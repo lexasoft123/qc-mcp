@@ -168,12 +168,37 @@ Implemented in `catalog.to_norm` / `to_display`. (A naive linear conversion put 
 
 ## 6. Presets & setlists
 
-- Recall = `SetlistPosition`(2) UPDATE `{ folder_key, position, is_factory,
-  is_downloads, is_plugin, … }`. User setlists live under
-  `/media/p4/Presets/My Presets`; `position` is 0-based within the setlist.
+- Recall = `SetlistPosition`(2) UPDATE. **Addressing differs by preset source:**
+  - **My Presets / Factory:** `folder_key` + `position` (0-based) [+ `is_factory`].
+    User setlists live under `/media/p4/Presets/My Presets`.
+  - **Downloads (cloud):** `is_downloads:true` + `key_in_downloads:<cloud_id UUID>` —
+    folder+position do **not** work for Downloads.
+  - **Plugin banks:** `is_plugin:true` + `key_in_plugin_folder`.
+  - `transport.recall(folder_key, position, is_factory, downloads_key, plugin_key)`.
 - On recall the QC pushes the full `RecallPreset` (new preset).
 - Capacity: setlists ≤ 256 presets, up to 10 user setlists, 3072 presets total.
 - `transport.recall`, MCP `switch_preset` / `recall_preset`.
+
+### 6a. DIRECTORY — catalog listing, captures & IRs
+
+The full DIRECTORY (presets + neural captures + IRs) is reversed in **docs/DIRECTORY.md**.
+
+- **Listing** = `File`(4) READ (empty) → the device streams one `File{UPDATE}` **per
+  folder**. `File.type`: `0 = Presets`, `1 = IRs` (keys `CIR_…`), `2 = Captures` (keys
+  are 64-hex content hashes). Each folder carries `files[{key, index, name, author,
+  coros_version, instrument, is_readonly, date_ms_since_epoch}]`; `index` is the
+  `SetlistPosition` position. `transport.list_directory` collects the stream;
+  `qc_mcp/directory.py` structures + searches it. MCP: `directory_summary`,
+  `search_directory`.
+- **Recents / Favorites** = `RecentsFavorites`(20) READ `{is_favorites}` →
+  `items[{name, folder_key, folder_name, is_factory, is_plugin}]`.
+  `transport.list_recents_favorites`, MCP `list_favorites`.
+- **Current pointer** = `SetlistPosition` READ. `transport.get_setlist_position`,
+  MCP `current_preset_position`.
+- **Multi-select** = `BulkOperation`(57) `{is_multiselection_active}` (batch export/
+  delete/move; destructive payloads intentionally not exercised).
+- Captures/IRs are *used* by referencing their file `key` as a grid block model hash
+  (same path as any device model). Cloud/Downloads listing is HTTPS, off the USB wire.
 
 ---
 

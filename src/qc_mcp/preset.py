@@ -1,6 +1,6 @@
 """Preset model + builder: construct/inspect a full BinaryPreset (chains, blocks,
 per-scene params, splitters/mixers, routing, bypass, metadata) so we can build
-multiamp-class presets like SRV multiamp.
+complex multi-amp presets.
 
 `describe(bp)` -> plain-dict spec; `build(spec)` -> BinaryPreset. The two are
 inverses on every field they cover, so `describe(build(spec)) == spec`. A
@@ -23,8 +23,12 @@ def BinaryPreset():
 
 # --- describe: BinaryPreset -> spec -----------------------------------------
 def _pv(pv):
-    # ParamValue is three scalar fields; keep all three (proto3 drops zeros).
-    return [pv.float_value, pv.int_value, pv.string_value]
+    # ParamValue is a oneof(int/float/string); keep only the active field non-None so
+    # presence round-trips exactly (e.g. string_value="" is distinct from float 0.0).
+    w = pv.WhichOneof("value")
+    return [pv.float_value if w == "float_value" else None,
+            pv.int_value if w == "int_value" else None,
+            pv.string_value if w == "string_value" else None]
 
 
 def _describe_model(m):
@@ -94,11 +98,11 @@ def _build_model(dst, spec):
             p.expression_max = ps["expr_max"]
         for f, i, s in ps.get("values", []):
             pv = p.param_values.add()
-            if f:
+            if f is not None:
                 pv.float_value = f
-            if i:
+            elif i is not None:
                 pv.int_value = i
-            if s:
+            elif s is not None:
                 pv.string_value = s
     return dst
 
@@ -171,7 +175,7 @@ class PresetBuilder:
         # value: scalar (all scenes) or list of up to 8 per-scene values
         vals = value if isinstance(value, (list, tuple)) else [value] * SCENES
         vals = list(vals)[:SCENES] + [0.0] * (SCENES - len(vals))
-        return [[float(v), 0, ""] for v in vals]
+        return [[float(v), None, None] for v in vals]
 
     def add_block(self, row, column, model_hash, params=None):
         m = {"hash": model_hash, "column": column, "params": []}
@@ -231,5 +235,5 @@ def _mk_block(model_hash, column, params):
     for idx, val in (params or {}).items():
         vals = val if isinstance(val, (list, tuple)) else [val] * SCENES
         m["params"].append({"index": idx,
-                            "values": [[float(v), 0, ""] for v in vals]})
+                            "values": [[float(v), None, None] for v in vals]})
     return m

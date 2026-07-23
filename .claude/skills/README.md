@@ -13,6 +13,9 @@ Rough order you'd apply them in a new protocol effort:
    statically from the app binary and decode/encode dynamically.
 3. **macos-dylib-interpose** — inject into the app to *capture* real traffic (and later
    *bridge* so your tool shares the app's session).
+3b. **drive-gui-correlate-protocol** — automate the app's GUI (screenshot + click) and
+   diff the captured traffic per action, to reverse GUI operations you can't guess and
+   for scenario testing. Pairs with the interposer capture from step 3.
 4. **reverse-framed-protocol** — align captures against known payloads to reverse the
    chunking, message envelope (header/trailer, command id), and compression.
 5. **reverse-session-handshake** — if the device won't stream/answer/accept edits,

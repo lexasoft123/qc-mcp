@@ -19,7 +19,7 @@ https://github.com/lexasoft123/qc-mcp
   grid position, routing, splitters/mixers, and parameter (in real display units).
 - **Build presets from natural language** — pick devices from the 533‑device
   catalog, lay out parallel/multiamp topologies with splitters + routing, set
-  parameters, and save. (Reproduces complex presets like a 4‑amp "SRV multiamp".)
+  parameters, and save. (Reproduces complex multi-amp presets faithfully.)
 - **Live control** — switch presets, scenes (A–H), performance modes, master volume.
 - **Two connection modes** — seize the device directly, or run **alongside a live
   Cortex Control** via a shared session (bridge mode).

@@ -16,8 +16,8 @@ dependencies = [
 re = ["capstone>=5.0", "pyusb>=1.2", "python-rtmidi>=1.5"]
 
 [project.urls]
-Homepage = "https://github.com/"          # add your repo URL
-"Protocol writeup" = "https://github.com/"
+Homepage = "https://github.com/lexasoft123/qc-mcp"
+"Protocol writeup" = "https://github.com/lexasoft123/qc-mcp/blob/main/PROTOCOL.md"
 
 [project.scripts]
 qc-mcp = "qc_mcp.server:main"

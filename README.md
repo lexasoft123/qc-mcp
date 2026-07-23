@@ -9,7 +9,7 @@ Cortex Control's internal **USB‑HID protocol**, reverse‑engineered from scra
 > device and the Cortex Control app. **Unofficial; not affiliated with Neural DSP.**
 > Full protocol write‑up in [PROTOCOL.md](PROTOCOL.md).
 
-https://github.com/ — *(add your repo URL)*
+https://github.com/lexasoft123/qc-mcp
 
 ---
 

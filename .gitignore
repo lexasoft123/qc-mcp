@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Interceptor build artifacts — do NOT commit a copy of Cortex Control
+interceptor/CortexControl-instrumented.app/
+interceptor/interpose.dylib
+interceptor/ent.plist
+
+# Captured HID traffic + decoded messages — may contain your session id, cloud
+# auth token, and preset data. Never commit these.
+interceptor/*.log
+interceptor/hid_log.txt
+interceptor/msgs/
+interceptor/target_preset.json
+/tmp/
+
+# macOS
+.DS_Store
+
+# scratch
+proto/_recovered.txt
+proto/last.tmp

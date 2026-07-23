@@ -1,0 +1,1291 @@
+// file: ProductionAutomation.proto  syntax=proto3 package=cortex_protobuf_v2
+// import "Preset.proto"
+message CortexMessageType {
+  enum Enum {
+    Undefined = 0;
+    Grid = 1;
+    SetlistPosition = 2;
+    IOSettings = 3;
+    File = 4;
+    IOMeter = 5;
+    Tuner = 6;
+    Diagnostics = 7;
+    MIDISettings = 8;
+    GeneralSettings = 9;
+    Version = 10;
+    ProductionAutomationMode = 11;
+    GridMove = 12;
+    Scene = 13;
+    Mode = 14;
+    RecallPreset = 15;
+    EnableCaptureOut = 16;
+    MasterVolume = 17;
+    CloudLogin = 18;
+    DefaultParameters = 19;
+    RecentsFavorites = 20;
+    UndoRedo = 21;
+    SceneCopy = 22;
+    SceneLabel = 23;
+    ShowGigView = 24;
+    Screenshot = 25;
+    CPULoad = 26;
+    ShowTuner = 27;
+    Looper = 28;
+    ProductForward = 29;
+    BackupsForward = 30;
+    LogsForward = 31;
+    KeepAlive = 32;
+    GlobalTempo = 33;
+    PresetDirty = 34;
+    ModuleStats = 35;
+    NeuralCapture = 36;
+    GridModelMeter = 37;
+    GlobalEQ = 38;
+    RecentSearches = 39;
+    LocalBackup = 40;
+    CloudBackup = 41;
+    CompilerInhibitedModules = 42;
+    SystemTimeSync = 43;
+    Logs = 44;
+    ProcessDownloadsQueue = 45;
+    CloudProduct = 46;
+    Confirmation = 47;
+    SceneColor = 48;
+    Connection = 49;
+    NewModels = 50;
+    ModelRepo = 51;
+    ResetCommsBuffers = 52;
+    SuspendConnection = 53;
+    PinnedModels = 54;
+    GigViewButton = 55;
+    GenericError = 56;
+    BulkOperation = 57;
+    License = 58;
+    PresetSpeedTest = 59;
+    Updater = 60;
+    UpdaterForward = 61;
+    GainCalibration = 62;
+    NeuralCapture2 = 63;
+    Serialization = 64;
+    TestFarm = 65;
+    ProductionTest = 66;
+    LoadAutomatedTestPreset = 67;
+    SetTestPresetInputOutputPorts = 68;
+    SetTestPresetSplitMixPoints = 69;
+    GenerateTestPreset = 70;
+    NumberOfMessageTypes = 71;
+  }
+}
+message MessageAction {
+  enum Enum {
+    CREATE = 0;
+    UPDATE = 1;
+    DELETE = 2;
+    READ = 3;
+    MOVE = 4;
+    COPY = 5;
+    UPLOAD = 6;
+    DOWNLOAD = 7;
+    SWAP = 8;
+  }
+}
+message HTTPOperation {
+  enum Enum {
+    GET = 0;
+    PUT = 1;
+    POST = 2;
+    DELETE = 3;
+  }
+}
+message LooperUpdateType {
+  enum Enum {
+    METER = 0;
+    BUTTONS = 1;
+  }
+}
+message RecallPresetReason {
+  enum Enum {
+    OTHER = 0;
+    UNDO = 1;
+    SAVE = 2;
+  }
+}
+message VersionMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string linux_kernel_version = 3;
+  string zenos_git_hash = 4;
+  string zenwireless_fw_version = 5;
+  string uboot_version = 6;
+  string app_fw_version = 7;
+  string bootloader_fw_version = 8;
+  string device_serial_number = 9;
+  bytes comms_version = 10;
+  cortex_protobuf_v2.VersionMessage.DeviceType device_type = 12;
+  bool is_ess = 13;
+  string custom_name = 15;
+  string mac_address = 16;
+  string zencoder_fw_app = 17;
+  string zencoder_fw_bootloader = 18;
+  string cortex_control_version = 11;
+  bool cortex_control_version_valid = 14;
+  enum DeviceType {
+    QC = 0;
+    ATMA = 1;
+  }
+}
+message HeadphonesFeedLevel {
+  float level = 1;
+  uint32 output_port_id = 2;
+}
+message InputPortSettings {
+  uint32 input_port_id = 1;
+  float level = 2;
+  float input_zmode = 3;
+  float input_type = 4;
+  float ground_lift = 5;
+  bool plugged = 6;
+}
+message OutputPortSettings {
+  uint32 output_port_id = 1;
+  float level = 2;
+  float ground_lift = 3;
+  bool mute = 4;
+  bool plugged = 5;
+}
+message HeadphonesSettings {
+  float level = 1;
+  repeated cortex_protobuf_v2.HeadphonesFeedLevel hp_feed = 2;
+  bool plugged = 3;
+}
+message USBPortSettings {
+  float level = 1;
+  float hp_select = 2;
+  bool plugged = 3;
+  float dry_wet = 4;
+}
+message ExpPortSettings {
+  int32 exp_port_id = 1;
+  bool plugged = 2;
+  float level = 3;
+  bool calibrating = 4;
+}
+message MIDIPortSettings {
+  float midi_thru = 1;
+}
+message PortSettings {
+  repeated cortex_protobuf_v2.InputPortSettings in_port = 1;
+  repeated cortex_protobuf_v2.OutputPortSettings out_port = 2;
+  cortex_protobuf_v2.HeadphonesSettings hp_port = 3;
+  cortex_protobuf_v2.USBPortSettings usb_port = 4;
+  cortex_protobuf_v2.MIDIPortSettings midi_port = 5;
+  repeated cortex_protobuf_v2.ExpPortSettings exp_port = 6;
+}
+message IOSettingsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  cortex_protobuf_v2.PortSettings settings = 3;
+  bool xlr1_2_linked = 4;
+  bool out3_4_linked = 5;
+}
+message GridMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  BinaryPreset preset = 3;
+  cortex_protobuf_v2.GridMessage.UpdateType update_type = 4;
+  enum UpdateType {
+    METER_UPDATE = 0;
+  }
+}
+message RecallPresetMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  BinaryPreset preset = 3;
+  cortex_protobuf_v2.RecallPresetReason.Enum reason = 4;
+}
+message SceneMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint32 selected_scene = 3;
+}
+message GridMoveElement {
+  uint32 from_row = 1;
+  uint32 from_col = 2;
+  uint32 to_row = 3;
+  uint32 to_col = 4;
+  bool is_drop = 5;
+}
+message GridMoveRow {
+  repeated uint32 modelIds = 1;
+}
+message GridMoveGrid {
+  repeated cortex_protobuf_v2.GridMoveRow rows = 1;
+}
+message GridMoveMessage {
+  uint64 request_id = 1;
+  repeated cortex_protobuf_v2.GridMoveElement move = 2;
+  cortex_protobuf_v2.GridMoveGrid grid = 3;
+}
+message SetlistPositionMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string folder_key = 3;
+  uint32 position = 4;
+  bool is_factory = 5;
+  bool is_downloads = 6;
+  string key_in_downloads = 7;
+  bool is_plugin = 8;
+  string key_in_plugin_folder = 9;
+}
+message DSPCommsDiagnosticsMessage {
+  uint32 status1 = 1;
+  uint32 status2 = 2;
+  uint32 status3 = 3;
+  uint32 status4 = 4;
+  float process_cpu = 5;
+  float internal_heap_usage = 6;
+  float external_heap_usage = 7;
+  float internal_pm_heap_usage = 8;
+  float process_cpu_max = 9;
+  float ext_dma_usage = 10;
+  uint32 error_flags = 11;
+}
+message SOC2ARMCommsDiagnosticsMessage {
+  uint32 USBConnected = 1;
+  uint32 inReadIdx = 2;
+  uint32 inWriteIdx = 3;
+  uint32 outReadIdx = 4;
+  uint32 outWriteIdx = 5;
+  uint64 USBAudioRxFrame = 6;
+  uint64 USBAudioTxFrame = 7;
+  uint32 USBAudioTxFrameSkipped = 8;
+  uint32 USBAudioTxFrameAborted = 9;
+  uint32 USBAudioOutRdWrDistanceAverage = 10;
+  uint32 USBAudioRdWrMinNumSamples = 11;
+  uint32 USBAudioRdWrMaxNumSamples = 12;
+  uint32 USBAudioPlusOneSampleCount = 13;
+  uint32 USBAudioMinusOneSampleCount = 14;
+  uint32 USBAudioFeedbackState = 15;
+  uint32 USBAudioStreamingEPEnabled = 16;
+  uint32 USBAudioStreamingEPDisabled = 17;
+  uint64 USBMidiOutCount = 18;
+  uint64 USBMidiInCount = 19;
+  uint64 USBHIDInCount = 20;
+  uint64 USBHIDOutCount = 21;
+  uint32 USBHIDInDroppedCount = 22;
+  uint32 USBHIDOutDroppedCount = 23;
+}
+message DiagnosticsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  cortex_protobuf_v2.DSPCommsDiagnosticsMessage SOC1Core1Diagnostics = 3;
+  cortex_protobuf_v2.DSPCommsDiagnosticsMessage SOC1Core2Diagnostics = 4;
+  cortex_protobuf_v2.DSPCommsDiagnosticsMessage SOC2Core1Diagnostics = 5;
+  cortex_protobuf_v2.DSPCommsDiagnosticsMessage SOC2Core2Diagnostics = 6;
+  cortex_protobuf_v2.SOC2ARMCommsDiagnosticsMessage SOC2ARMCoreDiagnostics = 7;
+  uint64 soc1_to_soc2_dropped_count = 8;
+}
+message ProductionAutomationModeMessage {
+  uint64 request_id = 1;
+  bool enable = 2;
+}
+message ProductDependency {
+  string hash = 1;
+  int32 missing = 2;
+  int32 visible = 3;
+  int32 published = 4;
+  string cloud_id = 5;
+  string name = 6;
+  string product_type = 7;
+}
+message ProductData {
+  string key = 1;
+  int32 index = 2;
+  string name = 3;
+  string author = 4;
+  string author_id = 5;
+  string coros_version = 6;
+  repeated string tags = 7;
+  string date = 8;
+  int32 gain = 9;
+  string cloud_id = 10;
+  string description = 11;
+  string shared_by = 12;
+  repeated cortex_protobuf_v2.ProductDependency factory_dependencies = 13;
+  repeated cortex_protobuf_v2.ProductDependency product_dependencies = 14;
+  int32 instrument = 15;
+  int32 device = 16;
+  bytes extraMetadata = 17;
+  string old_key = 18;
+  bool is_readonly = 19;
+  string version = 20;
+  int64 date_ms_since_epoch = 21;
+}
+message FolderInfo {
+  string key = 1;
+  string parent_key = 2;
+  string name = 3;
+  bool is_factory = 4;
+  bool is_downloads = 5;
+  bool is_user_default = 6;
+  bool is_cloud = 8;
+  bool is_favorites = 9;
+  bool is_plugin = 10;
+  repeated cortex_protobuf_v2.ProductData files = 7;
+}
+message FileMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 type = 3;
+  cortex_protobuf_v2.FolderInfo folder = 4;
+  cortex_protobuf_v2.FolderInfo to_folder = 5;
+  bool short_listing = 6;
+  bytes ir_payload = 7;
+  BinaryPreset preset_payload = 8;
+  int32 total_bulk_create_count = 9;
+  bool delete_from_library = 10;
+}
+message BulkOperationMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string progress_message = 3;
+  bool blocking = 4;
+  bool cancellable = 5;
+  float progress = 6;
+  bool finished = 7;
+  bool is_multiselection_active = 8;
+  int32 type = 9;
+  cortex_protobuf_v2.FolderInfo source_folder = 10;
+  cortex_protobuf_v2.FolderInfo destination_folder = 11;
+}
+message IOMeterMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  float input_1 = 3;
+  float input_2 = 4;
+  float return_1 = 5;
+  float return_2 = 6;
+  float xlr_1 = 7;
+  float xlr_1_limiter = 8;
+  float xlr_2 = 9;
+  float xlr_2_limiter = 10;
+  float out_3 = 11;
+  float out_3_limiter = 12;
+  float out_4 = 13;
+  float out_4_limiter = 14;
+  float send_1 = 15;
+  float send_2 = 16;
+  float hp_l = 17;
+  float hp_r = 18;
+  bool hp_limiter_active = 19;
+  float usb_output_1l = 20;
+  float usb_output_1r = 21;
+  float usb_output_2l = 22;
+  float usb_output_2r = 23;
+  float usb_output_3l = 24;
+  float usb_output_3r = 25;
+  float usb_output_4l = 26;
+  float usb_output_4r = 27;
+  float usb_input_1l = 28;
+  float usb_input_1r = 29;
+  float usb_input_2l = 30;
+  float usb_input_2r = 31;
+  float usb_input_3l = 32;
+  float usb_input_3r = 33;
+  float usb_input_4l = 34;
+  float usb_input_4r = 35;
+  float grid_xlr_1 = 36;
+  float grid_xlr_2 = 37;
+  float grid_out_3 = 38;
+  float grid_out_4 = 39;
+  float grid_send_1 = 40;
+  float grid_send_2 = 41;
+}
+message AvailableModes {
+  repeated uint32 modes = 1;
+}
+message ModeMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint32 mode = 3;
+  cortex_protobuf_v2.AvailableModes available_modes = 4;
+  uint32 atma_page = 5;
+}
+message EnableCaptureOutMessage {
+  uint64 request_id = 1;
+  bool enable = 2;
+}
+message MasterVolumeMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  float volume = 3;
+  bool engaged = 4;
+  bool calibrate = 5;
+}
+message TunerMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 input_port_id = 3;
+  float frequency = 4;
+  bool mute = 5;
+  bool enable_meter = 6;
+  float meter = 7;
+}
+message AuthorizationToken {
+  string access_token = 1;
+  string refresh_token = 2;
+  int32 expires_in = 3;
+}
+message CloudLoginMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string username = 3;
+  cortex_protobuf_v2.AuthorizationToken token = 4;
+}
+message DefaultParametersModel {
+  string id = 1;
+  Model model = 2;
+}
+message DefaultParametersMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 row = 3;
+  int32 column = 4;
+  repeated cortex_protobuf_v2.DefaultParametersModel all_defaults = 5;
+}
+message RecentsFavoritesItem {
+  string name = 1;
+  string folder_key = 2;
+  string folder_name = 3;
+  bool is_factory = 4;
+  bool is_plugin = 5;
+}
+message RecentsFavoritesMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bool is_favorites = 3;
+  repeated cortex_protobuf_v2.RecentsFavoritesItem items = 4;
+}
+message UndoRedoMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated int32 undo_frames = 3;
+  repeated int32 redo_frames = 4;
+  bool undo = 5;
+  bool redo = 6;
+}
+message SceneCopyMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 from_index = 3;
+  int32 to_index = 4;
+  bool is_swap = 5;
+}
+message SceneLabelMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 index = 3;
+  string label = 4;
+}
+message ShowGigViewMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bool show = 3;
+}
+message ScreenshotMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string folder_name = 3;
+  bool is_factory = 4;
+  int32 index = 5;
+  bytes png = 6;
+}
+message CPUColumnLoad {
+  float cpu_load = 1;
+  bool is_on_core2 = 2;
+}
+message CPUChainLoad {
+  repeated cortex_protobuf_v2.CPUColumnLoad columns = 1;
+}
+message CPULoadMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  float cpu_total_load = 3;
+  repeated cortex_protobuf_v2.CPUChainLoad chains = 4;
+}
+message ShowTunerMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bool show = 3;
+}
+message LooperStatus {
+  uint32 state = 1;
+  float progress = 2;
+  float undo_progress = 3;
+  uint32 duplicate_cycle = 4;
+  uint32 num_duplicate_cycles = 5;
+  uint32 one_shot_stopped = 6;
+  uint32 redo_available = 7;
+  uint32 loop_length = 8;
+  uint32 free_samples = 9;
+  uint32 in_reverse = 10;
+  uint32 one_shot = 11;
+  uint32 half_speed = 12;
+  uint32 fixed_duplicate_cycles = 13;
+  uint32 armed = 14;
+  uint32 waiting_for_cycle = 15;
+  uint32 undo_count = 16;
+  float max_write_displacement = 17;
+  float min_write_displacement = 18;
+  uint32 events_waiting_for_quantize = 19;
+  uint32 current_clock = 20;
+  uint32 transition = 21;
+  uint32 action = 22;
+}
+message LooperMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  cortex_protobuf_v2.LooperStatus status = 3;
+  uint32 state = 4;
+  bool one_shot_play = 5;
+  bool sync_start_waiting = 6;
+  bool quantize_enabled = 7;
+  cortex_protobuf_v2.LooperUpdateType.Enum update_type = 8;
+}
+message ProductForwardHeaderPair {
+  string name = 1;
+  string value = 2;
+}
+message ProductForwardRequest {
+  cortex_protobuf_v2.HTTPOperation.Enum operation = 1;
+  string url = 2;
+  int32 timeout = 3;
+  bool is_multipart = 4;
+  bytes payload = 5;
+  repeated cortex_protobuf_v2.ProductForwardHeaderPair headers = 6;
+}
+message ProductForwardResponse {
+  bytes payload = 1;
+  int32 error_code = 2;
+}
+message ProductForwardMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint64 cloud_request_id = 3;
+  cortex_protobuf_v2.ProductForwardRequest request = 4;
+  cortex_protobuf_v2.ProductForwardResponse response = 5;
+}
+message BackupsForwardRequestType {
+  enum Enum {
+    CREATE_OR_UPDATE = 0;
+    DOWNLOAD = 1;
+    RENAME = 2;
+    DELETE = 3;
+    LIST = 4;
+    FETCH_URL = 5;
+    UPLOAD_STATUS = 6;
+  }
+}
+message BackupsForwardRequest {
+  cortex_protobuf_v2.BackupsForwardRequestType.Enum type = 1;
+  string url = 2;
+  bytes payload = 3;
+  bool is_last_chunk = 4;
+  int32 timeout = 5;
+  repeated cortex_protobuf_v2.ProductForwardHeaderPair headers = 6;
+}
+message BackupsForwardResponse {
+  bytes payload = 1;
+  bool is_last_chunk = 2;
+  int32 error_code = 3;
+}
+message BackupsForwardMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint64 backups_request_id = 3;
+  cortex_protobuf_v2.BackupsForwardRequest request = 4;
+  cortex_protobuf_v2.BackupsForwardResponse response = 5;
+}
+message LogsForwardRequestType {
+  enum Enum {
+    FETCH_URLS = 0;
+    UPLOAD_LOGS = 1;
+    UPLOAD_COREDUMP = 2;
+  }
+}
+message LogsForwardRequest {
+  cortex_protobuf_v2.LogsForwardRequestType.Enum type = 1;
+  string url = 2;
+  bytes payload = 3;
+  bool is_last_chunk = 4;
+  int32 timeout = 5;
+  repeated cortex_protobuf_v2.ProductForwardHeaderPair headers = 6;
+}
+message LogsForwardResponse {
+  bytes payload = 1;
+  int32 error_code = 2;
+}
+message LogsForwardMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint64 logs_request_id = 3;
+  cortex_protobuf_v2.LogsForwardRequest request = 4;
+  cortex_protobuf_v2.LogsForwardResponse response = 5;
+}
+message KeepAliveMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bool is_online = 3;
+  float timeout = 4;
+}
+message GeneralMIDIMessage {
+  uint32 source = 1;
+  repeated MidiMessageInfo msg = 2;
+}
+message GeneralMIDIMessages {
+  repeated cortex_protobuf_v2.GeneralMIDIMessage messages = 1;
+}
+message MIDISettingsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  cortex_protobuf_v2.GeneralMIDIMessages preset_load_messages = 3;
+  cortex_protobuf_v2.GeneralMIDIMessages general_midi_messages = 4;
+}
+message MetronomeStatusUpdate {
+  uint32 is_enabled = 1;
+  uint32 preroll_enabled = 2;
+  uint32 current_beat = 3;
+  uint32 current_bar = 4;
+  uint32 current_tick = 5;
+  int32 count_in_beats_remaining = 6;
+  int32 count_in_bars_remaining = 7;
+}
+message GlobalTempoMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated Param params = 3;
+  cortex_protobuf_v2.MetronomeStatusUpdate metronome_status = 4;
+}
+message PresetDirtyMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bool is_dirty = 3;
+}
+message GlobalBypassRows {
+  bool row1 = 1;
+  bool row2 = 2;
+  bool row3 = 3;
+  bool row4 = 4;
+}
+message SceneBlockBypass {
+  enum Enum {
+    ALWAYS_OVERWRITE = 0;
+    NONSTOMP_OVERWRITE = 1;
+    NEVER_OVERWRITE = 2;
+  }
+}
+message CloudDomain {
+  enum Enum {
+    DEFAULT_DOMAIN = 0;
+    ALTERNATIVE_DOMAIN = 1;
+  }
+}
+message PowerOptions {
+  enum Enum {
+    SHUTDOWN = 0;
+    REBOOT = 1;
+    STANDBY = 2;
+    WAKE_UP = 3;
+  }
+}
+message AtmaPowerOnMode {
+  enum Enum {
+    POWER_BUTTON = 0;
+    POWER_ON_WHEN_PLUGGED_IN = 1;
+  }
+}
+message MasterVolumeAssignmentOptions {
+  bool out12 = 1;
+  bool out34 = 2;
+  bool send12 = 3;
+  bool headphones = 4;
+}
+message MidiClockOut {
+  enum Enum {
+    OFF = 0;
+    MIDI_DIN_ONLY = 1;
+    USB_MIDI_ONLY = 2;
+    BOTH_USB_AND_DIN_MIDI = 3;
+  }
+}
+message DownloadDestinationFolder {
+  string key = 1;
+  int32 type = 2;
+}
+message StorageInfoType {
+  enum Enum {
+    PRESETS = 0;
+    NEURAL_CAPTURES = 1;
+    IMPULSE_RESPONSES = 2;
+  }
+}
+message StorageInfoEntity {
+  cortex_protobuf_v2.StorageInfoType.Enum entity_type = 1;
+  int32 size_maximum = 2;
+  int32 size_current = 3;
+}
+message StorageInfo {
+  int64 total_storage_size_kb = 1;
+  int64 free_storage_size_kb = 2;
+  repeated cortex_protobuf_v2.StorageInfoEntity storage_entities = 3;
+}
+message GeneralSettingsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bool reset_wifi_networks = 3;
+  int32 screen_brightness = 4;
+  int32 led_brightness = 5;
+  bool lock_screen_and_volume_knob = 6;
+  cortex_protobuf_v2.GlobalBypassRows global_bypass_cab = 7;
+  cortex_protobuf_v2.GlobalBypassRows global_bypass_ir = 8;
+  cortex_protobuf_v2.SceneBlockBypass.Enum scene_block_bypass = 9;
+  bool midi_over_usb = 10;
+  int32 midi_channel = 11;
+  bool ignore_duplicate_pc = 12;
+  cortex_protobuf_v2.PowerOptions.Enum power_option = 13;
+  int32 power_button_sensitivity = 14;
+  bool reset_settings = 15;
+  bool factory_reset = 16;
+  float available_disk_space = 17;
+  float total_disk_space = 18;
+  bool internal_midi_clock_enabled = 19;
+  string cloud_endpoint = 20;
+  cortex_protobuf_v2.MasterVolumeAssignmentOptions master_volume_assignment = 21;
+  bool stomp_mode_auto_assign = 22;
+  bool swap_tempo_tuner_access = 23;
+  cortex_protobuf_v2.MidiClockOut.Enum midi_clock_out = 24;
+  repeated cortex_protobuf_v2.DownloadDestinationFolder download_destination_folders = 25;
+  bool disable_internet_connection_check = 26;
+  bool enable_dynamic_delay_compensation = 27;
+  int32 dimmed_led_brightness = 28;
+  bool enable_preset_dimmed = 29;
+  bool enable_scene_dimmed = 30;
+  bool enable_stomp_dimmed = 31;
+  cortex_protobuf_v2.AtmaPowerOnMode.Enum atma_power_mode = 32;
+  repeated int32 looper_stomp_assignments = 33;
+  bool midi_clock_in_enabled = 34;
+  bool atma_looper_lock_mode = 35;
+  cortex_protobuf_v2.StorageInfo storage_info = 36;
+  cortex_protobuf_v2.CloudDomain.Enum cloud_domain = 37;
+  bool gig_view_stomp_access_enabled = 38;
+  int32 hold_timing = 39;
+}
+message ModuleStatsItem {
+  uint32 id = 1;
+  float cpu_percent = 2;
+  uint32 dm_heap_bytes = 3;
+  uint32 pm_heap_bytes = 4;
+  uint32 sd_heap_bytes = 5;
+  uint32 dmda_bytes = 6;
+  uint32 pmda_bytes = 7;
+  uint32 pmco_bytes = 8;
+  float edma_percent = 9;
+  int32 singletons = 10;
+  int32 latency = 11;
+  bool reuse_pmco = 12;
+  bool has_sidechain = 13;
+}
+message ModuleStatsSizeRelationPair {
+  repeated uint32 smaller_models = 1;
+  repeated uint32 larger_models = 2;
+}
+message ModuleStatsSizeRelation {
+  uint32 id = 1;
+  cortex_protobuf_v2.ModuleStatsSizeRelationPair relations = 2;
+}
+message ModuleStatsValidModelId {
+  uint32 id = 1;
+  bool valid = 2;
+}
+message ModuleStatsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated cortex_protobuf_v2.ModuleStatsItem stats = 3;
+  repeated cortex_protobuf_v2.ModuleStatsSizeRelation size_relations = 4;
+  repeated cortex_protobuf_v2.ModuleStatsValidModelId valid_id = 5;
+  repeated cortex_protobuf_v2.ModuleStatsItem core_stats = 6;
+}
+message NeuralCaptureParameter {
+  int32 index = 1;
+  float value = 2;
+}
+message NeuralCaptureSaveInfo {
+  string name = 1;
+  int32 device = 2;
+  int32 instrument = 3;
+}
+message NeuralCaptureMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bool try_to_show_dialog = 3;
+  string show_dialog_fail_reason = 4;
+  bool show_dialog = 5;
+  int32 state = 6;
+  repeated cortex_protobuf_v2.NeuralCaptureParameter parameters = 7;
+  int32 progress = 8;
+  bool toggle_ab_model = 9;
+  cortex_protobuf_v2.NeuralCaptureSaveInfo save_info = 10;
+  int32 error_id = 11;
+  bool model_ab_bypass = 12;
+  Model model_ab = 13;
+}
+message GridModelMeterMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 row = 3;
+  int32 column = 4;
+}
+message GlobalEQParameter {
+  int32 parameter_index = 1;
+  float value = 2;
+}
+message GlobalEQMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated cortex_protobuf_v2.GlobalEQParameter parameters = 3;
+  bool bypassed = 4;
+  bool has_user_defaults = 5;
+  cortex_protobuf_v2.GlobalEQMessage.DefaultParameterAction default_parameter_action = 6;
+  enum DefaultParameterAction {
+    RESET_TO_FACTORY = 0;
+    RESET_TO_USER = 1;
+    SET = 2;
+  }
+}
+message RecentSearchesMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated string searches = 3;
+}
+message LocalBackupMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string backup_json = 3;
+  bool can_apply_backup = 4;
+  bool applied_backup = 5;
+  bool is_last_chunk = 6;
+}
+message CloudBackupItem {
+  string user_id = 1;
+  string client_type = 2;
+  string client_version = 3;
+  string name = 4;
+  string timestamp = 5;
+  string access_url = 6;
+  string key = 7;
+  string download_timestamp = 8;
+}
+message CloudBackupErrorCode {
+  enum Enum {
+    BACKUP_OPERATION_IN_PROGRESS = 0;
+    BACKUP_CREATION_FAILED = 1;
+    BACKUP_CREATION_SUCCEDED = 2;
+    BACKUP_UPDATE_FAILED = 3;
+    BACKUP_UPDATE_NOT_FOUND = 4;
+    BACKUP_UPDATE_SUCCEDED = 5;
+    BACKUP_RENAME_FAILED = 6;
+    BACKUP_RENAME_NOT_FOUND = 7;
+    BACKUP_RENAME_SUCCEDED = 8;
+    BACKUP_DOWNLOAD_FAILED = 9;
+    BACKUP_DOWNLOAD_NOT_FOUND = 10;
+    BACKUP_DOWNLOAD_SUCCEDED = 11;
+    BACKUP_DELETE_FAILED = 12;
+    BACKUP_DELETE_NOT_FOUND = 13;
+    BACKUP_DELETE_SUCCEDED = 14;
+    BACKUP_LISTING_FAILED = 15;
+    BACKUP_LISTING_SUCCEDED = 16;
+    NOT_CONNECTED_OR_LOGGED_IN = 17;
+    GRID_NOT_VISIBLE = 18;
+  }
+}
+message CloudBackupMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated cortex_protobuf_v2.CloudBackupItem backups = 3;
+  cortex_protobuf_v2.CloudBackupErrorCode.Enum error_code = 4;
+  int32 cloud_error_code = 5;
+  int32 installation_progress = 6;
+  bool is_busy = 7;
+}
+message CompilerInhibitedModulesMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bool global_gate = 3;
+  bool global_eq = 4;
+}
+message SystemTimeSyncMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint64 ms_since_epoch = 3;
+}
+message LogsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string correlation_id = 3;
+}
+message ProcessDownloadsQueueMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 type = 3;
+}
+message CloudTransferStateItem {
+  string id = 1;
+  cortex_protobuf_v2.CloudTransferStateItem.State state = 2;
+  enum State {
+    NOT_DOWNLOADED = 0;
+    DOWNLOADING = 1;
+    DOWNLOADED = 2;
+    NOT_UPLOADED = 3;
+    UPLOADING = 4;
+    UPLOADED = 5;
+  }
+}
+message CloudTransferState {
+  repeated cortex_protobuf_v2.CloudTransferStateItem items = 1;
+}
+message CloudProductMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 type = 3;
+  string from_folder = 4;
+  string to_folder = 5;
+  repeated int32 to_indices = 6;
+  repeated string product_keys = 7;
+  cortex_protobuf_v2.CloudTransferState cloud_transfer_state = 8;
+}
+message ConfirmationAction {
+  enum Enum {
+    OK = 0;
+    CANCEL = 1;
+  }
+}
+message ConfirmationMessage {
+  uint64 request_id = 1;
+  uint64 confirmation_id = 2;
+  string title = 3;
+  string msg = 4;
+  repeated cortex_protobuf_v2.ConfirmationAction.Enum actions = 5;
+  cortex_protobuf_v2.ConfirmationAction.Enum response = 6;
+  string ok_title = 7;
+  string cancel_title = 8;
+}
+message SceneColorMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 index = 3;
+  uint32 color = 4;
+}
+message ConnectionMessage {
+  uint64 request_id = 1;
+  bool connected = 2;
+}
+message NewModelsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated uint32 models = 3;
+}
+message ModelRepoMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  bytes model_repo_payload = 3;
+}
+message ResetCommsBuffersMessage {
+  uint64 request_id = 1;
+  string session_id = 2;
+}
+message LicenseItem {
+  string id = 1;
+  string name = 2;
+  uint64 plugin_id = 3;
+  string license_type = 4;
+  string expiration_date = 5;
+}
+message LicenseMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated cortex_protobuf_v2.LicenseItem licenses = 3;
+  bool is_enabled = 4;
+  bool is_deactivated = 5;
+  cortex_protobuf_v2.LicenseMessage.LicenseUpdateStatus update_status = 6;
+  repeated uint64 new_plugin_ids = 7;
+  repeated uint64 supported_plugin_ids = 8;
+  enum LicenseUpdateStatus {
+    IDLE = 0;
+    UPDATING = 1;
+    FAILED = 2;
+  }
+}
+message SuspendConnectionMessage {
+  uint64 request_id = 1;
+  bool suspend = 2;
+  cortex_protobuf_v2.SuspendConnectionMessage.Reason reason = 3;
+  enum Reason {
+    BACKUP = 0;
+    FACTORY_RESET = 1;
+    SETTINGS_RESET = 2;
+  }
+}
+message GigViewButtonMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint64 button_index = 3;
+  bool pressed = 4;
+}
+message PinnedModelsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated uint32 models = 3;
+  repeated string captures = 4;
+}
+message GenericErrorMessage {
+  uint64 request_id = 1;
+  cortex_protobuf_v2.GenericErrorMessage.ErrorCode error_code = 2;
+  enum ErrorCode {
+    VERSION_IS_NEWER = 0;
+    VERSION_IS_OLDER = 1;
+    CLOUD_LOGIN_FAILED = 2;
+    EXCESS_DOWNLOADS_PRESETS_WARNING_TRIGGERED = 3;
+    EXCESS_DOWNLOADS_CAPTURES_WARNING_TRIGGERED = 4;
+  }
+}
+message PresetSpeedTestMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string setlist_name = 3;
+  int32 num_laps = 4;
+  bool randomize = 5;
+  string csv_file = 6;
+}
+message UpdaterForwardRequestType {
+  enum Enum {
+    CHECK = 0;
+    DOWNLOAD_CHANGELOG = 1;
+    DOWNLOAD_UPDATE_HEADER = 2;
+    DOWNLOAD_UPDATE = 3;
+  }
+}
+message UpdaterForwardRequest {
+  cortex_protobuf_v2.UpdaterForwardRequestType.Enum type = 1;
+  string url = 2;
+  int32 timeout = 3;
+  string payload = 4;
+  repeated cortex_protobuf_v2.ProductForwardHeaderPair headers = 5;
+}
+message UpdaterForwardResponse {
+  bytes payload = 1;
+  bool is_last_chunk = 2;
+  int32 error_code = 3;
+}
+message UpdaterForwardMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint64 updater_request_id = 3;
+  cortex_protobuf_v2.UpdaterForwardRequest request = 4;
+  cortex_protobuf_v2.UpdaterForwardResponse response = 5;
+}
+message UpdaterCommand {
+  enum Enum {
+    CHECK = 0;
+    CHECK_AND_DOWNLOAD = 1;
+    INSTALL = 2;
+    RESTART_DOWNLOAD_VIA_CONTROL = 3;
+    CANCEL_DOWNLOAD = 4;
+  }
+}
+message UpdaterStatus {
+  enum Enum {
+    NONE = 0;
+    NEW_VERSION_AVAILABLE_TO_DOWNLOAD = 1;
+    NEW_VERSION_DOWNLOADED = 2;
+    NO_NEW_VERSION_AVAILABLE = 3;
+  }
+}
+message UpdaterState {
+  enum Enum {
+    IDLE = 0;
+    REQUESTING_DATA = 1;
+    DOWNLOADING_DATA = 2;
+    UPDATING = 3;
+    REBOOT = 4;
+    FAILED = 5;
+  }
+}
+message UpdaterMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  cortex_protobuf_v2.UpdaterCommand.Enum command = 3;
+  cortex_protobuf_v2.UpdaterStatus.Enum status = 4;
+  cortex_protobuf_v2.UpdaterState.Enum state = 5;
+  string new_version_id = 6;
+  string changelog = 7;
+  float download_progress = 8;
+  float installation_progress = 9;
+}
+message GainCalParameter {
+  cortex_protobuf_v2.GainCalParameter.GainCalibrationOutput index = 1;
+  float gain_db = 2;
+  enum GainCalibrationOutput {
+    OUT_1_GAIN = 0;
+    OUT_2_GAIN = 1;
+    OUT_3_GAIN = 2;
+    OUT_4_GAIN = 3;
+    SEND_1 = 4;
+    SEND_2 = 5;
+    HP_L_GAIN = 6;
+    HP_R_GAIN = 7;
+  }
+}
+message GainCalInputPortParameter {
+  cortex_protobuf_v2.GainCalInputPortParameter.InputPortId port_id = 1;
+  float level = 2;
+  enum InputPortId {
+    EMPTY = 0;
+    INPUT_1 = 1;
+    INPUT_2 = 2;
+    INPUT_1_2 = 3;
+    RETURN_1 = 4;
+    RETURN_2 = 5;
+    RETURN_1_2 = 6;
+    PREV_ROW = 7;
+    USB_IN_5 = 8;
+    USB_IN_6 = 9;
+    USB_IN_7 = 10;
+    USB_IN_8 = 11;
+    USB_IN_5_6 = 12;
+    USB_IN_7_8 = 13;
+    SIDECHAIN_BUFFER = 14;
+    MAX_PORTS = 15;
+  }
+}
+message GainCalOutputPortParameter {
+  cortex_protobuf_v2.GainCalOutputPortParameter.OutputPortId port_id = 1;
+  float level = 2;
+  enum OutputPortId {
+    EMPTY = 0;
+    XLR_1_2 = 1;
+    OUTPUT_3_4 = 2;
+    SEND_1_2 = 3;
+    XLR_1 = 4;
+    XLR_2 = 5;
+    OUTPUT_3 = 6;
+    OUTPUT_4 = 7;
+    SEND_1 = 8;
+    SEND_2 = 9;
+    USB_OUT_5 = 10;
+    USB_OUT_6 = 11;
+    USB_OUT_7 = 12;
+    USB_OUT_8 = 13;
+    USB_OUT_5_6 = 14;
+    USB_OUT_7_8 = 15;
+    NEXT_ROW_3 = 16;
+    NEXT_ROW_4 = 17;
+    NEXT_ROW_3_4 = 18;
+    MULTIPLE_OUTS = 19;
+    USB_OUT_3 = 20;
+    USB_OUT_4 = 21;
+    USB_OUT_3_4 = 22;
+    MAX_PORTS = 23;
+  }
+}
+message GainCalHeadphonesFeed {
+  float level = 1;
+  cortex_protobuf_v2.GainCalOutputPortParameter.OutputPortId output_port_id = 2;
+}
+message GainCalHeadphonesParameter {
+  float level = 1;
+  cortex_protobuf_v2.GainCalHeadphonesFeed feed = 2;
+}
+message GainCalibrationMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated cortex_protobuf_v2.GainCalParameter gains = 3;
+  bool load_input_preset = 4;
+  bool load_output_preset = 5;
+  repeated cortex_protobuf_v2.GainCalInputPortParameter in_port = 6;
+  repeated cortex_protobuf_v2.GainCalOutputPortParameter out_port = 7;
+  repeated cortex_protobuf_v2.GainCalHeadphonesParameter hp_port = 8;
+}
+message SerializationMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string serial_number = 3;
+  string display_type = 4;
+  cortex_protobuf_v2.SerializationMessage.Result result = 5;
+  enum Result {
+    SUCCESS = 0;
+    IS_SERIALIZED = 1;
+  }
+}
+message TestFarmTestState {
+  enum Enum {
+    NONE = 0;
+    QUEUED = 1;
+    RUNNING = 2;
+    PASSED = 3;
+    FAILED = 4;
+    ABORTING = 5;
+    ABORTED = 6;
+  }
+}
+message TestFarmMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  string test_id = 3;
+  cortex_protobuf_v2.TestFarmTestState.Enum state = 4;
+}
+message NeuralCapture2Message {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  int32 state = 3;
+  string job_id = 4;
+  cortex_protobuf_v2.NeuralCaptureSaveInfo save_info = 5;
+  repeated cortex_protobuf_v2.NeuralCaptureParameter parameters = 6;
+  bool cabsim_bypass = 7;
+  Model cabsim = 8;
+  int32 error_id = 9;
+  string error_string = 10;
+  bool open_dialog = 11;
+  bool start_from_scratch = 12;
+}
+message ProductionTestMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint32 led_color = 3;
+  bool enable_tempo_led = 4;
+}
+message LoadAutomatedTestPresetMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+}
+message SetTestPresetInputOutputPortsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated cortex_protobuf_v2.GainCalInputPortParameter.InputPortId input_ports = 3;
+  repeated cortex_protobuf_v2.GainCalOutputPortParameter.OutputPortId output_ports = 4;
+  repeated uint32 input_port_rows = 5;
+  repeated uint32 output_port_rows = 6;
+}
+message SetTestPresetSplitMixPointsMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  repeated uint32 split_mix_rows = 3;
+  repeated int32 split_points = 4;
+  repeated int32 mix_points = 5;
+  repeated bool hard_pan_mixer = 6;
+}
+message GenerateTestPresetMessage {
+  cortex_protobuf_v2.MessageAction.Enum action = 1;
+  uint64 request_id = 2;
+  uint32 latency_test_mode = 3;
+  uint32 grid_density = 4;
+}

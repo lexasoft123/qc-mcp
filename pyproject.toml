@@ -1,0 +1,36 @@
+[project]
+name = "qc-mcp"
+version = "0.1.0"
+description = "MCP server to read and control a Neural DSP Quad Cortex over its reverse-engineered USB-HID protocol"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["quad-cortex", "neural-dsp", "mcp", "guitar", "usb-hid", "reverse-engineering"]
+dependencies = [
+    "mcp>=1.2.0",
+    "protobuf>=5.0",
+]
+
+[project.optional-dependencies]
+# only needed for the reverse-engineering tools in tools/
+re = ["capstone>=5.0", "pyusb>=1.2", "python-rtmidi>=1.5"]
+
+[project.urls]
+Homepage = "https://github.com/"          # add your repo URL
+"Protocol writeup" = "https://github.com/"
+
+[project.scripts]
+qc-mcp = "qc_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+qc_mcp = ["qc_descriptors.pb", "ModelRepo.xml"]

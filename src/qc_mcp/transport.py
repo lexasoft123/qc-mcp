@@ -277,11 +277,15 @@ class QuadCortex:
                 self.add_block(m["hash"], row=ridx, column=cidx)
                 time.sleep(pace)
                 for pidx, p in enumerate(m.get("params", [])):
-                    vals = [v[0] for v in p.get("values", [])]
-                    if per_scene and len(vals) >= 8:
-                        self.set_param_scenes(ridx, cidx, pidx, vals)
-                    elif vals and vals[0]:
-                        self.set_param(ridx, cidx, pidx, vals[0])
+                    valspecs = p.get("values", [])
+                    if not any(any(x is not None for x in v) for v in valspecs):
+                        continue
+                    # scene-varying float param with per-scene values -> assign + write
+                    if per_scene and p.get("scene_mode") and len(valspecs) >= 8 \
+                            and all(v[0] is not None for v in valspecs):
+                        self.set_param_scenes(ridx, cidx, pidx, [v[0] for v in valspecs])
+                    else:
+                        self.set_param_typed(ridx, cidx, pidx, valspecs[:1])
                     time.sleep(0.03)
             # input/output lane blocks (auto-created with the row) — set their params
             for field in ("input_control", "output_control"):
@@ -291,9 +295,10 @@ class QuadCortex:
 
     def _apply_lane_params(self, row, field, sub, pace=0.04):
         for pidx, p in enumerate(sub.get("params", [])):
-            vals = [v[0] for v in p.get("values", [])]
-            if vals and vals[0]:
-                self.set_lane_param(row, field, pidx, vals[0], column=sub.get("column", 0))
+            vals = p.get("values", [])
+            f = vals[0][0] if vals else None
+            if f is not None:
+                self.set_lane_param(row, field, pidx, f, column=sub.get("column", 0))
                 time.sleep(pace)
 
     def set_routing(self, row, in_portid=None, out_portid=None):
@@ -438,6 +443,32 @@ class QuadCortex:
                     return obj
         return None
 
+    def set_param_typed(self, row, column, param_index, valspecs, scene_mode=False):
+        """Set a param preserving value TYPE (float/int/string). valspecs = list of
+        [f|None, i|None, s|None] per scene, as produced by preset.describe — so cab
+        mic/IR-name strings, capture file_name, and IR paths survive a rebuild, not
+        just floats. scene_mode writes all 8 per-scene values."""
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        ch = g.preset.chains.add()
+        ch.row = row
+        m = ch.models.add()
+        m.column = column
+        p = m.params.add()
+        p.index = param_index
+        if scene_mode:
+            p.scene_mode = True
+        for f, i, s in valspecs:
+            pv = p.param_values.add()
+            if f is not None:
+                pv.float_value = f
+            elif i is not None:
+                pv.int_value = i
+            elif s is not None:
+                pv.string_value = s
+        self.send("Grid", g)
+
     def set_scene(self, scene):
         m = P.message_class("Scene")(action=P.ACTION["UPDATE"],
                                      request_id=self.next_request_id(),
@@ -449,9 +480,10 @@ class QuadCortex:
                                     request_id=self.next_request_id(), mode=int(mode))
         self.send("Mode", m)
 
-    def set_param_scenes(self, row, column, param_index, values):
-        """Set all per-scene values of a parameter at once (values = up to 8
-        floats, one per scene A-H)."""
+    def assign_param_to_scenes(self, row, column, param_index):
+        """Make a param scene-varying — the "Assign to Scenes" right-click action in
+        Cortex Control. Verified message: Grid UPDATE with the param carrying only
+        scene_mode:true (no param_values)."""
         g = P.message_class("Grid")()
         g.action = P.ACTION["UPDATE"]
         g.request_id = self.next_request_id()
@@ -462,18 +494,206 @@ class QuadCortex:
         p = m.params.add()
         p.index = param_index
         p.scene_mode = True
-        for v in list(values)[:8]:
-            p.param_values.add().float_value = float(v)
         self.send("Grid", g)
 
-    def recall(self, folder_key, position, is_factory=False):
+    def _write_active_scene_param(self, row, column, param_index, value):
+        """Plain value write. Once a param is scene-assigned, this lands on the ACTIVE
+        scene; otherwise it's global. No scene_mode flag (matches the app)."""
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        ch = g.preset.chains.add()
+        ch.row = row
+        m = ch.models.add()
+        m.column = column
+        p = m.params.add()
+        p.index = param_index
+        p.param_values.add().float_value = float(value)
+        self.send("Grid", g)
+
+    def set_param_scenes(self, row, column, param_index, values):
+        """Set a param's per-scene values (up to 8, scenes A-H). Verified sequence
+        (reversed from Cortex Control): assign the param to scenes, then for each scene
+        make it active and write its value (the device routes a plain write to the
+        active scene). Restores scene A afterward."""
+        vals = list(values)[:8]
+        self.assign_param_to_scenes(row, column, param_index)
+        time.sleep(0.05)
+        for scene, v in enumerate(vals):
+            self.set_scene(scene)
+            time.sleep(0.04)
+            self._write_active_scene_param(row, column, param_index, v)
+            time.sleep(0.04)
+        self.set_scene(0)
+
+    # Neural Capture block model ids (Neural Capture catalog category).
+    CAPTURE_V1 = 14000
+    CAPTURE_V2 = 14001
+    CAPTURE_FILE_NAME_PARAM = 5
+
+    def set_capture(self, row, column, capture_key, capture_name="", version="v1"):
+        """Place a Neural Capture block at (row, column) and load a specific capture
+        into it. The capture is selected by param[5] `file_name` = the capture's 64-hex
+        key concatenated with its display name (how the device binds a capture to a
+        block; see docs/DIRECTORY.md). version 'v1'->block 14000, 'v2'->14001. The
+        capture must already be on the device (factory, or downloaded from Cortex
+        Cloud). Returns the echoed block or None."""
+        hash_ = self.CAPTURE_V2 if str(version).lower() in ("v2", "2") else self.CAPTURE_V1
+        echo = self.add_block(hash_, row=row, column=column)
+        time.sleep(0.08)
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        ch = g.preset.chains.add()
+        ch.row = row
+        m = ch.models.add()
+        m.column = column
+        p = m.params.add()
+        p.index = self.CAPTURE_FILE_NAME_PARAM
+        p.param_values.add().string_value = f"{capture_key}{capture_name}"
+        self.send("Grid", g)
+        return echo
+
+    # IR-loader block ids + param indices (see docs/DIRECTORY.md).
+    IR_SINGLE_M = 29001
+    IR_SINGLE_ST = 29002
+    IR_PATH_PARAM = 2
+    IR_NAME_PARAM = 22
+
+    def set_ir(self, row, column, ir_key, ir_name="", stereo=False):
+        """Place an IR-loader block at (row, column) and load an impulse response into
+        it. The IR is bound by param[2] IR PATH = the IR's `CIR_…` key, and param[22]
+        IR NAME = display name (two separate string params). The IR must be on the
+        device. Returns the echoed block or None."""
+        hash_ = self.IR_SINGLE_ST if stereo else self.IR_SINGLE_M
+        echo = self.add_block(hash_, row=row, column=column)
+        time.sleep(0.08)
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        ch = g.preset.chains.add(); ch.row = row
+        m = ch.models.add(); m.column = column
+        p1 = m.params.add(); p1.index = self.IR_PATH_PARAM
+        p1.param_values.add().string_value = str(ir_key)
+        p2 = m.params.add(); p2.index = self.IR_NAME_PARAM
+        p2.param_values.add().string_value = str(ir_name)
+        self.send("Grid", g)
+        return echo
+
+    BYPASS_PARAM = 4   # a block's bypass control is param index 4 (verified on OD/amp)
+
+    def set_block_bypass(self, row, column, bypassed=True, scenes=None, bypass_param=BYPASS_PARAM):
+        """Bypass or re-enable the block at (row, column). Verified message shape:
+        Grid UPDATE preset.bypass[{ row, colBypass{ column, sceneBypass{bypass} } }].
+        scenes=None -> single sceneBypass for the current scene (what the app sends);
+        pass a list of up to 8 bools for explicit per-scene (A-H) bypass."""
+        if scenes is None:
+            self._write_bypass(row, column, bool(bypassed))
+            return
+        # per-scene bypass is just the block's BYPASS PARAM (index `bypass_param`, =4 for
+        # most single blocks) assigned to scenes — reversed from the right-click "Assign
+        # to Scenes" on the bypass button, which emits params{index:4, scene_mode:true}.
+        # 1.0 = bypassed, 0.0 = active.
+        self.set_param_scenes(row, column, bypass_param,
+                              [1.0 if s else 0.0 for s in list(scenes)[:8]])
+
+    def _write_bypass(self, row, column, bypassed):
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        b = g.preset.bypass.add()
+        b.row = row
+        cb = b.colBypass.add()
+        cb.column = column
+        cb.sceneBypass.add().bypass = bool(bypassed)
+        self.send("Grid", g)
+
+    def _assign_bypass_to_scenes(self, row, column):
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        b = g.preset.bypass.add()
+        b.row = row
+        cb = b.colBypass.add()
+        cb.column = column
+        cb.sceneMode = True
+        self.send("Grid", g)
+
+    def recall(self, folder_key="", position=0, is_factory=False,
+               downloads_key="", plugin_key=""):
+        """Load a preset via SetlistPosition UPDATE. The addressing differs by source:
+          * My Presets / Factory: folder_key + position (+ is_factory).
+          * Downloads (cloud):     downloads_key = the preset's cloud_id UUID
+                                   (sets is_downloads + key_in_downloads).
+          * Plugin banks:          plugin_key (sets is_plugin + key_in_plugin_folder).
+        """
         m = P.message_class("SetlistPosition")()
         m.action = P.ACTION["UPDATE"]
         m.request_id = self.next_request_id()
-        m.folder_key = folder_key
-        m.position = position
-        m.is_factory = is_factory
+        if downloads_key:
+            m.is_downloads = True
+            m.key_in_downloads = downloads_key
+        elif plugin_key:
+            m.is_plugin = True
+            m.key_in_plugin_folder = plugin_key
+        else:
+            m.folder_key = folder_key
+            m.position = position
+            m.is_factory = is_factory
         self.send("SetlistPosition", m)
+
+    def list_directory(self, timeout_ms=8000, quiet_ms=700):
+        """Send a File READ and collect the full stream of File UPDATE folder
+        messages the device emits (presets, IRs, captures). Returns the structured
+        catalog from directory.structure_directory(). Read-only."""
+        from . import directory as _dir
+        cls = P.message_class("File")
+        m = cls(action=P.ACTION["READ"])
+        if "request_id" in [f.name for f in cls.DESCRIPTOR.fields]:
+            m.request_id = self.next_request_id()
+        self.send("File", m)
+        want = P.NAME_TO_CMD["File"]
+        deadline = time.time() + timeout_ms / 1000.0
+        last = time.time()
+        folders = []
+        while time.time() < deadline:
+            self._collect(0.15)
+            got = False
+            for cmd, obj, raw, pb in list(self._pending):
+                if cmd == want and obj is not None and obj.HasField("folder"):
+                    folders.append(obj)
+                    self._pending.remove((cmd, obj, raw, pb))
+                    got = True
+            if got:
+                last = time.time()
+            elif folders and (time.time() - last) * 1000 > quiet_ms:
+                break
+        return _dir.structure_directory(folders)
+
+    def get_setlist_position(self):
+        """Current loaded-preset pointer: {folder_key, position, is_factory}."""
+        obj = self.read_state("SetlistPosition")
+        if obj is None:
+            return None
+        return {"folder_key": obj.folder_key, "position": obj.position,
+                "is_factory": obj.is_factory}
+
+    def list_recents_favorites(self, favorites=False, timeout_ms=3000):
+        """RecentsFavorites READ. favorites=True -> favorites list, else recents.
+        Returns [{name, folder_key, folder_name, is_factory, is_plugin}]."""
+        cls = P.message_class("RecentsFavorites")
+        m = cls(action=P.ACTION["READ"])
+        if "is_favorites" in [f.name for f in cls.DESCRIPTOR.fields]:
+            m.is_favorites = bool(favorites)
+        if "request_id" in [f.name for f in cls.DESCRIPTOR.fields]:
+            m.request_id = self.next_request_id()
+        _c, obj, _r = self.request("RecentsFavorites", m, timeout_ms=timeout_ms)
+        if obj is None:
+            return []
+        return [{"name": it.name, "folder_key": it.folder_key,
+                 "folder_name": it.folder_name,
+                 "is_factory": getattr(it, "is_factory", False),
+                 "is_plugin": getattr(it, "is_plugin", False)} for it in obj.items]
 
     def read_state(self, command, timeout_ms=2500):
         cls = P.message_class(command)

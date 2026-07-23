@@ -4,8 +4,10 @@ protocol. See PROTOCOL.md for the full protocol.
 Capabilities: read the live preset (fx blocks, grid positions, per-lane input/
 output blocks, params) the way Cortex Control does on boot; read hardware I/O
 settings and CPU load; switch presets, scenes (A-H), and performance modes
-(Preset=0 / Hybrid=6); recall presets; set master volume; and search the 533-
-device catalog (name / emulated gear / parameters).
+(Preset=0 / Hybrid=6); recall presets; set master volume; search the 533-device
+catalog (name / emulated gear / parameters); and browse the on-device DIRECTORY —
+presets, neural captures, and IRs — with search, favorites/recents, and load-by-
+position (see qc_mcp/directory.py and docs/DIRECTORY.md).
 
 The connection maintains the session + KeepAlive heartbeat the QC requires before
 it will stream state and answer READs (see transport.QuadCortex).
@@ -200,16 +202,37 @@ def switch_scene(scene: int) -> str:
 
 
 @mcp.tool()
-def switch_preset(position: int, setlist_key: str = "/media/p4/Presets/My Presets",
-                  is_factory: bool = False) -> dict:
-    """WRITE: switch to a preset by setlist + position (0-based). Returns the
-    loaded preset's signal chain (the device pushes it on switch)."""
-    qc = _conn()
-    qc.recall(setlist_key, position, is_factory=is_factory)
+def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Presets",
+                  is_factory: bool = False, downloads_cloud_id: str = "",
+                  plugin_key: str = "") -> dict:
+    """WRITE: switch the active preset. Addressing depends on the source:
+      * My Presets / Factory: setlist_key + position (0-based) [+ is_factory].
+      * Downloads (cloud):     downloads_cloud_id = the preset's cloud_id (from
+                               search_directory's 'key'/list). folder+position do NOT
+                               work for Downloads.
+      * Plugin banks:          plugin_key.
+    Returns the loaded preset's signal chain (captured from the push the device sends
+    on switch — works whether connected directly or bridged to Cortex Control)."""
     import time
-    time.sleep(0.6)
-    bp = qc.get_current_preset()
-    return {"position": position, "preset": _preset_summary(bp) if bp else None}
+    qc = _conn()
+    qc._pending.clear()
+    if downloads_cloud_id:
+        qc.recall(downloads_key=downloads_cloud_id)
+    elif plugin_key:
+        qc.recall(plugin_key=plugin_key)
+    else:
+        qc.recall(setlist_key, position, is_factory=is_factory)
+    want = P.NAME_TO_CMD["RecallPreset"]
+    bp = None
+    deadline = time.time() + 3.5
+    while time.time() < deadline and bp is None:
+        qc._collect(0.15)
+        for cmd, obj, raw, pb in list(qc._pending):
+            if cmd == want and obj is not None and obj.HasField("preset") \
+                    and sum(1 for ch in obj.preset.chains for m in ch.models if m.hash):
+                bp = obj.preset
+            qc._pending.remove((cmd, obj, raw, pb))
+    return {"loaded": bool(bp), "preset": _preset_summary(bp) if bp else None}
 
 
 # Performance-mode id map (confirmed live: 0=Preset, 6=Hybrid; Scene/Stomp TBD).
@@ -322,6 +345,78 @@ def add_block(row: int, column: int, device_hash: int, params: dict = None) -> s
 
 
 @mcp.tool()
+def add_capture(row: int, column: int, capture_key: str = "", capture_name: str = "",
+                version: str = "v1", query: str = "") -> dict:
+    """WRITE: place a Neural Capture block at grid (row, column) and load a capture
+    into it. Provide either capture_key (+capture_name) from search_directory, OR a
+    `query` to look one up by name in the on-device captures. version 'v1'|'v2' picks
+    the V1/V2 capture block. The capture must already be on the device (factory, or
+    downloaded via Cortex Cloud)."""
+    from . import directory
+    if query and not capture_key:
+        hits = directory.search(_catalog(), query, category="captures", limit=1)
+        if not hits:
+            return {"error": f"no on-device capture matches {query!r}"}
+        capture_key = hits[0]["key"]; capture_name = hits[0]["name"]
+    if not capture_key:
+        return {"error": "provide capture_key (from search_directory) or query"}
+    _conn().set_capture(row, column, capture_key, capture_name, version=version)
+    return {"placed": "Neural Capture", "version": version, "row": row, "column": column,
+            "capture": capture_name or capture_key[:12]}
+
+
+@mcp.tool()
+def add_ir(row: int, column: int, ir_key: str = "", ir_name: str = "",
+           stereo: bool = False, query: str = "") -> dict:
+    """WRITE: place an IR-loader block at grid (row, column) and load an impulse
+    response. Provide ir_key (a `CIR_…` key from search_directory category='irs')
+    +ir_name, OR a `query` to look one up by name. stereo picks the mono/stereo loader.
+    The IR must already be on the device."""
+    from . import directory
+    if query and not ir_key:
+        hits = directory.search(_catalog(), query, category="irs", limit=1)
+        if not hits:
+            return {"error": f"no on-device IR matches {query!r}"}
+        ir_key = hits[0]["key"]; ir_name = hits[0]["name"]
+    if not ir_key:
+        return {"error": "provide ir_key (from search_directory category='irs') or query"}
+    _conn().set_ir(row, column, ir_key, ir_name, stereo=stereo)
+    return {"placed": "IR loader", "stereo": stereo, "row": row, "column": column,
+            "ir": ir_name or ir_key}
+
+
+@mcp.tool()
+def add_split(row: int, split_percent: float = 50.0, mix_percent: float = 50.0) -> str:
+    """WRITE: split a lane into a parallel path. split_percent = where the split occurs,
+    mix_percent = wet/dry blend at the merge (0-100). Use remove-split via clear_grid or
+    set both to -1 to collapse. See build_preset for full parallel topologies."""
+    qc = _conn()
+    qc.set_split_points(row, int(split_percent), int(mix_percent))
+    return f"Split lane {row} at {split_percent}% / mix {mix_percent}%."
+
+
+@mcp.tool()
+def set_lane_routing(row: int, in_portid: int = None, out_portid: int = None) -> str:
+    """WRITE: set a grid lane's input/output routing (portids). in=1 main input, out=19
+    main output; 0 = idle. Mirrors clear_grid's clean routing."""
+    _conn().set_routing(row, in_portid=in_portid, out_portid=out_portid)
+    return f"Routed lane {row}: in={in_portid} out={out_portid}."
+
+
+@mcp.tool()
+def save_preset_as(name: str, setlist_key: str = "/media/p4/Presets/My Presets") -> dict:
+    """WRITE: save the CURRENT grid as a NEW preset file `name` in a setlist (default
+    My Presets), without overwriting the loaded preset. Reads the live grid and writes
+    it via File CREATE."""
+    qc = _conn()
+    bp = qc.get_current_preset()
+    if not bp:
+        return {"error": "could not read current grid to save"}
+    qc.write_preset_file(bp, setlist_key, name)
+    return {"saved_as": name, "setlist": setlist_key}
+
+
+@mcp.tool()
 def remove_block(row: int, column: int) -> str:
     """WRITE: remove the block at grid (row, column)."""
     _conn().delete_block(row, column)
@@ -336,6 +431,28 @@ def set_parameter(row: int, column: int, param_index: int, display_value: float,
     val = _norm(device_hash, param_index, display_value) if device_hash else display_value
     _conn().set_param(row, column, param_index, val)
     return f"Set param {param_index} = {display_value} at row{row} col{column}."
+
+
+@mcp.tool()
+def set_parameter_scenes(row: int, column: int, param_index: int, values: list,
+                         device_hash: int = 0) -> str:
+    """WRITE: set a parameter's per-scene values at once (values = up to 8 DISPLAY
+    values, one per scene A-H). Marks the param scene-varying. If device_hash is given,
+    values are converted from display units; else sent as-is (0-1)."""
+    vals = [_norm(device_hash, param_index, v) if device_hash else v for v in values]
+    _conn().set_param_scenes(row, column, param_index, vals)
+    return f"Set param {param_index} across {len(vals)} scenes at row{row} col{column}."
+
+
+@mcp.tool()
+def set_block_bypass(row: int, column: int, bypassed: bool = True,
+                     scenes: list = None) -> str:
+    """WRITE: bypass (bypassed=True) or re-enable a block at grid (row, column).
+    scenes: omit to apply to the current scene, or pass up to 8 booleans for explicit
+    per-scene (A-H) bypass states."""
+    _conn().set_block_bypass(row, column, bypassed=bypassed, scenes=scenes)
+    state = "bypassed" if (bypassed and scenes is None) else ("per-scene" if scenes else "enabled")
+    return f"Block at row{row} col{column} -> {state}."
 
 
 @mcp.tool()
@@ -361,6 +478,64 @@ def find_devices(query: str = "", category: str = "", limit: int = 25) -> list:
     res = catalog.find(query or None, category or None)[:limit]
     return [{"hash": m["id"], "name": m["name"], "category": m["category"],
              "based_on": m["tm"]} for m in res]
+
+
+_catalog_cache = None
+
+
+def _catalog(refresh=False):
+    """Cached device DIRECTORY (presets / IRs / captures). The full stream is large
+    (thousands of captures), so cache it per session; pass refresh=True to re-pull."""
+    global _catalog_cache
+    if _catalog_cache is None or refresh:
+        _catalog_cache = _conn().list_directory()
+    return _catalog_cache
+
+
+@mcp.tool()
+def directory_summary(refresh: bool = False) -> dict:
+    """Counts of the on-device DIRECTORY: presets, IRs (impulse responses), and neural
+    captures, each as {folders, files}. Read-only. Cached per session."""
+    from . import directory
+    return directory.counts(_catalog(refresh))
+
+
+@mcp.tool()
+def search_directory(query: str = "", category: str = "", limit: int = 30,
+                     refresh: bool = False) -> list:
+    """Search the on-device DIRECTORY by name. category = 'presets' | 'captures' |
+    'irs' (blank = all). Returns items with folder_key + position so a preset hit can
+    be loaded via switch_preset(position, setlist_key=folder_key, is_factory=...).
+    Capture/IR hits include their content 'key' (hash) used to reference them in a
+    block. Read-only. Examples: search_directory('SRV','presets'),
+    search_directory('Laney','captures')."""
+    from . import directory
+    cat = category or None
+    hits = directory.search(_catalog(refresh), query, category=cat, limit=limit)
+    return [{"name": h["name"], "category": h["category"],
+             "folder_name": h["folder_name"], "setlist_key": h["folder_key"],
+             "position": h["index"], "is_factory": h["is_factory"],
+             "is_downloads": h["folder_key"].startswith("cloud-0"),
+             "downloads_cloud_id": h.get("cloud_id", ""),
+             "author": h["author"], "key": h["key"]} for h in hits]
+
+
+@mcp.tool()
+def list_favorites(favorites: bool = True) -> list:
+    """The device's Favorites (favorites=True) or Recents (favorites=False) preset
+    list: [{name, folder_name, setlist_key, is_factory, is_plugin}]. Load one via
+    switch_preset. Read-only."""
+    items = _conn().list_recents_favorites(favorites=favorites)
+    return [{"name": it["name"], "folder_name": it["folder_name"],
+             "setlist_key": it["folder_key"], "is_factory": it["is_factory"],
+             "is_plugin": it["is_plugin"]} for it in items]
+
+
+@mcp.tool()
+def current_preset_position() -> dict:
+    """The currently loaded preset's pointer: {folder_key, position, is_factory}.
+    Read-only (SetlistPosition READ)."""
+    return _conn().get_setlist_position() or {"note": "no position reported"}
 
 
 def main():

@@ -155,9 +155,13 @@ def get_current_preset() -> dict:
 def recall_preset(position: int, setlist_key: str = "", is_factory: bool = False,
                   capture_seconds: float = 3.0) -> dict:
     """WRITE: load a preset by setlist position (0-based). Changes the active
-    preset on the device. Returns the loaded preset's signal chain if the QC
-    pushes it back."""
+    preset on the device. setlist_key defaults to the CURRENT folder — the device
+    REQUIRES folder_key on SetlistPosition UPDATE (a folderless recall is silently
+    refused: it answers with the unchanged position). Verifies the recall landed."""
     qc = _conn()
+    if not setlist_key and not is_factory:
+        cur = qc.get_setlist_position() or {}
+        setlist_key = cur.get("folder_key") or "/media/p4/Presets/My Presets"
     cls = P.message_class("SetlistPosition")
     m = cls(action=P.ACTION["UPDATE"], request_id=qc.next_request_id(),
             position=position, is_factory=is_factory)
@@ -165,15 +169,22 @@ def recall_preset(position: int, setlist_key: str = "", is_factory: bool = False
         m.folder_key = setlist_key
     qc.send("SetlistPosition", m)
     import time
+    out = {"recalled_position": position}
     deadline = time.time() + capture_seconds
     while time.time() < deadline:
         qc._collect(0.2)
         for cmd, obj, raw, pb in list(qc._pending):
             if cmd == P.NAME_TO_CMD["RecallPreset"] and obj is not None \
                     and obj.HasField("preset"):
-                return {"recalled_position": position,
-                        "preset": _preset_summary(obj.preset)}
-    return {"recalled_position": position, "note": "sent; no preset echo captured"}
+                out["preset"] = _preset_summary(obj.preset)
+                deadline = 0
+    # the device echoes SetlistPosition with the ACTUAL position — verify it moved
+    now = qc.get_setlist_position() or {}
+    if now.get("position") is not None and now["position"] != position:
+        return {"error": f"device refused the recall (still at position "
+                         f"{now['position']}) — check setlist_key/position.",
+                "requested": position, "actual": now}
+    return out
 
 
 @mcp.tool()

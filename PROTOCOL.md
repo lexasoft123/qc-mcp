@@ -168,7 +168,10 @@ Implemented in `catalog.to_norm` / `to_display`. (A naive linear conversion put 
 
 ## 6. Presets & setlists
 
-- Recall = `SetlistPosition`(2) UPDATE. **Addressing differs by preset source:**
+- Recall = `SetlistPosition`(2) UPDATE. **`folder_key` is REQUIRED** for user/factory
+  recalls — a folderless UPDATE is silently refused, and the device *answers your
+  request_id with the unchanged position* (that echo-mismatch is the failure signal;
+  verified live). **Addressing differs by preset source:**
   - **My Presets / Factory:** `folder_key` + `position` (0-based) [+ `is_factory`].
     User setlists live under `/media/p4/Presets/My Presets`.
   - **Downloads (cloud):** `is_downloads:true` + `key_in_downloads:<cloud_id UUID>` —

@@ -78,7 +78,9 @@ Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
 - **Captures**: block hash 14000(V1)/14001(V2) + param[5] `file_name`=`<64hex key><name>`;
   also list the key in the preset's `factory_/product_dependencies`.
 - **Loading Downloads/Plugin presets** uses `key_in_downloads` (cloud_id) / plugin key, not
-  folder+position.
+  folder+position. And **recalls REQUIRE `folder_key`** — a folderless SetlistPosition
+  UPDATE is silently refused (device echoes the unchanged position back). `recall_preset`
+  now defaults to the current folder and verifies the position actually moved.
 - Value taper: `min>0 and max/min>=5` ⇒ power taper (k≈1.667), else linear.
 
 ## Conventions

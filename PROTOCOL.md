@@ -168,7 +168,10 @@ Implemented in `catalog.to_norm` / `to_display`. (A naive linear conversion put 
 
 ## 6. Presets & setlists
 
-- Recall = `SetlistPosition`(2) UPDATE. **Addressing differs by preset source:**
+- Recall = `SetlistPosition`(2) UPDATE. **`folder_key` is REQUIRED** for user/factory
+  recalls — a folderless UPDATE is silently refused, and the device *answers your
+  request_id with the unchanged position* (that echo-mismatch is the failure signal;
+  verified live). **Addressing differs by preset source:**
   - **My Presets / Factory:** `folder_key` + `position` (0-based) [+ `is_factory`].
     User setlists live under `/media/p4/Presets/My Presets`.
   - **Downloads (cloud):** `is_downloads:true` + `key_in_downloads:<cloud_id UUID>` —
@@ -178,6 +181,21 @@ Implemented in `catalog.to_norm` / `to_display`. (A naive linear conversion put 
 - On recall the QC pushes the full `RecallPreset` (new preset).
 - Capacity: setlists ≤ 256 presets, up to 10 user setlists, 3072 presets total.
 - `transport.recall`, MCP `switch_preset` / `recall_preset`.
+
+### Saving (decoded from Cortex Control's own Save, 2026-07)
+
+- **Save = `File`(4) `action=CREATE`** with `folder{key, files[{index:<position>,
+  name:<preset name>}]}` and **no `preset_payload`** — the device commits its live
+  working grid to `<folder>/<name>.pb` at `<position>` (~65-byte request). The reply
+  `File{UPDATE}` carries the assigned path, author, a fresh UUID, and fw version;
+  the device then pushes `RecallPreset` + `Scene` + `SetlistPosition` +
+  `RecentsFavorites` + `PresetDirty:false`.
+- **Do NOT save via `RecallPreset`(15) UPDATE `reason=SAVE`** — on a slot with no
+  preset file yet ("Unsaved") it **hangs the device** (hard reboot required) and
+  commits nothing.
+- `transport.write_preset_file(folder_key, position, name)`; MCP `save_preset`
+  (current slot) / `save_preset_as` (any slot; refuses to clobber a different-named
+  occupant unless `overwrite=True`).
 
 ### 6a. DIRECTORY — catalog listing, captures & IRs
 
@@ -209,6 +227,13 @@ The full DIRECTORY (presets + neural captures + IRs) is reversed in **docs/DIREC
   is an array indexed by scene, and `Param.scene_mode` marks a param as scene-varying.
   `BinaryPreset.default_scene` is the boot scene.
 - `transport.set_scene`, MCP `switch_scene`. Verified live (A→C→A).
+- **Labels & colors** (captured from Cortex Control's scene rename, 2026-07): dedicated
+  per-scene commands, NOT preset fields — `SceneLabel`(23) UPDATE `{index, label}` and
+  `SceneColor`(48) UPDATE `{index, color}` (ARGB int; the app auto-sends a color with
+  each label). A `Grid` UPDATE carrying `BinaryPreset.scene_labels[]` is a **silent
+  no-op** (confirmed live). Labeled state reflects into `BinaryPreset.scene_labels[]`
+  on read; a scene holding data but no label displays "Undefined" on the device.
+  `transport.set_scene_label` / `set_scene_color`, MCP `set_preset_meta`.
 - **Refinement:** `set_param`/param display currently target scene 0; to be fully
   scene-accurate they should target the active/default scene.
 

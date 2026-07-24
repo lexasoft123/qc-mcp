@@ -12,8 +12,11 @@ position (see qc_mcp/directory.py and docs/DIRECTORY.md).
 The connection maintains the session + KeepAlive heartbeat the QC requires before
 it will stream state and answer READs (see transport.QuadCortex).
 
-Exclusive HID access — **Cortex Control must be quit** while this server is
-connected to the device (and vice-versa).
+Connection modes (auto-detected in _conn): **bridge** — the instrumented Cortex
+Control is running (interceptor/run-bridge.sh) and we share its live session over
+FIFOs, so the app and this server work at once (preferred); **direct** — no bridge
+FIFOs, we seize the HID device ourselves, which requires Cortex Control to be quit
+(exclusive access). QC_BRIDGE=0 forces direct mode.
 """
 from __future__ import annotations
 import os
@@ -25,7 +28,27 @@ from . import protocol as P
 from . import catalog
 from .transport import QuadCortex, QCError
 
-mcp = FastMCP("quad-cortex")
+mcp = FastMCP("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
+(guitar amp modeler) over its internal USB protocol. Core workflow for building:
+
+1. connect() — asks bridge vs direct when ambiguous; bridge self-launches the app.
+2. SLOT SAFETY: never build over a named preset. If the currently open slot is
+   empty ("Unsaved") use IT (the user chose it); else list_empty_slots + recall.
+3. Build: find_devices for hashes -> build_preset (topology+params in one spec)
+   -> ALWAYS verify with get_current_preset (routing/split_points) + cpu_load
+   (<~85%; delete, don't bypass, to save CPU).
+4. Scenes A-H = per-block param/bypass snapshots. set_block_bypass(scenes=[...])
+   for drives/amps (NO-OP on delays — scene the delay MIX instead). Vary AMP
+   params per scene too (gain/master/EQ) via set_parameter_scenes. Label scenes
+   with set_preset_meta.
+5. Stereo multi-amp: pan branch lanes with set_lane_output (~0.3/0.7), drop lane
+   volumes ~0.5 so the parallel sum doesn't clip.
+6. Save: save_preset / save_preset_as (File CREATE; guarded against clobbering).
+   A success string is not proof — verify via current_preset_position + read.
+
+Deeper knowledge (routing recipes for shared-front multi-amp rigs, CPU model,
+protocol docs, GUI verification harness) lives in the qc-mcp repo — sessions
+opened in that repo load it automatically as skills/CLAUDE.md.""")
 
 _qc = None
 _lock = threading.Lock()
@@ -56,6 +79,40 @@ def _disconnect():
         if _qc is not None:
             _qc.close()
             _qc = None
+
+
+def _repo_root():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _app_running(pattern):
+    import subprocess
+    return subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0
+
+
+def _bridge_running():
+    """Bridge is usable = FIFOs exist AND the instrumented app is alive (the FIFOs
+    are plain filesystem objects and outlive the app — existence alone lies)."""
+    return (os.path.exists("/tmp/qc_inject") and os.path.exists("/tmp/qc_in")
+            and _app_running("CortexControl-instrumented"))
+
+
+def _launch_bridge(timeout_s=45):
+    """Start interceptor/run-bridge.sh (instrumented Cortex Control with the FIFO
+    bridge) detached, and wait until the bridge is up."""
+    import subprocess, time
+    script = os.path.join(_repo_root(), "interceptor", "run-bridge.sh")
+    if not os.path.exists(script):
+        return f"run-bridge.sh not found at {script}"
+    subprocess.Popen([script], cwd=_repo_root(), start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if _bridge_running():
+            time.sleep(12)  # boot storm: the app pulls the whole catalog on start —
+            return None     # join after it settles or our first reads time out
+        time.sleep(1)
+    return f"bridge did not come up within {timeout_s}s (device plugged in?)"
 
 
 def _fields(msg):
@@ -95,8 +152,11 @@ def _preset_summary(bp):
                         vals[cps[pos]["name"]] = round(catalog.to_display(m.hash, pos, nv), 3)
                 return {"name": info.get("name"), "params": vals}
             return None
+        split_points = [[s.split, s.mix] for s in ch.split_control_points
+                        if (s.split, s.mix) != (-1, -1)]
         chains.append({"row": ch.row, "in_port": ch.in_portid,
-                       "out_port": ch.out_portid, "blocks": blocks,
+                       "out_port": ch.out_portid,
+                       "split_points": split_points, "blocks": blocks,
                        "input_block": lane_ctrl(ch.input_control),
                        "output_block": lane_ctrl(ch.output_control)})
     return {"name": bp.name, "tempo": bp.tempo, "default_scene": bp.default_scene,
@@ -105,15 +165,59 @@ def _preset_summary(bp):
 
 
 @mcp.tool()
-def connect() -> str:
-    """Connect to the Quad Cortex over USB-HID. Cortex Control must be quit
-    (it holds the device exclusively). Safe/read-only."""
+def connect(mode: str = "auto", quit_app: bool = False) -> dict:
+    """Connect to the Quad Cortex. mode:
+      * 'auto' (default) — if the bridge (instrumented Cortex Control) is running,
+        join it. Otherwise DON'T guess: returns the available modes as a question —
+        relay the choice to the user, then call connect(mode=...) with their answer.
+      * 'bridge' — launches interceptor/run-bridge.sh ITSELF if needed (starts the
+        instrumented Cortex Control; app + MCP share the device) and connects.
+        Takes ~20s on a cold start.
+      * 'direct' — exclusive USB-HID. If any Cortex Control is running it holds the
+        device: refuses unless quit_app=True (then quits the app first).
+    """
+    global _qc
+    if _qc is not None:
+        return {"status": f"already connected ({'bridge' if _qc.bridge else 'direct'} mode)"}
+    if mode == "auto":
+        if _bridge_running():
+            mode = "bridge"
+        else:
+            return {"question": "How should I connect to the Quad Cortex?",
+                    "options": {
+                        "bridge": "I launch the instrumented Cortex Control myself; "
+                                  "the app and MCP then share the device (recommended "
+                                  "— GUI verification works too). ~20s cold start.",
+                        "direct": "Exclusive USB-HID, no app running. Faster, but no "
+                                  "Cortex Control GUI alongside."},
+                    "next": "Ask the user, then call connect(mode='bridge') or "
+                            "connect(mode='direct')."}
+    if mode == "bridge":
+        os.environ.pop("QC_BRIDGE", None)   # undo a prior direct-mode override
+        if not _bridge_running():
+            err = _launch_bridge()
+            if err:
+                return {"error": err}
+    elif mode == "direct":
+        if _bridge_running() or _app_running("Cortex Control.app"):
+            if not quit_app:
+                return {"error": "Cortex Control is running and holds the device. "
+                                 "Pass quit_app=True to quit it and connect direct, "
+                                 "or use mode='bridge' to share its session."}
+            import subprocess, time
+            subprocess.run(["osascript", "-e", 'quit app "Cortex Control"'],
+                           capture_output=True)
+            time.sleep(3)
+        os.environ["QC_BRIDGE"] = "0"     # _conn() honors this: force direct
+    else:
+        return {"error": f"unknown mode {mode!r} — use 'auto', 'bridge' or 'direct'."}
     try:
         qc = _conn()
         v = qc.read_state("Version")
-        return f"Connected. Firmware {getattr(v, 'zenos_git_hash', '?')}."
+        return {"status": f"Connected ({mode}). Firmware "
+                          f"{getattr(v, 'zenos_git_hash', '?')}."}
     except QCError as e:
-        return f"Connect failed: {e}"
+        return {"error": f"Connect failed: {e}"}
 
 
 @mcp.tool()
@@ -147,9 +251,13 @@ def get_current_preset() -> dict:
 def recall_preset(position: int, setlist_key: str = "", is_factory: bool = False,
                   capture_seconds: float = 3.0) -> dict:
     """WRITE: load a preset by setlist position (0-based). Changes the active
-    preset on the device. Returns the loaded preset's signal chain if the QC
-    pushes it back."""
+    preset on the device. setlist_key defaults to the CURRENT folder — the device
+    REQUIRES folder_key on SetlistPosition UPDATE (a folderless recall is silently
+    refused: it answers with the unchanged position). Verifies the recall landed."""
     qc = _conn()
+    if not setlist_key and not is_factory:
+        cur = qc.get_setlist_position() or {}
+        setlist_key = cur.get("folder_key") or "/media/p4/Presets/My Presets"
     cls = P.message_class("SetlistPosition")
     m = cls(action=P.ACTION["UPDATE"], request_id=qc.next_request_id(),
             position=position, is_factory=is_factory)
@@ -157,15 +265,22 @@ def recall_preset(position: int, setlist_key: str = "", is_factory: bool = False
         m.folder_key = setlist_key
     qc.send("SetlistPosition", m)
     import time
+    out = {"recalled_position": position}
     deadline = time.time() + capture_seconds
     while time.time() < deadline:
         qc._collect(0.2)
         for cmd, obj, raw, pb in list(qc._pending):
             if cmd == P.NAME_TO_CMD["RecallPreset"] and obj is not None \
                     and obj.HasField("preset"):
-                return {"recalled_position": position,
-                        "preset": _preset_summary(obj.preset)}
-    return {"recalled_position": position, "note": "sent; no preset echo captured"}
+                out["preset"] = _preset_summary(obj.preset)
+                deadline = 0
+    # the device echoes SetlistPosition with the ACTUAL position — verify it moved
+    now = qc.get_setlist_position() or {}
+    if now.get("position") is not None and now["position"] != position:
+        return {"error": f"device refused the recall (still at position "
+                         f"{now['position']}) — check setlist_key/position.",
+                "requested": position, "actual": now}
+    return out
 
 
 @mcp.tool()
@@ -180,17 +295,62 @@ def set_master_volume(volume: float, engaged: bool = True) -> str:
 
 
 @mcp.tool()
-def cpu_load() -> dict:
-    """Read the current DSP/CPU load (the QC streams this). Read-only."""
+def cpu_load(detail: bool = True) -> dict:
+    """Read the current DSP load. Returns {total_percent} plus, when detail=True, a
+    per-block and per-core breakdown: the QC has two DSP cores and assigns each block
+    to one (reporting a per-block cost + is_on_core2 flag), balancing to keep the
+    busier core under ~90%. Heaviest blocks are amps/captures (~0.5-0.6) and stereo
+    reverbs; cabs ~0.18; drives/comp ~0.08-0.16. To LOWER CPU you must DELETE blocks —
+    bypassing/disabling does NOT free CPU. Duplicating a block across parallel lanes
+    multiplies its cost. Global EQ + Input Gate live on the shared core and auto-
+    disable on overload. Read-only. See docs/CPU.md and the optimize-preset-cpu skill."""
     qc = _conn()
     import time
+    want = P.NAME_TO_CMD["CPULoad"]
+    # CPULoad is streamed continuously, so the buffer holds stale ones — drop any
+    # already queued, then take the LATEST fresh message (reflects the current grid).
+    qc._pending = [t for t in qc._pending if t[0] != want]
+    msg = None
     deadline = time.time() + 2.0
     while time.time() < deadline:
-        qc._collect(0.2)
-        for cmd, obj, raw, pb in list(qc._pending):
-            if cmd == P.NAME_TO_CMD["CPULoad"] and obj is not None:
-                return _fields(obj)
-    return {"note": "no CPULoad update captured"}
+        qc._collect(0.25)
+        fresh = [obj for cmd, obj, raw, pb in qc._pending if cmd == want and obj is not None]
+        qc._pending = [t for t in qc._pending if t[0] != want]
+        if fresh:
+            msg = fresh[-1]
+            break
+    if msg is None:
+        return {"note": "no CPULoad update captured"}
+    out = {"total_percent": round(msg.cpu_total_load, 1)}
+    if not detail:
+        return out
+    names = {}
+    try:                                        # label blocks by name (best-effort)
+        bp = qc.get_current_preset(timeout_ms=3000)
+        if bp:
+            for ridx, ch in enumerate(bp.chains):
+                for cidx, m in enumerate(ch.models):   # array index == physical column
+                    if m.hash:
+                        names[(ridx, cidx)] = catalog.name_of(m.hash).split(" [")[0]
+    except Exception:
+        pass
+    blocks = []
+    by_core = {"core1": 0.0, "core2": 0.0}
+    for ridx, ch in enumerate(msg.chains):
+        for cidx, col in enumerate(ch.columns):
+            load = round(getattr(col, "cpu_load", 0.0), 4)
+            if load <= 0:
+                continue
+            on2 = bool(getattr(col, "is_on_core2", False))
+            by_core["core2" if on2 else "core1"] += load
+            blocks.append({"row": ridx, "col": cidx, "cpu": load,
+                           "core": 2 if on2 else 1, "name": names.get((ridx, cidx), "")})
+    blocks.sort(key=lambda b: -b["cpu"])
+    out["by_core_weight"] = {k: round(v, 3) for k, v in by_core.items()}
+    out["blocks"] = blocks
+    out["hint"] = ("Delete (not bypass) blocks to cut CPU; dedupe blocks repeated "
+                   "across parallel lanes; prefer mono (M) over stereo (ST).")
+    return out
 
 
 @mcp.tool()
@@ -306,7 +466,9 @@ def build_preset(spec: dict, clear: bool = True) -> dict:
           ] } ] }
 
     Find device hashes with find_devices. Returns the resulting topology.
-    WRITE. Does not persist until you call save_preset."""
+    WRITE. Does not persist until you save; spec `name` is NOT applied to the live
+    grid (preset names live on the preset FILE) — pass it to save_preset /
+    save_preset_as, which is what actually names the preset."""
     qc = _conn()
     if clear:
         qc.clear_grid()
@@ -386,13 +548,15 @@ def add_ir(row: int, column: int, ir_key: str = "", ir_name: str = "",
 
 
 @mcp.tool()
-def add_split(row: int, split_percent: float = 50.0, mix_percent: float = 50.0) -> str:
-    """WRITE: split a lane into a parallel path. split_percent = where the split occurs,
-    mix_percent = wet/dry blend at the merge (0-100). Use remove-split via clear_grid or
-    set both to -1 to collapse. See build_preset for full parallel topologies."""
+def add_split(row: int, split_col: int = 0, mix_col: int = -1) -> str:
+    """WRITE: set a lane's split/mix points — COLUMN indices, not percentages.
+    split_col = the column the signal branches BEFORE (put it after the shared blocks);
+    mix_col = the column the branch merges back at, or -1 for a no-merge tap (feeds the
+    row below without polluting this lane — the shared-front trick). (-1, -1) removes
+    the split. See build_preset's `splitter` and the build-preset-routing skill."""
     qc = _conn()
-    qc.set_split_points(row, int(split_percent), int(mix_percent))
-    return f"Split lane {row} at {split_percent}% / mix {mix_percent}%."
+    qc.set_split_points(row, int(split_col), int(mix_col))
+    return f"Lane {row} split at col {split_col}, mix at col {mix_col}."
 
 
 @mcp.tool()
@@ -404,16 +568,123 @@ def set_lane_routing(row: int, in_portid: int = None, out_portid: int = None) ->
 
 
 @mcp.tool()
-def save_preset_as(name: str, setlist_key: str = "/media/p4/Presets/My Presets") -> dict:
-    """WRITE: save the CURRENT grid as a NEW preset file `name` in a setlist (default
-    My Presets), without overwriting the loaded preset. Reads the live grid and writes
-    it via File CREATE."""
+def set_lane_output(row: int, pan: float = None, volume: float = None,
+                    mute: bool = None, solo: bool = None) -> str:
+    """WRITE: set a grid lane's output (Lane Output Control): pan (0.0=hard L, 0.5=
+    center, 1.0=hard R), volume (0.0-1.0), mute, solo. For a STEREO multi-amp blend,
+    pan the parallel BRANCH amp lanes (e.g. one ~0.3 left, one ~0.7 right) and leave
+    the main/output row centered — panning the output row pans the whole mix."""
     qc = _conn()
-    bp = qc.get_current_preset()
-    if not bp:
-        return {"error": "could not read current grid to save"}
-    qc.write_preset_file(bp, setlist_key, name)
-    return {"saved_as": name, "setlist": setlist_key}
+    import time
+    # LaneOutputControl param order: VOLUME=0, PAN=1, MUTE=2, SOLO=3
+    updates = [(0, volume), (1, pan)]
+    if mute is not None:
+        updates.append((2, 1.0 if mute else 0.0))
+    if solo is not None:
+        updates.append((3, 1.0 if solo else 0.0))
+    done = {}
+    for idx, val in updates:
+        if val is not None:
+            qc.set_lane_param(row, "output_control", idx, float(val))
+            done[{0: "volume", 1: "pan", 2: "mute", 3: "solo"}[idx]] = float(val)
+            time.sleep(0.05)
+    return f"Set lane {row} output {done}."
+
+
+@mcp.tool()
+def set_preset_meta(name: str = None, tempo: int = None, default_scene: int = None,
+                    scene_labels: list = None, scene_colors: list = None) -> str:
+    """WRITE: set preset metadata on the LIVE preset. scene_labels / scene_colors (up
+    to 8 entries for scenes A-H; None entries skipped, "" clears) use the VERIFIED
+    SceneLabel/SceneColor ops. `name` cannot be set live — preset names live on the
+    preset file; pass it to save_preset / save_preset_as instead (ignored here with a
+    warning). tempo/default_scene are best-effort (unverified op). Unlabeled scenes
+    that hold scene data show as "Undefined" on the device — label the ones you use."""
+    _conn().set_preset_meta(tempo=tempo, default_scene=default_scene,
+                            scene_labels=scene_labels, scene_colors=scene_colors)
+    out = f"Set preset meta: scene_labels={scene_labels} scene_colors={scene_colors}"
+    if tempo is not None or default_scene is not None:
+        out += f" tempo={tempo} default_scene={default_scene} (best-effort/unverified)"
+    if name is not None:
+        out += (f". NOTE: name={name!r} NOT applied — names are set by the save op; "
+                "pass it to save_preset/save_preset_as.")
+    return out + "."
+
+
+def _slot_occupant(folder_key, index):
+    """Best-effort: the preset file already at (folder_key, index) per the DIRECTORY
+    catalog, or None if the slot looks empty / the catalog can't tell."""
+    cat = _catalog()
+    for fo in (cat or {}).get("presets", []):
+        if fo.get("key") == folder_key:
+            for f in fo.get("files", []):
+                if f.get("index") == index:
+                    return f
+    return None
+
+
+@mcp.tool()
+def list_empty_slots(setlist_key: str = "/media/p4/Presets/My Presets",
+                     limit: int = 8) -> dict:
+    """Free ("Unsaved") preset positions in a setlist folder — the SAFE build targets
+    (never build over a named preset). A setlist is a fixed 256-slot table; free slots
+    are listed with an EMPTY name. Positions map to banks: 0-7 = 1A-1H, 8-15 = 2A-2H, …
+    Read-only. NOTE `source`: 'snapshot' can be stale — a slot saved since the snapshot
+    may still show empty; verify the target with current_preset_position/read if unsure."""
+    cur = None    # the slot the user has OPEN — if it's empty, it's the intended target
+    try:
+        p = _conn().get_setlist_position() or {}
+        if p.get("folder_key") == setlist_key and not p.get("is_factory"):
+            cur = int(p.get("position"))
+    except Exception:
+        pass
+    cat = _catalog()
+    for fo in (cat or {}).get("presets", []):
+        if fo.get("key") == setlist_key:
+            files = fo.get("files", [])
+            present = {f.get("index") for f in files}
+            free = sorted({f["index"] for f in files if not f.get("name")} |
+                          {i for i in range(256) if i not in present})
+            def label(i):
+                return f"{i // 8 + 1}{'ABCDEFGH'[i % 8]}"
+            out = {"setlist": setlist_key, "source": _catalog_source}
+            if cur is not None and cur in free:
+                free.remove(cur)
+                free.insert(0, cur)
+                out["recommended"] = {"position": cur, "slot": label(cur),
+                                      "why": "currently OPEN on the device and empty — "
+                                             "the user likely selected it on purpose; "
+                                             "build here (no recall needed)."}
+            out["empty_positions"] = [{"position": i, "slot": label(i)}
+                                      for i in free[:limit]]
+            return out
+    out = {"error": f"folder {setlist_key!r} not in the directory catalog",
+           "source": _catalog_source}
+    if _catalog_source == "empty":
+        out["bootstrap"] = _BOOTSTRAP_HINT
+    return out
+
+
+@mcp.tool()
+def save_preset_as(name: str, setlist_key: str = "", position: int = -1,
+                   overwrite: bool = False) -> dict:
+    """WRITE: save the CURRENT working grid as preset `name` via File CREATE — the same
+    op Cortex Control's Save uses (File{action=CREATE, folder{key, files{index, name}}},
+    no payload; the device commits its live grid). Defaults target the currently loaded
+    slot. SAFETY: refuses to write into a slot that already holds a preset with a
+    different name unless overwrite=True — use list_empty_slots to pick a free target.
+    Never uses RecallPreset SAVE (which hangs on an Unsaved slot)."""
+    qc = _conn()
+    pos = qc.get_setlist_position() or {}
+    folder = setlist_key or pos.get("folder_key") or "/media/p4/Presets/My Presets"
+    idx = position if position >= 0 else int(pos.get("position", 0))
+    occ = _slot_occupant(folder, idx)
+    if occ and occ.get("name") and occ["name"] != name and not overwrite:
+        return {"error": f"slot {idx} in {folder!r} already holds {occ['name']!r} — "
+                         "pass an empty position (see list_empty_slots) or overwrite=True."}
+    qc.write_preset_file(folder, idx, name)
+    return {"saved_as": name, "setlist": folder, "position": idx,
+            "replaced": (occ or {}).get("name") or None}
 
 
 @mcp.tool()
@@ -449,7 +720,10 @@ def set_block_bypass(row: int, column: int, bypassed: bool = True,
                      scenes: list = None) -> str:
     """WRITE: bypass (bypassed=True) or re-enable a block at grid (row, column).
     scenes: omit to apply to the current scene, or pass up to 8 booleans for explicit
-    per-scene (A-H) bypass states."""
+    per-scene (A-H) bypass states. KNOWN LIMIT: per-scene bypass is verified on
+    drive/amp blocks but is a SILENT NO-OP on Delay blocks (e.g. Analog Delay 6001;
+    likely a different bypass path for trails-capable blocks) — for delays,
+    scene-control the MIX param instead (0 = off; also preserves trails)."""
     _conn().set_block_bypass(row, column, bypassed=bypassed, scenes=scenes)
     state = "bypassed" if (bypassed and scenes is None) else ("per-scene" if scenes else "enabled")
     return f"Block at row{row} col{column} -> {state}."
@@ -464,9 +738,27 @@ def clear_grid() -> str:
 
 @mcp.tool()
 def save_preset(name: str = "") -> str:
-    """WRITE: persist the current grid to the loaded preset slot (RecallPreset SAVE)."""
-    _conn().save_preset()
-    return f"Saved preset{(' as ' + name) if name else ''}."
+    """WRITE: persist the current working grid to the loaded slot via File CREATE (the
+    app's real Save op). Pass `name` for a new/Unsaved slot; if omitted, reuses the
+    slot's existing preset name. Does NOT use RecallPreset SAVE (that hangs an Unsaved
+    slot). To save into a DIFFERENT slot use save_preset_as."""
+    qc = _conn()
+    pos = qc.get_setlist_position() or {}
+    folder = pos.get("folder_key") or "/media/p4/Presets/My Presets"
+    idx = int(pos.get("position", 0))
+    if not name:
+        # reuse the slot's existing name: directory occupant first (authoritative),
+        # then the working preset's own name field
+        occ = _slot_occupant(folder, idx)
+        name = (occ or {}).get("name") or ""
+        if not name:
+            bp = qc.get_current_preset()
+            name = getattr(bp, "name", "") or ""
+        if not name:
+            return ("This slot is Unsaved and the working preset has no name — "
+                    "pass name= explicitly (a nameless save would create 'Untitled').")
+    qc.write_preset_file(folder, idx, name)
+    return f"Saved preset as '{name}' (pos {idx})."
 
 
 @mcp.tool()
@@ -481,23 +773,92 @@ def find_devices(query: str = "", category: str = "", limit: int = 25) -> list:
 
 
 _catalog_cache = None
+_catalog_source = None       # 'device' | 'snapshot' | 'empty' — where the cache came from
+
+
+def _snapshot_path():
+    """On-disk DIRECTORY snapshot (structure_directory output + _favorites/_counts).
+    Written by tools/gui/dump_catalog.py and refreshed here after a good live read."""
+    return os.environ.get("QC_CATALOG_JSON") or os.path.join(
+        os.path.dirname(__file__), "..", "..", "interceptor", "catalog.json")
+
+
+def _catalog_file_count(cat):
+    from . import directory
+    return sum(v["files"] for v in directory.counts(cat).values())
+
+
+def _load_snapshot():
+    import json
+    try:
+        with open(_snapshot_path()) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def _save_snapshot(cat):
+    import json
+    from . import directory
+    try:
+        out = dict(cat)
+        out.setdefault("_counts", directory.counts(cat))
+        with open(_snapshot_path(), "w") as fh:
+            json.dump(out, fh, indent=1)
+    except (OSError, TypeError):
+        pass
 
 
 def _catalog(refresh=False):
-    """Cached device DIRECTORY (presets / IRs / captures). The full stream is large
-    (thousands of captures), so cache it per session; pass refresh=True to re-pull."""
-    global _catalog_cache
-    if _catalog_cache is None or refresh:
-        _catalog_cache = _conn().list_directory()
+    """Cached device DIRECTORY (presets / IRs / captures). Prefers a live read — which
+    works in BOTH bridge and direct mode (one File READ; the device streams the whole
+    catalog in ~12s). Falls back to the on-disk snapshot if the live read is worse than
+    the snapshot (e.g. interrupted stream). A good live read refreshes the snapshot,
+    keeping it warm. Cached per session; refresh=True re-pulls."""
+    global _catalog_cache, _catalog_source
+    if _catalog_cache is not None and not refresh:
+        return _catalog_cache
+    try:
+        live = _conn().list_directory()
+    except Exception:
+        live = None
+    live_n = _catalog_file_count(live) if live else 0
+    snap = _load_snapshot()
+    snap_n = _catalog_file_count(snap) if snap else 0
+    # Bridge reads often return only a partial trickle (e.g. 0 presets, a few
+    # captures), so a nonzero count isn't enough — trust the live read only when it's
+    # at least as complete as the snapshot; otherwise use the snapshot. A good live
+    # read refreshes the snapshot, keeping it warm for later bridge sessions.
+    if live and live_n >= snap_n and live_n > 0:
+        _catalog_cache, _catalog_source = live, "device"
+        _save_snapshot(live)
+    elif snap and snap_n > 0:
+        _catalog_cache, _catalog_source = snap, "snapshot"
+    else:
+        _catalog_cache = live or {"presets": [], "irs": [], "captures": []}
+        _catalog_source = "empty"
     return _catalog_cache
+
+
+_BOOTSTRAP_HINT = (
+    "No directory snapshot yet (interceptor/catalog.json is gitignored — it holds "
+    "personal library names). Call directory_summary(refresh=True): the live listing "
+    "works in BOTH bridge and direct mode (takes ~15s — the device streams the whole "
+    "catalog) and auto-saves the snapshot. Fallback if the live read fails: "
+    "tools/gui/dump_catalog.py mines the app's own listing from the interposer log.")
 
 
 @mcp.tool()
 def directory_summary(refresh: bool = False) -> dict:
     """Counts of the on-device DIRECTORY: presets, IRs (impulse responses), and neural
-    captures, each as {folders, files}. Read-only. Cached per session."""
+    captures, each as {folders, files}. Read-only. Cached per session. If source is
+    'empty', the returned bootstrap hint explains how to (re)generate the snapshot."""
     from . import directory
-    return directory.counts(_catalog(refresh))
+    out = directory.counts(_catalog(refresh))
+    out["source"] = _catalog_source   # 'device' | 'snapshot' | 'empty'
+    if _catalog_source == "empty":
+        out["bootstrap"] = _BOOTSTRAP_HINT
+    return out
 
 
 @mcp.tool()
@@ -526,6 +887,11 @@ def list_favorites(favorites: bool = True) -> list:
     list: [{name, folder_name, setlist_key, is_factory, is_plugin}]. Load one via
     switch_preset. Read-only."""
     items = _conn().list_recents_favorites(favorites=favorites)
+    if not items:
+        # bridge read empty -> fall back to the snapshot's captured favorites/recents
+        snap = _load_snapshot() or {}
+        items = (snap.get("_favorites") or {}).get(
+            "favorites" if favorites else "recents", [])
     return [{"name": it["name"], "folder_name": it["folder_name"],
              "setlist_key": it["folder_key"], "is_factory": it["is_factory"],
              "is_plugin": it["is_plugin"]} for it in items]

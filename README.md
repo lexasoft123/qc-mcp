@@ -34,17 +34,25 @@ https://github.com/lexasoft123/qc-mcp
 
 ```bash
 git clone <your-repo-url> qc-mcp && cd qc-mcp
-python3 -m venv .venv
-./.venv/bin/pip install -e .
+./install.sh
 ```
 
-Register with Claude Code:
+`install.sh` is idempotent and does everything: creates the venv, installs the
+package (with the GUI verification extras), and registers `quad-cortex` with
+Claude Code at **user scope** — the server is then available in *every* Claude
+session, from any folder, without opening Claude in this repo. Re-run it after
+moving the repo to re-register the new path. Use `./install.sh --local` if you
+prefer the registration confined to this folder.
 
-```bash
-claude mcp add quad-cortex -- "$PWD/.venv/bin/qc-mcp"
-```
+Two notes:
+- The repo also ships a project-scope `.mcp.json`, so even without running
+  `install.sh`, opening Claude Code inside the repo offers the server (it just
+  expects `.venv` to exist — so run the installer once anyway).
+- The repo's **skills and CLAUDE.md knowledge** (routing recipes, gotchas, CPU
+  model) only load for sessions opened **inside the repo** — from other folders
+  you get raw device control without that expertise.
 
-Or in an MCP client config:
+Other MCP clients — point them at the venv binary:
 
 ```json
 { "mcpServers": { "quad-cortex": { "command": "/absolute/path/qc-mcp/.venv/bin/qc-mcp" } } }

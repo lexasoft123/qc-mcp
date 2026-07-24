@@ -85,6 +85,27 @@ Cross-check with `cpu_load` (its block list reveals duplicates / orphaned blocks
   the output row **after `mix_col`** so it processes the merged signal, not one lane. FX
   before the merge only affect that lane (why one amp ended up "dry" of the delay once).
 
+## 2b. Transparent Blend — parallel/side-chain without spending lanes
+`Transparent Blend` (hash **16013**, Utility; sibling `Plugin Blend` 16008) is a
+**single-slot** block that taps another point in the grid and blends it into the current
+slot — so you get a parallel/return path **without** consuming a splitter lane + mixer
+lane. Params (display): `SOURCE` (0–44 — picks the tap), `BLEND` 0–100 %, `OUTPUT`
+−60..+12 dB, `Delay` 0–255 (samples, for time-alignment), plus `InputChannel`/
+`StereoInput` for stereo handling.
+- **`SOURCE` is a picklist**, not a fixed enum: physical **Input 1/2/1+2**, **FX Return
+  1/2/1+2**, **USB inputs 5–8/5+6/7+8**, then **every block on the grid by position**
+  (shown as `R{row}C{col} <name>`). So it can pull the output of any block anywhere.
+- `SOURCE` can be **assigned to Scenes** (long-press in the app) — the tap point itself
+  becomes scene-varying. Verify the exact stored index by reading the block back
+  (`get_current_preset`): the list is dynamic (grid blocks are appended after the fixed
+  input/return/USB entries), so the integer depends on the current grid.
+- **Why it matters here:** it's a cleaner alternative to the jumper-row / split-the-
+  patch-fed-lane gymnastics — e.g. tap the shared pedal chain's last block into each amp
+  lane. **Untested as a full multi-amp recipe** (does BLEND=100 fully substitute the
+  lane's own input? stereo behavior?) — capture/verify on-device before trusting it for
+  a build; the lane-split recipe above is still the confirmed one. See the
+  `transparent-blend-block` memory.
+
 ## 3. I/O and stereo
 - Output "Multi Out" (`out_port=19`) is this device's main out — leave it unless told.
 - **Stereo comes from panning the lanes**, not from the output alone. Two places to pan:

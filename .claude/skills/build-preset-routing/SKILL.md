@@ -99,12 +99,23 @@ lane. Params (display): `SOURCE` (0–44 — picks the tap), `BLEND` 0–100 %, 
   becomes scene-varying. Verify the exact stored index by reading the block back
   (`get_current_preset`): the list is dynamic (grid blocks are appended after the fixed
   input/return/USB entries), so the integer depends on the current grid.
-- **Why it matters here:** it's a cleaner alternative to the jumper-row / split-the-
-  patch-fed-lane gymnastics — e.g. tap the shared pedal chain's last block into each amp
-  lane. **Untested as a full multi-amp recipe** (does BLEND=100 fully substitute the
-  lane's own input? stereo behavior?) — capture/verify on-device before trusting it for
-  a build; the lane-split recipe above is still the confirmed one. See the
-  `transparent-blend-block` memory.
+- **CONFIRMED multi-amp recipe (built & saved "4 Amp Blend", 2026-07-24):** this beats
+  the jumper/split method and enables layouts it CAN'T do — e.g. **4 amps sharing one
+  pedal**, impossible the old way (4 rows, all consumed by amps). Recipe:
+  1. Row 0: `In 1 → shared pedal(s) → amp1 → cab → out=19` (amp1 inline, normal).
+  2. Rows 1–3: `Transparent Blend(col0) → ampN → cab → out=19`, each blend
+     `BLEND=100`, `SOURCE = R1C1 <first shared pedal>`. All amps then get the same
+     post-pedal signal; pan the lanes + drop volumes (4-way sum) as usual.
+  - **Selecting a side-chain SOURCE auto-sets that lane's `in_port` to 0** — the lane is
+    fed *purely* by the blend (BLEND=100 = 100% source), so you don't wire its input.
+    Confirmed by read-back (in=0) + the on-screen side-chain taps + signal on the meter.
+  - **`SOURCE` is fiddly to set programmatically** (the stored value is not a clean list
+    index; a linear display write lands on the wrong entry — `SOURCE=12`→"Input 1/2").
+    Robust method: set ONE blend's source via the app dropdown, read its stored value
+    back, then replicate that exact value to the other blends (worked here: display 38.5
+    = R1C1 Myth Drive, same for all three since the pedal shares a list position). Verify
+    each in the app (the block editor shows the resolved source name). See the
+    `transparent-blend-block` memory.
 
 ## 3. I/O and stereo
 - Output "Multi Out" (`out_port=19`) is this device's main out — leave it unless told.

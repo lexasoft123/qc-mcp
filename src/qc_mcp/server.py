@@ -395,19 +395,30 @@ def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Pr
     return {"loaded": bool(bp), "preset": _preset_summary(bp) if bp else None}
 
 
-# Performance-mode id map (Mode(14)), captured live. Ids 0-8:
+# Performance-mode id map (Mode(14)) — FULLY captured live, ids 0-8.
 #   BASE:   0=Preset, 1=Scene, 2=Stomp.
-#   HYBRID: 3-8 = the 3 pairings x 2 row-orders (top A-D / bottom E-H). The row order
-#           is baked into the id (each order = its own id; not a bitmask of the bases).
-#   Confirmed:  3=Preset/Scene, 5=Scene/Preset, 6=Scene/Stomp, 8=Stomp/Scene.
-#   Inferred (unobserved): 4 & 7 = the Preset/Stomp pair (the only untested pairing).
-MODES = {"preset": 0, "scene": 1, "stomp": 2,
-         "hybrid": 6, "scene+stomp": 6, "scene/stomp": 6, "stomp+scene": 8, "stomp/scene": 8,
-         "preset+scene": 3, "preset/scene": 3, "scene+preset": 5, "scene/preset": 5}
+#   HYBRID: 3-8 = a "top row A-D / bottom row E-H" pairing of two base modes. The row
+#           order is part of the id, following id = 3 + 2*top + bottom_rank (bottom_rank
+#           = 0/1 = which of the two OTHER base modes sits on the bottom, lower id first):
+#             3=Preset/Scene 4=Preset/Stomp | 5=Scene/Preset 6=Scene/Stomp |
+#             7=Stomp/Preset 8=Stomp/Scene.  A hybrid always combines exactly 2 modes
+#           (one per footswitch row). All nine ids verified on-device.
+_BASE = {"preset": 0, "scene": 1, "stomp": 2}
+MODES = dict(_BASE, hybrid=6,
+             **{f"{a}+{b}": v for a, b, v in (
+                 ("preset", "scene", 3), ("preset", "stomp", 4),
+                 ("scene", "preset", 5), ("scene", "stomp", 6),
+                 ("stomp", "preset", 7), ("stomp", "scene", 8))},
+             **{f"{a}/{b}": v for a, b, v in (
+                 ("preset", "scene", 3), ("preset", "stomp", 4),
+                 ("scene", "preset", 5), ("scene", "stomp", 6),
+                 ("stomp", "preset", 7), ("stomp", "scene", 8))})
 MODE_NAMES = {0: "Preset", 1: "Scene", 2: "Stomp",
               3: "Preset+Scene Hybrid (Preset top A-D / Scene bottom E-H)",
+              4: "Preset+Stomp Hybrid (Preset top A-D / Stomp bottom E-H)",
               5: "Scene+Preset Hybrid (Scene top A-D / Preset bottom E-H)",
               6: "Scene+Stomp Hybrid (Scene top A-D / Stomp bottom E-H)",
+              7: "Stomp+Preset Hybrid (Stomp top A-D / Preset bottom E-H)",
               8: "Stomp+Scene Hybrid (Stomp top A-D / Scene bottom E-H)"}
 
 

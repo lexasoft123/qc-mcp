@@ -731,10 +731,12 @@ class QuadCortex:
             m.is_factory = is_factory
         self.send("SetlistPosition", m)
 
-    def list_directory(self, timeout_ms=8000, quiet_ms=700):
+    def list_directory(self, timeout_ms=30000, quiet_ms=1500):
         """Send a File READ and collect the full stream of File UPDATE folder
         messages the device emits (presets, IRs, captures). Returns the structured
-        catalog from directory.structure_directory(). Read-only."""
+        catalog from directory.structure_directory(). Read-only. Works in BRIDGE
+        mode too (verified: the full ~400-message stream arrives in ~12s — hence
+        the generous default window; the app's own boot listing is the same READ)."""
         from . import directory as _dir
         cls = P.message_class("File")
         m = cls(action=P.ACTION["READ"])

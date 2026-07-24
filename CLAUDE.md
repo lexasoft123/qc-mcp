@@ -64,12 +64,12 @@ Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
   `out=16`(mix bus); split `{split_col,mix_col}` is **1→2** (nest for 3+ amps via a relay
   row). Split **after** shared blocks (`split_col` = first non-shared column). Post-merge
   FX go **after `mix_col`**. Stereo = **pan branch lanes** (LaneOutputControl PAN=idx 1;
-  0=L,.5=C,1=R) — not the output row. Directory catalog falls back to
-  `interceptor/catalog.json` when the live read is partial (bridge). That snapshot is
-  **gitignored** (personal library names) — on a fresh clone bootstrap it: quit Cortex
-  Control + `directory_summary(refresh=True)` in direct mode (auto-saves it), or in
-  bridge mode open the app's DIRECTORY tab then `tools/gui/dump_catalog.py`. The tools
-  return this hint themselves when `source == "empty"`.
+  0=L,.5=C,1=R) — not the output row. Directory: the live listing (one `File` READ →
+  device streams the whole catalog, ~12s) **works in bridge mode too** — on a fresh
+  clone just call `directory_summary(refresh=True)`; it auto-saves the gitignored
+  `interceptor/catalog.json` snapshot (fallback for interrupted reads; the tools return
+  this hint when `source == "empty"`). `run-bridge.sh` now sets `QC_VERBOSE=1` so the
+  frame log the GUI tools need is always written.
 - **Param values are a oneof** (int/float/string); preserve the active field (`preset._pv`,
   `set_param_typed`) or string params (cab mic names, capture `file_name`, IR path) drop.
 - **Per-scene param**: assign to scenes (`params{index, scene_mode:true}`, no values), then

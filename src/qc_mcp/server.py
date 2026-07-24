@@ -695,11 +695,11 @@ def _save_snapshot(cat):
 
 
 def _catalog(refresh=False):
-    """Cached device DIRECTORY (presets / IRs / captures). Prefers a live read, but
-    that comes back empty in bridge mode (Cortex Control owns the File request/response
-    correlation, so our injected READ gets no reply). So: try the device; on an empty
-    result fall back to the on-disk snapshot. A good live read refreshes the snapshot,
-    keeping it warm for later bridge sessions. Cached per session; refresh=True re-pulls."""
+    """Cached device DIRECTORY (presets / IRs / captures). Prefers a live read — which
+    works in BOTH bridge and direct mode (one File READ; the device streams the whole
+    catalog in ~12s). Falls back to the on-disk snapshot if the live read is worse than
+    the snapshot (e.g. interrupted stream). A good live read refreshes the snapshot,
+    keeping it warm. Cached per session; refresh=True re-pulls."""
     global _catalog_cache, _catalog_source
     if _catalog_cache is not None and not refresh:
         return _catalog_cache
@@ -727,10 +727,10 @@ def _catalog(refresh=False):
 
 _BOOTSTRAP_HINT = (
     "No directory snapshot yet (interceptor/catalog.json is gitignored — it holds "
-    "personal library names). Bootstrap one: EITHER quit Cortex Control and call "
-    "directory_summary(refresh=True) in direct mode (the live read auto-saves the "
-    "snapshot), OR in bridge mode open the DIRECTORY tab in Cortex Control (so its "
-    "listing traffic is captured) then run tools/gui/dump_catalog.py.")
+    "personal library names). Call directory_summary(refresh=True): the live listing "
+    "works in BOTH bridge and direct mode (takes ~15s — the device streams the whole "
+    "catalog) and auto-saves the snapshot. Fallback if the live read fails: "
+    "tools/gui/dump_catalog.py mines the app's own listing from the interposer log.")
 
 
 @mcp.tool()

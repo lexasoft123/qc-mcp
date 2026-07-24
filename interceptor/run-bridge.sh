@@ -14,5 +14,7 @@ pkill -f "Applications/Neural DSP/Cortex Control.app" 2>/dev/null || true
 sleep 1
 
 echo "Launching instrumented Cortex Control (bridge FIFOs: /tmp/qc_inject, /tmp/qc_in)"
+echo "Frame log: $HERE/hid_log.txt (QC_VERBOSE=1 — needed by tools/gui correlation)"
 QC_INJECT=/tmp/qc_inject QC_OUT=/tmp/qc_in \
+  QC_VERBOSE=1 QC_LOG="$HERE/hid_log.txt" \
   DYLD_INSERT_LIBRARIES="$DYLIB" "$APP" "$@"

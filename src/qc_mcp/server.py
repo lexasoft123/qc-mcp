@@ -28,7 +28,27 @@ from . import protocol as P
 from . import catalog
 from .transport import QuadCortex, QCError
 
-mcp = FastMCP("quad-cortex")
+mcp = FastMCP("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
+(guitar amp modeler) over its internal USB protocol. Core workflow for building:
+
+1. connect() — asks bridge vs direct when ambiguous; bridge self-launches the app.
+2. SLOT SAFETY: never build over a named preset. If the currently open slot is
+   empty ("Unsaved") use IT (the user chose it); else list_empty_slots + recall.
+3. Build: find_devices for hashes -> build_preset (topology+params in one spec)
+   -> ALWAYS verify with get_current_preset (routing/split_points) + cpu_load
+   (<~85%; delete, don't bypass, to save CPU).
+4. Scenes A-H = per-block param/bypass snapshots. set_block_bypass(scenes=[...])
+   for drives/amps (NO-OP on delays — scene the delay MIX instead). Vary AMP
+   params per scene too (gain/master/EQ) via set_parameter_scenes. Label scenes
+   with set_preset_meta.
+5. Stereo multi-amp: pan branch lanes with set_lane_output (~0.3/0.7), drop lane
+   volumes ~0.5 so the parallel sum doesn't clip.
+6. Save: save_preset / save_preset_as (File CREATE; guarded against clobbering).
+   A success string is not proof — verify via current_preset_position + read.
+
+Deeper knowledge (routing recipes for shared-front multi-amp rigs, CPU model,
+protocol docs, GUI verification harness) lives in the qc-mcp repo — sessions
+opened in that repo load it automatically as skills/CLAUDE.md.""")
 
 _qc = None
 _lock = threading.Lock()
@@ -611,17 +631,33 @@ def list_empty_slots(setlist_key: str = "/media/p4/Presets/My Presets",
     are listed with an EMPTY name. Positions map to banks: 0-7 = 1A-1H, 8-15 = 2A-2H, …
     Read-only. NOTE `source`: 'snapshot' can be stale — a slot saved since the snapshot
     may still show empty; verify the target with current_preset_position/read if unsure."""
+    cur = None    # the slot the user has OPEN — if it's empty, it's the intended target
+    try:
+        p = _conn().get_setlist_position() or {}
+        if p.get("folder_key") == setlist_key and not p.get("is_factory"):
+            cur = int(p.get("position"))
+    except Exception:
+        pass
     cat = _catalog()
     for fo in (cat or {}).get("presets", []):
         if fo.get("key") == setlist_key:
             files = fo.get("files", [])
             present = {f.get("index") for f in files}
             free = sorted({f["index"] for f in files if not f.get("name")} |
-                          {i for i in range(256) if i not in present})[:limit]
+                          {i for i in range(256) if i not in present})
             def label(i):
                 return f"{i // 8 + 1}{'ABCDEFGH'[i % 8]}"
-            return {"setlist": setlist_key, "source": _catalog_source,
-                    "empty_positions": [{"position": i, "slot": label(i)} for i in free]}
+            out = {"setlist": setlist_key, "source": _catalog_source}
+            if cur is not None and cur in free:
+                free.remove(cur)
+                free.insert(0, cur)
+                out["recommended"] = {"position": cur, "slot": label(cur),
+                                      "why": "currently OPEN on the device and empty — "
+                                             "the user likely selected it on purpose; "
+                                             "build here (no recall needed)."}
+            out["empty_positions"] = [{"position": i, "slot": label(i)}
+                                      for i in free[:limit]]
+            return out
     out = {"error": f"folder {setlist_key!r} not in the directory catalog",
            "source": _catalog_source}
     if _catalog_source == "empty":

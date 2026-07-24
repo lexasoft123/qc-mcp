@@ -135,8 +135,11 @@ ad-hoc scripts for device control. The full toolbox:
 - **Routing / stereo:** `set_lane_routing(row, in_portid, out_portid)`,
   `set_lane_output(row, pan, volume, mute, solo)`, `add_split` (splits are also set via
   `build_preset`'s `splitter`).
-- **Scenes:** `set_parameter_scenes(row, col, index, values[8])` (assign-to-scenes + write),
-  `set_block_bypass(row, col, bypassed, scenes=[…])` (per-scene bypass), `switch_scene(0-7)`,
+- **Scenes:** `set_parameter_scenes(row, col, index, values[8])` (assign-to-scenes + write;
+  the tool confirms each scene switch via Scene READ — racing drops values). Scene the AMP
+  params too (gain ladder, lead master bump, EQ trims), not just drive bypass.
+  `set_block_bypass(row, col, bypassed, scenes=[…])` (per-scene bypass — works on drives/
+  amps, silent NO-OP on delays: scene the delay MIX instead), `switch_scene(0-7)`,
   `set_preset_meta(scene_labels=[…], scene_colors=[…])` — labels/colors go over dedicated
   SceneLabel/SceneColor ops (verified); scenes with data but no label show "Undefined".
   Preset `name` is NOT settable live — it's set by the save op (pass it to save_preset/_as).

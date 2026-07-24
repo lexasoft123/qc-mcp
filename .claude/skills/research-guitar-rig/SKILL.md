@@ -134,6 +134,19 @@ there's a high-gain part. That list becomes the scene map.
   on the block's **bypass param (index 4)**; `set_block_bypass(..., scenes=[...])`.
 - **Per-scene volume** for a lead bump: assign the amp's level or the lane output VOLUME to
   scenes and raise it on the lead scene.
+- **Don't stop at bypass toggles — scene the AMP and FX params themselves.** Bypass alone
+  gives on/off tones; the artist's palette usually needs the amp to *move* between scenes.
+  Typical per-scene param moves (via `set_parameter_scenes(row, col, param_index,
+  values[8], device_hash)`), values per scene A..H:
+  | param | Clean | Crunch | Lead | why |
+  |---|---|---|---|---|
+  | amp GAIN/VOLUME | 3 | 4.5 | 5–6 | breakup ladder from one amp |
+  | amp MASTER / lane VOLUME | ref | ref | +1–2 dB | the solo cuts through |
+  | amp TREBLE/PRESENCE | ref | ref | −0.5–1 | tame fizz as gain rises |
+  | delay/reverb MIX | low/0 | low | up (15–25%) | wetter leads (also the delay
+  on/off mechanism — see below) |
+- **Delay blocks: per-scene BYPASS is a silent no-op** (trails-capable blocks) — scene the
+  delay's **MIX** instead (0 = off; nicer too: trails ring out across the switch).
 - Name/color scenes for the tones; `switch_scene(0–7)` = A–H. Verify by switching scenes and
   reading back the per-scene values.
 

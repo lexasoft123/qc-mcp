@@ -38,7 +38,13 @@ python3 -m venv .venv
 ./.venv/bin/pip install -e .
 ```
 
-Register with Claude Code:
+**Claude Code registers automatically:** the repo ships a project-scope `.mcp.json`,
+so opening Claude Code **inside this folder** offers the `quad-cortex` server on first
+use — just approve it. (Sessions started in other folders won't see the server, the
+skills, or CLAUDE.md — always work from the repo root.) For the optional GUI
+verification harness install `pip install -e '.[gui]'` instead.
+
+Manual registration (other MCP clients, or if you prefer explicit scope):
 
 ```bash
 claude mcp add quad-cortex -- "$PWD/.venv/bin/qc-mcp"

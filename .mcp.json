@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "quad-cortex": {
+      "type": "stdio",
+      "command": ".venv/bin/qc-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}

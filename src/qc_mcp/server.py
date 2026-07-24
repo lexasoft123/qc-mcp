@@ -684,7 +684,10 @@ def set_block_bypass(row: int, column: int, bypassed: bool = True,
                      scenes: list = None) -> str:
     """WRITE: bypass (bypassed=True) or re-enable a block at grid (row, column).
     scenes: omit to apply to the current scene, or pass up to 8 booleans for explicit
-    per-scene (A-H) bypass states."""
+    per-scene (A-H) bypass states. KNOWN LIMIT: per-scene bypass is verified on
+    drive/amp blocks but is a SILENT NO-OP on Delay blocks (e.g. Analog Delay 6001;
+    likely a different bypass path for trails-capable blocks) — for delays,
+    scene-control the MIX param instead (0 = off; also preserves trails)."""
     _conn().set_block_bypass(row, column, bypassed=bypassed, scenes=scenes)
     state = "bypassed" if (bypassed and scenes is None) else ("per-scene" if scenes else "enabled")
     return f"Block at row{row} col{column} -> {state}."

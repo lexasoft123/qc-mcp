@@ -600,20 +600,34 @@ class QuadCortex:
         p.param_values.add().float_value = float(value)
         self.send("Grid", g)
 
+    def _await_scene(self, scene, timeout_s=2.0):
+        """Block until the device reports `scene` active (Scene READ). Racing a plain
+        param write against an un-settled scene switch lands the value on the WRONG
+        scene — found live when a batch scene write dropped a value."""
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            st = self.read_state("Scene", timeout_ms=600)
+            if st is not None and int(getattr(st, "selected_scene", -1)) == int(scene):
+                return True
+            time.sleep(0.05)
+        return False
+
     def set_param_scenes(self, row, column, param_index, values):
         """Set a param's per-scene values (up to 8, scenes A-H). Verified sequence
         (reversed from Cortex Control): assign the param to scenes, then for each scene
         make it active and write its value (the device routes a plain write to the
-        active scene). Restores scene A afterward."""
+        active scene). Each switch is CONFIRMED via Scene READ before writing — a fixed
+        sleep raced the device and dropped values. Restores scene A afterward."""
         vals = list(values)[:8]
         self.assign_param_to_scenes(row, column, param_index)
         time.sleep(0.05)
         for scene, v in enumerate(vals):
             self.set_scene(scene)
-            time.sleep(0.04)
+            self._await_scene(scene)
             self._write_active_scene_param(row, column, param_index, v)
             time.sleep(0.04)
         self.set_scene(0)
+        self._await_scene(0)
 
     # Neural Capture block model ids (Neural Capture catalog category).
     CAPTURE_V1 = 14000

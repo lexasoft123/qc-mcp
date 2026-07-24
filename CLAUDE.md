@@ -79,6 +79,10 @@ Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
 - **Per-scene param**: assign to scenes (`params{index, scene_mode:true}`, no values), then
   per scene set active scene + write a plain value — it lands on the active scene.
 - **Per-scene bypass** = the same, on the block's **bypass param (index 4)** (1.0=bypassed).
+  Verified on drives/amps; **silent no-op on Delay blocks** (trails-capable → different
+  bypass path? pending a capture of the app's toggle) — scene the delay's **MIX** instead
+  (0=off, preserves trails). And **scene switches must be confirmed** (Scene READ) before
+  writing a scene value — a fixed sleep races the device and drops values (`_await_scene`).
 - **Scene labels/colors = dedicated `SceneLabel`(23)/`SceneColor`(48) UPDATEs** `{index,
   label|color}` — a Grid UPDATE with preset-level `scene_labels[]` is a silent no-op.
   Preset **name** is set by the save (File CREATE), not settable on the live grid.

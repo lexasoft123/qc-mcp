@@ -395,21 +395,65 @@ def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Pr
     return {"loaded": bool(bp), "preset": _preset_summary(bp) if bp else None}
 
 
-# Performance-mode id map (confirmed live: 0=Preset, 6=Hybrid; Scene/Stomp TBD).
-MODES = {"preset": 0, "hybrid": 6}
-MODE_NAMES = {v: k for k, v in MODES.items()}
+# Performance-mode id map. Confirmed live via Mode(14): 0=Preset, 6=Scene+Stomp
+# Hybrid (top row A-D=Scene, bottom E-H=Stomp). Base Scene/Stomp-only + other
+# Hybrid pairings exist on the device but their ids aren't captured yet.
+MODES = {"preset": 0, "hybrid": 6, "scene+stomp": 6}
+MODE_NAMES = {0: "Preset", 6: "Scene+Stomp Hybrid"}
 
 
 @mcp.tool()
-def switch_mode(mode) -> str:
-    """WRITE: set the performance mode (footswitch behavior). Accepts a name
-    ('preset', 'hybrid') or a raw numeric id. Confirmed on this unit: 0=Preset,
-    6=Hybrid. A preset only allows the modes in its available_modes list."""
+def get_mode() -> dict:
+    """Read the current performance mode (footswitch behavior) and the mode cycle.
+    Mode(14) READ. Returns {mode, mode_name, available_modes:[ids], cycle:[names]} —
+    `available_modes` is the Preset/Scene/Stomp/Hybrid cycle the device steps through
+    (BANK DOWN+TEMPO on the unit). Read-only. Ids: 0=Preset, 6=Scene+Stomp Hybrid."""
+    m = _conn().read_state("Mode", timeout_ms=3000)
+    if m is None:
+        return {"note": "no Mode reply"}
+    avail = [int(x) for x in m.available_modes.modes] if m.HasField("available_modes") else []
+    return {"mode": int(m.mode), "mode_name": MODE_NAMES.get(int(m.mode), f"#{m.mode}"),
+            "available_modes": avail,
+            "cycle": [MODE_NAMES.get(i, f"#{i}") for i in avail]}
+
+
+@mcp.tool()
+def switch_mode(mode) -> dict:
+    """WRITE: set the active performance mode (footswitch behavior). Accepts a name
+    ('preset', 'hybrid'/'scene+stomp') or a raw numeric id. Mode(14) UPDATE {mode};
+    the device echoes it. The target must be in the preset's available_modes cycle
+    (see get_mode) — switching to an unavailable mode is refused. Confirmed ids:
+    0=Preset, 6=Scene+Stomp Hybrid."""
     mid = MODES.get(str(mode).lower()) if not isinstance(mode, int) else mode
     if mid is None:
-        return f"Unknown mode {mode!r}. Known: {list(MODES)} (or a numeric id)."
-    _conn().set_mode(mid)
-    return f"Set mode {mid} ({MODE_NAMES.get(mid, '?')})."
+        return {"error": f"unknown mode {mode!r}. Known: {sorted(set(MODES))} or an id."}
+    qc = _conn()
+    avail = []
+    cur = qc.read_state("Mode", timeout_ms=2000)
+    if cur is not None and cur.HasField("available_modes"):
+        avail = [int(x) for x in cur.available_modes.modes]
+    if avail and mid not in avail:
+        return {"error": f"mode {mid} not in this preset's cycle {avail} — set the "
+                         "cycle first with set_mode_cycle(...)."}
+    qc.set_mode(mid)
+    return {"mode": mid, "mode_name": MODE_NAMES.get(mid, f"#{mid}")}
+
+
+@mcp.tool()
+def set_mode_cycle(modes: list) -> dict:
+    """WRITE: set which performance modes the footswitch cycle steps through
+    (Modes Configuration). Mode(14) UPDATE {available_modes{modes:[...]}}; e.g.
+    [0, 6] = Preset <-> Scene+Stomp Hybrid. Accepts names or ids. Does not change the
+    active mode (call switch_mode after). Ids: 0=Preset, 6=Scene+Stomp Hybrid."""
+    ids = []
+    for x in modes:
+        v = MODES.get(str(x).lower()) if not isinstance(x, int) else x
+        if v is None:
+            return {"error": f"unknown mode {x!r} in {modes}."}
+        ids.append(v)
+    _conn().set_mode_cycle(ids)
+    return {"available_modes": ids,
+            "cycle": [MODE_NAMES.get(i, f"#{i}") for i in ids]}
 
 
 @mcp.tool()

@@ -519,8 +519,19 @@ class QuadCortex:
         self.send("Scene", m)
 
     def set_mode(self, mode):
+        """Set the active performance mode: Mode(14) UPDATE {mode} (device echoes)."""
         m = P.message_class("Mode")(action=P.ACTION["UPDATE"],
                                     request_id=self.next_request_id(), mode=int(mode))
+        self.send("Mode", m)
+
+    def set_mode_cycle(self, mode_ids):
+        """Set the footswitch mode cycle: Mode(14) UPDATE {available_modes{modes[]}}
+        (captured from Cortex Control's Modes Configuration). Does not change the
+        active mode."""
+        m = P.message_class("Mode")(action=P.ACTION["UPDATE"],
+                                    request_id=self.next_request_id())
+        for i in mode_ids:
+            m.available_modes.modes.append(int(i))
         self.send("Mode", m)
 
     def set_scene_label(self, index, label):

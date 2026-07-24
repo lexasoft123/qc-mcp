@@ -36,7 +36,10 @@ Cross-check with `cpu_load` (its block list reveals duplicates / orphaned blocks
 - **Parallel split** — `split_control_points {split, mix}` per row (in `build_preset`:
   `"splitter":{"split_col":S,"mix_col":M}`). `split=S` branches the signal **before the
   block at column S**; `mix=M` merges the branch back at column M. `(-1,-1)` = none.
-  **A split is 1→2 only.**
+  **A split is 1→2 only.** The underlying law (per the official manual): **rows 1&3 are
+  "Path A", rows 2&4 are "Path B"; splitters only route Path A → Path B.** That's WHY a
+  branch (Path B) row can't host its own split (rejected), while row 3 — even when
+  patch-fed via in=7 — CAN split (it's Path A).
 - **Read-vs-delta indexing:** in a full READ, row = chain-array index, column =
   models-array index, param index = params-array index (the `.row/.column/.index`
   *fields* are 0 there). In edits you set those fields explicitly.

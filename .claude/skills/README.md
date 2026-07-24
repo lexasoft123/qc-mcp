@@ -25,6 +25,22 @@ Rough order you'd apply them in a new protocol effort:
 7. **macho-string-xref** — read specific code paths (framing/CRC) via capstone when you
    need to *confirm* an algorithm; prefer capture over hand-decoding state machines.
 
+## Operational skills (using the device, not reversing it)
+- **research-guitar-rig** — research an artist's rig from the web (where to search, what to
+  extract) and translate it to QC amp/cab/pedal models with correct settings, incl. the
+  artist's tone palette as **Scenes** (clean/crunch/lead/heavy/ambient). Front half of a
+  "sound like X" build; pairs with build-preset-routing.
+- **build-preset-routing** — build presets with correct grid routing, I/O, and
+  multi-amp/parallel/shared-front topologies, and verify them (read back split_points +
+  screenshot + cpu_load). Covers the split rules, panning/stereo, and the bridge
+  reliability (O_RDWR reader, request_id matching) that makes live building work.
+- **optimize-preset-cpu** — read the QC's per-block/per-core DSP load (`cpu_load`) and
+  reduce a preset's CPU under the ~90% ceiling (delete≠bypass, de-dup parallel lanes,
+  mono vs stereo, core balance). See `../../docs/CPU.md`.
+- **review-preset** — comprehensively audit a preset before saving/shipping: signal
+  integrity/routing, I/O, gain-staging/clipping, stereo, CPU, model/cab choices, param/tone
+  sanity, scenes, metadata, and faithfulness. Grounded checklist → findings by severity.
+
 Supporting tools referenced by the skills live in `../../tools/` and
 `../../interceptor/`.
 

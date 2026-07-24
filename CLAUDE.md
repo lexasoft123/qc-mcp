@@ -44,14 +44,37 @@ Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
 - **Read vs delta indexing**: in a full read, array *position* is the index; the id/
   column/index *fields* are 0. In edits, set the fields. `apply_spec` uses position.
 - **Grid whole-preset UPDATE merges** (doesn't replace) — build incrementally / clear first.
-- **Bridge `get_current_preset` (a READ) is flaky/empty** after multi-block builds — the
-  device *pushes* the full grid on **recall**; listen for that, or use `QC_BRIDGE=0`
-  (direct mode, CC quit) for reliable read-back in tests.
+  And **`clear_grid` needs working reads** (it deletes what it reads); if reads are dead it
+  clears nothing and the next build merges onto stale state (ghost/duplicate blocks).
+- **Bridge reads are reliable now** (were flaky). Fixed in `bridge.py`/`transport.py`:
+  out FIFO is **O_RDWR** (reader never hits EOF when the app blinks) + **self-healing**
+  reader thread; reads correlate on **`request_id`** (device echoes it; our ids use a high
+  base to dodge the app's). Streamed telemetry (CPULoad) is `request_id=0` broadcast → take
+  the **latest**, not the first buffered. If a session goes stale, `disconnect`→`connect`
+  revives it (`get_current_preset` also auto-reconnects+retries once).
+- **Saving = File CREATE, never RecallPreset SAVE.** The app saves via `File{action=CREATE,
+  folder{key, files{index=<position>, name}}}` (cmd 4, **no** preset_payload — device commits
+  its live working grid). *RecallPreset UPDATE reason=SAVE* **hangs the device** on an empty/
+  Unsaved slot (needs a reboot). `save_preset`/`save_preset_as` now both use File CREATE.
+  Success string ≠ commit: verify via `current_preset_position` + app header name w/o `*`.
+- **`add_block` de-dupes**: re-adding a hash already on that row is a no-op — to move a
+  block, delete first (or use a different hash). Verify every build (read `split_points` +
+  screenshot); orphaned amps still draw CPU but make no sound.
+- **Routing/parallel** (see `build-preset-routing` skill): `in=1`/`out=19`(Multi Out)/
+  `out=16`(mix bus); split `{split_col,mix_col}` is **1→2** (nest for 3+ amps via a relay
+  row). Split **after** shared blocks (`split_col` = first non-shared column). Post-merge
+  FX go **after `mix_col`**. Stereo = **pan branch lanes** (LaneOutputControl PAN=idx 1;
+  0=L,.5=C,1=R) — not the output row. Directory catalog falls back to
+  `interceptor/catalog.json` when the live read is partial (bridge).
 - **Param values are a oneof** (int/float/string); preserve the active field (`preset._pv`,
   `set_param_typed`) or string params (cab mic names, capture `file_name`, IR path) drop.
 - **Per-scene param**: assign to scenes (`params{index, scene_mode:true}`, no values), then
   per scene set active scene + write a plain value — it lands on the active scene.
 - **Per-scene bypass** = the same, on the block's **bypass param (index 4)** (1.0=bypassed).
+- **Scene labels/colors = dedicated `SceneLabel`(23)/`SceneColor`(48) UPDATEs** `{index,
+  label|color}` — a Grid UPDATE with preset-level `scene_labels[]` is a silent no-op.
+  Preset **name** is set by the save (File CREATE), not settable on the live grid.
+  Unlabeled scenes with data show "Undefined" on-device.
 - **Captures**: block hash 14000(V1)/14001(V2) + param[5] `file_name`=`<64hex key><name>`;
   also list the key in the preset's `factory_/product_dependencies`.
 - **Loading Downloads/Plugin presets** uses `key_in_downloads` (cloud_id) / plugin key, not

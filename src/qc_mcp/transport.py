@@ -27,7 +27,11 @@ class QuadCortex:
         else:
             self.io = IOHIDTransport(seize=True)
         self._rx = P.Reassembler()
-        self._req_id = 100
+        # High, distinctive base so our request_ids never collide with Cortex
+        # Control's (small, incrementing) ids when sharing its session in bridge mode.
+        # The device echoes request_id in solicited replies, so we match on it to
+        # reject stale/buffered responses and the app's own traffic.
+        self._req_id = 0x51C_00000    # "QC" — arbitrary high base
         self._session_id = session_id
         self._pending = []  # decoded (cmd, obj, raw) not yet consumed
         self._send_lock = threading.Lock()
@@ -161,6 +165,10 @@ class QuadCortex:
         want = command if isinstance(command, int) else P.NAME_TO_CMD[command]
         if expect is not None:
             want = expect if isinstance(expect, int) else P.NAME_TO_CMD[expect]
+        # The device echoes request_id; match it to reject stale/buffered replies and
+        # (in bridge mode) Cortex Control's own responses. Fall back to a command match
+        # only if nothing with our id arrives (some message types may not echo it).
+        exp_rid = int(getattr(proto_message, "request_id", 0) or 0) if proto_message is not None else 0
         self.send(command, proto_message, proto_bytes)
         deadline = time.time() + timeout_ms / 1000.0
         # prefer a response whose protobuf actually decodes (skip bare READ acks)
@@ -170,9 +178,14 @@ class QuadCortex:
             keep = []
             for cmd, obj, raw, pb in self._pending:
                 if cmd == want:
-                    if obj is not None and len(pb) > 2:
+                    rid = int(getattr(obj, "request_id", 0) or 0) if obj is not None else 0
+                    if exp_rid and rid == exp_rid and obj is not None and len(pb) > 2:
+                        self._pending = keep + [t for t in self._pending
+                                                if t is not (cmd, obj, raw, pb)]
                         return cmd, obj, raw
-                    best = (cmd, obj, raw)
+                    if not exp_rid and obj is not None and len(pb) > 2:
+                        return cmd, obj, raw
+                    best = best or (cmd, obj, raw)   # fallback: right command, id absent/mismatched
                 else:
                     keep.append((cmd, obj, raw, pb))
             self._pending = keep
@@ -212,21 +225,45 @@ class QuadCortex:
     def get_current_preset(self, timeout_ms=6000):
         """Read the full currently-loaded preset (BinaryPreset) from the device,
         the way Cortex Control does on boot. Requires the heartbeat (started in
-        open()). Returns the BinaryPreset or None."""
+        open()). Returns the BinaryPreset or None. In bridge mode, an empty result
+        can mean a stale reader connection, so we reopen the bridge and retry once."""
+        bp = self._read_preset_once(timeout_ms)
+        if bp is None and self.bridge:
+            self.reconnect()
+            bp = self._read_preset_once(timeout_ms)
+        return bp
+
+    def _read_preset_once(self, timeout_ms):
         cls = P.message_class("RecallPreset")
         m = cls(action=P.ACTION["READ"])
+        rid = None
         if "request_id" in [f.name for f in cls.DESCRIPTOR.fields]:
-            m.request_id = self.next_request_id()
+            rid = self.next_request_id()
+            m.request_id = rid
+        want = P.NAME_TO_CMD["RecallPreset"]
         self.send("RecallPreset", m)
         deadline = time.time() + timeout_ms / 1000.0
         while time.time() < deadline:
             self._collect(0.15)
             for cmd, obj, raw, pb in list(self._pending):
-                if cmd == P.NAME_TO_CMD["RecallPreset"] and obj is not None \
-                        and obj.HasField("preset") and len(obj.preset.chains):
+                # match our request_id so a buffered/older push or the app's own
+                # recall echo can't be mistaken for the response to THIS read.
+                if cmd == want and obj is not None and obj.HasField("preset") \
+                        and len(obj.preset.chains) \
+                        and (rid is None or int(getattr(obj, "request_id", 0) or 0) == rid):
                     self._pending.remove((cmd, obj, raw, pb))
                     return obj.preset
         return None
+
+    def reconnect(self):
+        """Recover a stale connection in place. In bridge mode this reopens the
+        FIFO reader/writer (fixing a dead reader thread after the app restarted or
+        the connection aged out) without tearing down the session."""
+        reopen = getattr(self.io, "reopen", None)
+        if callable(reopen):
+            reopen()
+            self._rx = P.Reassembler()   # drop any half-decoded frame from before
+            self._pending = []
 
     def clear_grid(self):
         """Delete every block in the current grid (rows = chain index, columns =
@@ -414,14 +451,20 @@ class QuadCortex:
             "cortex_protobuf_v2.RecallPresetReason.Enum").values_by_name[reason].number
         self.send("RecallPreset", m)
 
-    def write_preset_file(self, binary_preset, folder_key, name):
-        """Create a preset file in a folder via FileMessage CREATE preset_payload."""
+    def write_preset_file(self, folder_key, position, name, binary_preset=None):
+        """Save the current WORKING preset to a setlist slot via File CREATE — exactly
+        how Cortex Control's Save works (decoded from the wire): File{action=CREATE,
+        folder{key, files{index=<position>, name}}} and **no preset_payload**. The
+        device commits its live working grid to <folder>/<name>.pb at <position>. Do NOT
+        use RecallPreset SAVE for this (it hangs on an empty/Unsaved slot). binary_preset
+        is accepted for back-compat but intentionally NOT sent (the app sends none)."""
         f = P.message_class("File")()
         f.action = P.ACTION["CREATE"]
         f.request_id = self.next_request_id()
-        f.preset_payload.CopyFrom(binary_preset)
-        binary_preset.name = name
         f.folder.key = folder_key
+        fi = f.folder.files.add()
+        fi.index = int(position)
+        fi.name = name
         self.send("File", f)
 
     def read_message(self, command, timeout_ms=4000):
@@ -479,6 +522,52 @@ class QuadCortex:
         m = P.message_class("Mode")(action=P.ACTION["UPDATE"],
                                     request_id=self.next_request_id(), mode=int(mode))
         self.send("Mode", m)
+
+    def set_scene_label(self, index, label):
+        """Label scene index (0-7 = A-H) on the LIVE preset. Verified wire op (captured
+        from Cortex Control's scene rename): SceneLabel(23) UPDATE {index, label}. A
+        Grid UPDATE carrying preset-level scene_labels is silently IGNORED — don't."""
+        m = P.message_class("SceneLabel")(action=P.ACTION["UPDATE"],
+                                          request_id=self.next_request_id(),
+                                          index=int(index), label=str(label))
+        self.send("SceneLabel", m)
+
+    def set_scene_color(self, index, color):
+        """Color scene index (0-7). Verified: SceneColor(48) UPDATE {index, color}
+        (color = ARGB int; the app auto-sends one alongside each label)."""
+        m = P.message_class("SceneColor")(action=P.ACTION["UPDATE"],
+                                          request_id=self.next_request_id(),
+                                          index=int(index), color=int(color))
+        self.send("SceneColor", m)
+
+    def set_preset_meta(self, name=None, tempo=None, default_scene=None,
+                        scene_labels=None, scene_colors=None):
+        """Set preset-level metadata on the live preset.
+        VERIFIED paths: scene_labels/scene_colors -> dedicated SceneLabel(23)/
+        SceneColor(48) UPDATEs (a Grid UPDATE with these preset fields is a silent
+        no-op — confirmed live). `name` CANNOT be set on the live grid at all: preset
+        names live on the preset FILE and are set by the save op (write_preset_file) —
+        it is ignored here. tempo/default_scene still go via Grid UPDATE (unverified —
+        never observed working; treat as best-effort)."""
+        if scene_labels is not None:
+            for i, lbl in enumerate(list(scene_labels)[:8]):
+                if lbl is not None:
+                    self.set_scene_label(i, lbl)
+                    time.sleep(0.03)
+        if scene_colors is not None:
+            for i, c in enumerate(list(scene_colors)[:8]):
+                if c is not None:
+                    self.set_scene_color(i, c)
+                    time.sleep(0.03)
+        if tempo is not None or default_scene is not None:
+            g = P.message_class("Grid")()
+            g.action = P.ACTION["UPDATE"]
+            g.request_id = self.next_request_id()
+            if tempo is not None:
+                g.preset.tempo = int(tempo)
+            if default_scene is not None:
+                g.preset.default_scene = int(default_scene)
+            self.send("Grid", g)
 
     def assign_param_to_scenes(self, row, column, param_index):
         """Make a param scene-varying — the "Assign to Scenes" right-click action in

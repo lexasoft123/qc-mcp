@@ -546,8 +546,11 @@ def list_empty_slots(setlist_key: str = "/media/p4/Presets/My Presets",
                 return f"{i // 8 + 1}{'ABCDEFGH'[i % 8]}"
             return {"setlist": setlist_key, "source": _catalog_source,
                     "empty_positions": [{"position": i, "slot": label(i)} for i in free]}
-    return {"error": f"folder {setlist_key!r} not in the directory catalog",
-            "source": _catalog_source}
+    out = {"error": f"folder {setlist_key!r} not in the directory catalog",
+           "source": _catalog_source}
+    if _catalog_source == "empty":
+        out["bootstrap"] = _BOOTSTRAP_HINT
+    return out
 
 
 @mcp.tool()
@@ -722,13 +725,24 @@ def _catalog(refresh=False):
     return _catalog_cache
 
 
+_BOOTSTRAP_HINT = (
+    "No directory snapshot yet (interceptor/catalog.json is gitignored — it holds "
+    "personal library names). Bootstrap one: EITHER quit Cortex Control and call "
+    "directory_summary(refresh=True) in direct mode (the live read auto-saves the "
+    "snapshot), OR in bridge mode open the DIRECTORY tab in Cortex Control (so its "
+    "listing traffic is captured) then run tools/gui/dump_catalog.py.")
+
+
 @mcp.tool()
 def directory_summary(refresh: bool = False) -> dict:
     """Counts of the on-device DIRECTORY: presets, IRs (impulse responses), and neural
-    captures, each as {folders, files}. Read-only. Cached per session."""
+    captures, each as {folders, files}. Read-only. Cached per session. If source is
+    'empty', the returned bootstrap hint explains how to (re)generate the snapshot."""
     from . import directory
     out = directory.counts(_catalog(refresh))
     out["source"] = _catalog_source   # 'device' | 'snapshot' | 'empty'
+    if _catalog_source == "empty":
+        out["bootstrap"] = _BOOTSTRAP_HINT
     return out
 
 

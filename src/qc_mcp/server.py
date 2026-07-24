@@ -395,16 +395,18 @@ def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Pr
     return {"loaded": bool(bp), "preset": _preset_summary(bp) if bp else None}
 
 
-# Performance-mode id map, all confirmed live via Mode(14):
-#   0=Preset, 1=Scene, 2=Stomp (the three base modes);
-#   6=Scene+Stomp hybrid (Scene top A-D / Stomp bottom E-H),
-#   8=Stomp+Scene hybrid (the swapped-row layout).
-# The hybrid's row order is baked into the id (6 vs 8); the ids are NOT a bitmask of
-# the base modes (6,8 don't derive from 1|2). Gig-View / other hybrid ids uncaptured.
-MODES = {"preset": 0, "scene": 1, "stomp": 2, "hybrid": 6,
-         "scene+stomp": 6, "scene/stomp": 6,
-         "stomp+scene": 8, "stomp/scene": 8}
+# Performance-mode id map (Mode(14)), captured live. Ids 0-8:
+#   BASE:   0=Preset, 1=Scene, 2=Stomp.
+#   HYBRID: 3-8 = the 3 pairings x 2 row-orders (top A-D / bottom E-H). The row order
+#           is baked into the id (each order = its own id; not a bitmask of the bases).
+#   Confirmed:  3=Preset/Scene, 5=Scene/Preset, 6=Scene/Stomp, 8=Stomp/Scene.
+#   Inferred (unobserved): 4 & 7 = the Preset/Stomp pair (the only untested pairing).
+MODES = {"preset": 0, "scene": 1, "stomp": 2,
+         "hybrid": 6, "scene+stomp": 6, "scene/stomp": 6, "stomp+scene": 8, "stomp/scene": 8,
+         "preset+scene": 3, "preset/scene": 3, "scene+preset": 5, "scene/preset": 5}
 MODE_NAMES = {0: "Preset", 1: "Scene", 2: "Stomp",
+              3: "Preset+Scene Hybrid (Preset top A-D / Scene bottom E-H)",
+              5: "Scene+Preset Hybrid (Scene top A-D / Preset bottom E-H)",
               6: "Scene+Stomp Hybrid (Scene top A-D / Stomp bottom E-H)",
               8: "Stomp+Scene Hybrid (Stomp top A-D / Scene bottom E-H)"}
 

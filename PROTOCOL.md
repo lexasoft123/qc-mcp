@@ -249,12 +249,14 @@ The full DIRECTORY (presets + neural captures + IRs) is reversed in **docs/DIREC
     Must be in `available_modes` or it's refused. MCP `switch_mode`, `transport.set_mode`.
   - **Set the cycle** (Modes Configuration): `Mode` UPDATE
     `{ available_modes{ modes:[...] } }`. MCP `set_mode_cycle`, `transport.set_mode_cycle`.
-- **Confirmed ids** (all captured live): `0 = Preset`, `1 = Scene`, `2 = Stomp` (the
-  three base modes, seen as cycle `{0,1,2}`); `6 = Scene+Stomp Hybrid` (top A–D =
-  Scene, bottom E–H = Stomp); `8 = the swapped hybrid` (Stomp top, Scene bottom).
-  **The hybrid's row order is encoded in the id** — the app's ⇅ swap toggles `6 ⇄ 8`.
-  `mode`/`modes` are raw uints and the hybrid ids are **not** a bitmask of the base
-  ids (6,8 don't derive from 1|2); Gig-View and other pairing ids remain uncaptured.
+- **Id space `0–8`** (captured live). `mode`/`modes` are raw uints.
+  - **Base:** `0 = Preset`, `1 = Scene`, `2 = Stomp`.
+  - **Hybrids `3–8`** = the 3 pairings × 2 row-orders (top A–D / bottom E–H). **The row
+    order is baked into the id** (each order is its own id — the app's ⇅ swap toggles
+    between a pairing's two ids; e.g. `6 ⇄ 8`, `3 ⇄ 5`). Confirmed: `3 = Preset/Scene`,
+    `5 = Scene/Preset`, `6 = Scene/Stomp`, `8 = Stomp/Scene`. **Inferred** (not yet
+    observed): `4` & `7` = the Preset/Stomp pair — the only untested pairing.
+  - The hybrid ids are **not** a bitmask of the base ids.
 - **Behavior:** setting `available_modes` so it no longer contains the currently-active
   mode makes the device **fall back to `mode 0` (Preset)** (device emitted `mode: 0`
   right after the cycle dropped the active hybrid). So change the cycle first, then

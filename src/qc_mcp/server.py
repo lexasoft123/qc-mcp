@@ -61,6 +61,40 @@ def _disconnect():
             _qc = None
 
 
+def _repo_root():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _app_running(pattern):
+    import subprocess
+    return subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0
+
+
+def _bridge_running():
+    """Bridge is usable = FIFOs exist AND the instrumented app is alive (the FIFOs
+    are plain filesystem objects and outlive the app — existence alone lies)."""
+    return (os.path.exists("/tmp/qc_inject") and os.path.exists("/tmp/qc_in")
+            and _app_running("CortexControl-instrumented"))
+
+
+def _launch_bridge(timeout_s=45):
+    """Start interceptor/run-bridge.sh (instrumented Cortex Control with the FIFO
+    bridge) detached, and wait until the bridge is up."""
+    import subprocess, time
+    script = os.path.join(_repo_root(), "interceptor", "run-bridge.sh")
+    if not os.path.exists(script):
+        return f"run-bridge.sh not found at {script}"
+    subprocess.Popen([script], cwd=_repo_root(), start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if _bridge_running():
+            time.sleep(12)  # boot storm: the app pulls the whole catalog on start —
+            return None     # join after it settles or our first reads time out
+        time.sleep(1)
+    return f"bridge did not come up within {timeout_s}s (device plugged in?)"
+
+
 def _fields(msg):
     return {f.name: getattr(msg, f.name) for f, _ in msg.ListFields()}
 
@@ -111,17 +145,59 @@ def _preset_summary(bp):
 
 
 @mcp.tool()
-def connect() -> str:
-    """Connect to the Quad Cortex. Auto-detects the mode: shares the instrumented
-    Cortex Control's session (bridge, preferred — both work at once) when its FIFOs
-    exist, else opens USB-HID directly (then Cortex Control must be quit — it holds
-    the device exclusively). Safe/read-only."""
+def connect(mode: str = "auto", quit_app: bool = False) -> dict:
+    """Connect to the Quad Cortex. mode:
+      * 'auto' (default) — if the bridge (instrumented Cortex Control) is running,
+        join it. Otherwise DON'T guess: returns the available modes as a question —
+        relay the choice to the user, then call connect(mode=...) with their answer.
+      * 'bridge' — launches interceptor/run-bridge.sh ITSELF if needed (starts the
+        instrumented Cortex Control; app + MCP share the device) and connects.
+        Takes ~20s on a cold start.
+      * 'direct' — exclusive USB-HID. If any Cortex Control is running it holds the
+        device: refuses unless quit_app=True (then quits the app first).
+    """
+    global _qc
+    if _qc is not None:
+        return {"status": f"already connected ({'bridge' if _qc.bridge else 'direct'} mode)"}
+    if mode == "auto":
+        if _bridge_running():
+            mode = "bridge"
+        else:
+            return {"question": "How should I connect to the Quad Cortex?",
+                    "options": {
+                        "bridge": "I launch the instrumented Cortex Control myself; "
+                                  "the app and MCP then share the device (recommended "
+                                  "— GUI verification works too). ~20s cold start.",
+                        "direct": "Exclusive USB-HID, no app running. Faster, but no "
+                                  "Cortex Control GUI alongside."},
+                    "next": "Ask the user, then call connect(mode='bridge') or "
+                            "connect(mode='direct')."}
+    if mode == "bridge":
+        os.environ.pop("QC_BRIDGE", None)   # undo a prior direct-mode override
+        if not _bridge_running():
+            err = _launch_bridge()
+            if err:
+                return {"error": err}
+    elif mode == "direct":
+        if _bridge_running() or _app_running("Cortex Control.app"):
+            if not quit_app:
+                return {"error": "Cortex Control is running and holds the device. "
+                                 "Pass quit_app=True to quit it and connect direct, "
+                                 "or use mode='bridge' to share its session."}
+            import subprocess, time
+            subprocess.run(["osascript", "-e", 'quit app "Cortex Control"'],
+                           capture_output=True)
+            time.sleep(3)
+        os.environ["QC_BRIDGE"] = "0"     # _conn() honors this: force direct
+    else:
+        return {"error": f"unknown mode {mode!r} — use 'auto', 'bridge' or 'direct'."}
     try:
         qc = _conn()
         v = qc.read_state("Version")
-        return f"Connected. Firmware {getattr(v, 'zenos_git_hash', '?')}."
+        return {"status": f"Connected ({mode}). Firmware "
+                          f"{getattr(v, 'zenos_git_hash', '?')}."}
     except QCError as e:
-        return f"Connect failed: {e}"
+        return {"error": f"Connect failed: {e}"}
 
 
 @mcp.tool()

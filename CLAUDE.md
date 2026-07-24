@@ -18,7 +18,11 @@ protocol and `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes.
     `to_display`). Data attribution: neuraldsp.com/device-list.
   - `preset.py` — `describe(bp)` ⇄ `build(spec)` + `apply_spec` (spec ⇄ BinaryPreset).
   - `directory.py` — structure/search the on-device catalog (presets/IRs/captures).
-  - `server.py` — FastMCP server (~29 tools). `_conn()` auto-detects bridge mode.
+  - `server.py` — FastMCP server (~30 tools). `connect(mode=auto|bridge|direct)`:
+    when nothing is running it RETURNS the mode options (relay the question to the
+    user); `mode='bridge'` self-launches `interceptor/run-bridge.sh` (~20s cold) and
+    joins; `mode='direct'` needs `quit_app=True` if Cortex Control holds the device.
+    Other tools' `_conn()` still auto-detects a running bridge.
 - `interceptor/` — DYLD interposer C + build/run scripts (capture + bridge). Logs and
   `catalog.json` are **gitignored** (contain library names / session ids).
 - `tools/` — RE utilities; `tools/gui/` — GUI-automation harness + tests (below).

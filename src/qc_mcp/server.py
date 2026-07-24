@@ -395,13 +395,16 @@ def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Pr
     return {"loaded": bool(bp), "preset": _preset_summary(bp) if bp else None}
 
 
-# Performance-mode id map. Confirmed live via Mode(14). The hybrid's ROW ORDER is
-# encoded in the id: 6 = Scene(top A-D)+Stomp(bottom E-H), 8 = the swap Stomp(top)+
-# Scene(bottom). 0=Preset. Base Scene/Stomp-only and other pairings not yet captured.
-MODES = {"preset": 0, "hybrid": 6,
+# Performance-mode id map, all confirmed live via Mode(14):
+#   0=Preset, 1=Scene, 2=Stomp (the three base modes);
+#   6=Scene+Stomp hybrid (Scene top A-D / Stomp bottom E-H),
+#   8=Stomp+Scene hybrid (the swapped-row layout).
+# The hybrid's row order is baked into the id (6 vs 8); the ids are NOT a bitmask of
+# the base modes (6,8 don't derive from 1|2). Gig-View / other hybrid ids uncaptured.
+MODES = {"preset": 0, "scene": 1, "stomp": 2, "hybrid": 6,
          "scene+stomp": 6, "scene/stomp": 6,
          "stomp+scene": 8, "stomp/scene": 8}
-MODE_NAMES = {0: "Preset",
+MODE_NAMES = {0: "Preset", 1: "Scene", 2: "Stomp",
               6: "Scene+Stomp Hybrid (Scene top A-D / Stomp bottom E-H)",
               8: "Stomp+Scene Hybrid (Stomp top A-D / Scene bottom E-H)"}
 

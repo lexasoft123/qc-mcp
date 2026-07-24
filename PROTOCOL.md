@@ -249,11 +249,12 @@ The full DIRECTORY (presets + neural captures + IRs) is reversed in **docs/DIREC
     Must be in `available_modes` or it's refused. MCP `switch_mode`, `transport.set_mode`.
   - **Set the cycle** (Modes Configuration): `Mode` UPDATE
     `{ available_modes{ modes:[...] } }`. MCP `set_mode_cycle`, `transport.set_mode_cycle`.
-- **Confirmed ids:** `0 = Preset`; `6 = Scene+Stomp Hybrid` (top A–D = Scene, bottom
-  E–H = Stomp); `8 = the swapped hybrid` (Stomp top, Scene bottom). **The hybrid's row
-  order is encoded in the id** — the app's ⇅ "swap" toggles `6 ⇄ 8` in `available_modes`
-  (captured live). `mode`/`modes` are raw uints; base Scene-only/Stomp-only and
-  Preset-hybrid pairings aren't captured yet.
+- **Confirmed ids** (all captured live): `0 = Preset`, `1 = Scene`, `2 = Stomp` (the
+  three base modes, seen as cycle `{0,1,2}`); `6 = Scene+Stomp Hybrid` (top A–D =
+  Scene, bottom E–H = Stomp); `8 = the swapped hybrid` (Stomp top, Scene bottom).
+  **The hybrid's row order is encoded in the id** — the app's ⇅ swap toggles `6 ⇄ 8`.
+  `mode`/`modes` are raw uints and the hybrid ids are **not** a bitmask of the base
+  ids (6,8 don't derive from 1|2); Gig-View and other pairing ids remain uncaptured.
 - **Behavior:** setting `available_modes` so it no longer contains the currently-active
   mode makes the device **fall back to `mode 0` (Preset)** (device emitted `mode: 0`
   right after the cycle dropped the active hybrid). So change the cycle first, then

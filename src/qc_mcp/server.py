@@ -395,11 +395,15 @@ def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Pr
     return {"loaded": bool(bp), "preset": _preset_summary(bp) if bp else None}
 
 
-# Performance-mode id map. Confirmed live via Mode(14): 0=Preset, 6=Scene+Stomp
-# Hybrid (top row A-D=Scene, bottom E-H=Stomp). Base Scene/Stomp-only + other
-# Hybrid pairings exist on the device but their ids aren't captured yet.
-MODES = {"preset": 0, "hybrid": 6, "scene+stomp": 6}
-MODE_NAMES = {0: "Preset", 6: "Scene+Stomp Hybrid"}
+# Performance-mode id map. Confirmed live via Mode(14). The hybrid's ROW ORDER is
+# encoded in the id: 6 = Scene(top A-D)+Stomp(bottom E-H), 8 = the swap Stomp(top)+
+# Scene(bottom). 0=Preset. Base Scene/Stomp-only and other pairings not yet captured.
+MODES = {"preset": 0, "hybrid": 6,
+         "scene+stomp": 6, "scene/stomp": 6,
+         "stomp+scene": 8, "stomp/scene": 8}
+MODE_NAMES = {0: "Preset",
+              6: "Scene+Stomp Hybrid (Scene top A-D / Stomp bottom E-H)",
+              8: "Stomp+Scene Hybrid (Stomp top A-D / Scene bottom E-H)"}
 
 
 @mcp.tool()
@@ -443,8 +447,10 @@ def switch_mode(mode) -> dict:
 def set_mode_cycle(modes: list) -> dict:
     """WRITE: set which performance modes the footswitch cycle steps through
     (Modes Configuration). Mode(14) UPDATE {available_modes{modes:[...]}}; e.g.
-    [0, 6] = Preset <-> Scene+Stomp Hybrid. Accepts names or ids. Does not change the
-    active mode (call switch_mode after). Ids: 0=Preset, 6=Scene+Stomp Hybrid."""
+    [0, 6] = Preset <-> Scene+Stomp Hybrid. Accepts names or ids. NOTE: if the
+    currently-active mode is dropped from the cycle, the device falls back to Preset
+    (0) — confirmed live. Ids: 0=Preset, 6=Scene/Stomp hybrid, 8=Stomp/Scene (swapped
+    rows). Does not itself change the active mode (call switch_mode after)."""
     ids = []
     for x in modes:
         v = MODES.get(str(x).lower()) if not isinstance(x, int) else x

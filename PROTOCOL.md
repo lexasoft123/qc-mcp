@@ -249,10 +249,15 @@ The full DIRECTORY (presets + neural captures + IRs) is reversed in **docs/DIREC
     Must be in `available_modes` or it's refused. MCP `switch_mode`, `transport.set_mode`.
   - **Set the cycle** (Modes Configuration): `Mode` UPDATE
     `{ available_modes{ modes:[...] } }`. MCP `set_mode_cycle`, `transport.set_mode_cycle`.
-- **Confirmed ids:** `0 = Preset`, `6 = Scene+Stomp Hybrid` (top row A–D = Scene,
-  bottom E–H = Stomp). `mode`/`modes` are raw uints (no enum in the schema) — base
-  Scene/Stomp-only and other Hybrid pairings exist on the device but their ids aren't
-  captured yet. The test unit's preset cycle was `{0, 6}`.
+- **Confirmed ids:** `0 = Preset`; `6 = Scene+Stomp Hybrid` (top A–D = Scene, bottom
+  E–H = Stomp); `8 = the swapped hybrid` (Stomp top, Scene bottom). **The hybrid's row
+  order is encoded in the id** — the app's ⇅ "swap" toggles `6 ⇄ 8` in `available_modes`
+  (captured live). `mode`/`modes` are raw uints; base Scene-only/Stomp-only and
+  Preset-hybrid pairings aren't captured yet.
+- **Behavior:** setting `available_modes` so it no longer contains the currently-active
+  mode makes the device **fall back to `mode 0` (Preset)** (device emitted `mode: 0`
+  right after the cycle dropped the active hybrid). So change the cycle first, then
+  `switch_mode`.
 - Manual (CorOS 4.0): three base modes — Preset / Scene / Stomp — plus Hybrid combos
   (drag one mode onto another); on-device cycling = BANK DOWN + TEMPO; MIDI CC#47
   switches modes. Ids for Scene/Stomp remain to be captured.

@@ -241,10 +241,44 @@ The full DIRECTORY (presets + neural captures + IRs) is reversed in **docs/DIREC
 
 ## 8. Performance modes
 
-- `Mode`(14) UPDATE `{ mode, available_modes{ modes[] }, atma_page }`.
-- **Confirmed on-device:** `0 = Preset`, `6 = Hybrid`. Scene / Stomp / Gig-View
-  values are not yet mapped (a preset only enables the modes in its
-  `available_modes`; the test unit's preset allowed `{0, 6}`).
+- `Mode`(14) `{ action, request_id, mode:uint, available_modes{ modes:uint[] },
+  atma_page:uint }`. Fully captured (2026-07-24):
+  - **Read current mode:** `Mode` READ → reply `{ mode, available_modes{modes[]} }`
+    — `mode` = active id, `available_modes.modes` = the footswitch cycle. MCP `get_mode`.
+  - **Switch mode:** `Mode` UPDATE `{ mode:id }`; device echoes (same request_id).
+    Must be in `available_modes` or it's refused. MCP `switch_mode`, `transport.set_mode`.
+  - **Set the cycle** (Modes Configuration): `Mode` UPDATE
+    `{ available_modes{ modes:[...] } }`. MCP `set_mode_cycle`, `transport.set_mode_cycle`.
+- **Id space `0–8` — fully mapped, every id verified live.** `mode`/`modes` are raw uints.
+  - **Base:** `0 = Preset`, `1 = Scene`, `2 = Stomp`.
+  - **Hybrids `3–8`** = a **top row A–D / bottom row E–H** pairing of two base modes
+    (a hybrid always combines exactly two — one per footswitch row). The row order is
+    part of the id; the app's ⇅ swap toggles a pairing's two ids. Formula
+    **`id = 3 + 2·top + bottom_rank`** (top = base id of the top-row mode; bottom_rank
+    = 0/1 for which of the other two base modes is on the bottom, lower id first):
+
+    | id | top A–D / bottom E–H | | id | top / bottom |
+    |----|----|----|----|----|
+    | 3 | Preset / Scene | | 6 | Scene / Stomp |
+    | 4 | Preset / Stomp | | 7 | Stomp / Preset |
+    | 5 | Scene / Preset  | | 8 | Stomp / Scene |
+  - The hybrid ids are **not** a bitmask of the base ids.
+- **`available_modes` (the cycle)** can hold **1..N** entries (Modes Configuration lets
+  you remove modes down to a single one, or add several). Reordering within the cycle
+  and its length are both free.
+- **Behavior:** setting `available_modes` so it no longer contains the currently-active
+  mode makes the device **fall back to `mode 0` (Preset)** (device emitted `mode: 0`
+  right after the cycle dropped the active hybrid). So change the cycle first, then
+  `switch_mode`.
+- Manual (CorOS 4.0): three base modes — Preset / Scene / Stomp — plus Hybrid combos
+  (drag one mode onto another); on-device cycling = BANK DOWN + TEMPO; MIDI CC#47
+  switches modes. Ids for Scene/Stomp remain to be captured.
+- **Hybrid = one mode per footswitch row** (confirmed live from the owner's Modes
+  Configuration screen): the top row A–D gets one mode, the bottom E–H the other, order
+  swappable. The observed cycle is **PRESET ⟷ SCENE+STOMP hybrid** (top A–D = Scene,
+  bottom E–H = Stomp), and available_modes was `{0, 6}` → **`6` = the Scene+Stomp
+  hybrid**, `0` = Preset. Only one switch row is left for presets, which is why Hybrid
+  halves the bank size. Whether other top/bottom pairings get distinct ids is uncaptured.
 - On the hardware, BANK DOWN + TEMPO cycles modes.
 - `transport.set_mode`, MCP `switch_mode` ('preset' / 'hybrid' / raw id).
 
@@ -310,6 +344,28 @@ MCP `get_io_settings`.
   `analyze_log.py` / `verify_frames.py` (reassemble + decode captured logs),
   `xref_dis.py` (Mach-O + capstone string-xref disassembler), `probe_usb.py`,
   `hid_capture.py`, `midi_monitor.py`.
+
+---
+
+## 11a. Official-manual cross-check (CorOS 4.0, neuraldsp.com/manual/quad-cortex)
+
+Checked 2026-07-24 against this document; the manual **confirms** the grid model
+(4×8, split→parallel→mix, outputs routable to rows), bypass≠CPU, Global EQ/Input
+Gate auto-disable, 256/setlist · 10 setlists · 3072 presets, per-scene params+bypass,
+and scene names/colors. Additions/corrections from the manual:
+
+- **Path A/B law:** rows 1&3 = "Path A", rows 2&4 = "Path B"; **splitters only route
+  Path A → Path B** — the reason branch rows reject their own splits (see the
+  build-preset-routing skill).
+- **Side-chaining** (unexplored by this protocol work): SOURCE/TRIGGER on capable
+  blocks, up to **two side-chain devices per pair of rows**.
+- **Global EQ** is assignable to one or both output pairs (1/2, 3/4).
+- **Deleting a User Setlist permanently deletes all presets in it** — never automate
+  setlist deletion.
+- **Device variants:** Quad Cortex mini (own manual) differs materially — 4 scenes
+  (A–D), 4-preset banks, and **bypass is NOT scene-assignable** on the mini. Facts
+  in this document were verified on a full-size unit ("QC MAX", fw 4.0.1); don't
+  assume they transfer to the mini.
 
 ---
 

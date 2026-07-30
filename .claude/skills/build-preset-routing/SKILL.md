@@ -36,7 +36,10 @@ Cross-check with `cpu_load` (its block list reveals duplicates / orphaned blocks
 - **Parallel split** — `split_control_points {split, mix}` per row (in `build_preset`:
   `"splitter":{"split_col":S,"mix_col":M}`). `split=S` branches the signal **before the
   block at column S**; `mix=M` merges the branch back at column M. `(-1,-1)` = none.
-  **A split is 1→2 only.**
+  **A split is 1→2 only.** The underlying law (per the official manual): **rows 1&3 are
+  "Path A", rows 2&4 are "Path B"; splitters only route Path A → Path B.** That's WHY a
+  branch (Path B) row can't host its own split (rejected), while row 3 — even when
+  patch-fed via in=7 — CAN split (it's Path A).
 - **Read-vs-delta indexing:** in a full READ, row = chain-array index, column =
   models-array index, param index = params-array index (the `.row/.column/.index`
   *fields* are 0 there). In edits you set those fields explicitly.
@@ -81,6 +84,38 @@ Cross-check with `cpu_load` (its block list reveals duplicates / orphaned blocks
 - **Post-merge (shared) FX — e.g. a stereo reverb for the whole blend:** place it on
   the output row **after `mix_col`** so it processes the merged signal, not one lane. FX
   before the merge only affect that lane (why one amp ended up "dry" of the delay once).
+
+## 2b. Transparent Blend — parallel/side-chain without spending lanes
+`Transparent Blend` (hash **16013**, Utility; sibling `Plugin Blend` 16008) is a
+**single-slot** block that taps another point in the grid and blends it into the current
+slot — so you get a parallel/return path **without** consuming a splitter lane + mixer
+lane. Params (display): `SOURCE` (0–44 — picks the tap), `BLEND` 0–100 %, `OUTPUT`
+−60..+12 dB, `Delay` 0–255 (samples, for time-alignment), plus `InputChannel`/
+`StereoInput` for stereo handling.
+- **`SOURCE` is a picklist**, not a fixed enum: physical **Input 1/2/1+2**, **FX Return
+  1/2/1+2**, **USB inputs 5–8/5+6/7+8**, then **every block on the grid by position**
+  (shown as `R{row}C{col} <name>`). So it can pull the output of any block anywhere.
+- `SOURCE` can be **assigned to Scenes** (long-press in the app) — the tap point itself
+  becomes scene-varying. Verify the exact stored index by reading the block back
+  (`get_current_preset`): the list is dynamic (grid blocks are appended after the fixed
+  input/return/USB entries), so the integer depends on the current grid.
+- **CONFIRMED multi-amp recipe (built & saved "4 Amp Blend", 2026-07-24):** this beats
+  the jumper/split method and enables layouts it CAN'T do — e.g. **4 amps sharing one
+  pedal**, impossible the old way (4 rows, all consumed by amps). Recipe:
+  1. Row 0: `In 1 → shared pedal(s) → amp1 → cab → out=19` (amp1 inline, normal).
+  2. Rows 1–3: `Transparent Blend(col0) → ampN → cab → out=19`, each blend
+     `BLEND=100`, `SOURCE = R1C1 <first shared pedal>`. All amps then get the same
+     post-pedal signal; pan the lanes + drop volumes (4-way sum) as usual.
+  - **Selecting a side-chain SOURCE auto-sets that lane's `in_port` to 0** — the lane is
+    fed *purely* by the blend (BLEND=100 = 100% source), so you don't wire its input.
+    Confirmed by read-back (in=0) + the on-screen side-chain taps + signal on the meter.
+  - **`SOURCE` is fiddly to set programmatically** (the stored value is not a clean list
+    index; a linear display write lands on the wrong entry — `SOURCE=12`→"Input 1/2").
+    Robust method: set ONE blend's source via the app dropdown, read its stored value
+    back, then replicate that exact value to the other blends (worked here: display 38.5
+    = R1C1 Myth Drive, same for all three since the pedal shares a list position). Verify
+    each in the app (the block editor shows the resolved source name). See the
+    `transparent-blend-block` memory.
 
 ## 3. I/O and stereo
 - Output "Multi Out" (`out_port=19`) is this device's main out — leave it unless told.

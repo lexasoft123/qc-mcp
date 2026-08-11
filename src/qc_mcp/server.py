@@ -658,6 +658,40 @@ def set_lane_output(row: int, pan: float = None, volume: float = None,
 
 
 @mcp.tool()
+def set_mixer(row: int, level_a: float = None, pan_a: float = None,
+              level_b: float = None, pan_b: float = None, phase: bool = None,
+              mixer_level: float = None, column: int = 0) -> str:
+    """WRITE: set the MIXER at a lane's merge point (the magenta 'M' node created by
+    a split whose mix_col >= 0). pan_a/pan_b: 0.0=hard L, 0.5=center, 1.0=hard R —
+    this is how you get STEREO WIDTH from a merged multi-amp rig (pan A left, B right).
+    A = the main lane, B = the branch that merges in. Levels are 0.0-1.0.
+    PAN SCALE (verified on-device): the QC displays pan as 0-50 per side, so the
+    reading is (0.5 - value) * 100 — pan_a=0.25 shows "25 L", 0.375 shows "13 L",
+    and 0.0/1.0 are hard L/R shown as "50". Halve the number you want, then offset
+    from 0.5.
+    NOTE the mixer is a lane SUB-BLOCK, not a grid block: it has no row/column cell and
+    does NOT appear in get_current_preset's `blocks`, so set_parameter(row, col, ...)
+    silently does nothing to it — use this tool."""
+    qc = _conn()
+    import time
+    # Mixer param order: LEVEL A=0, PAN A=1, LEVEL B=2, PAN B=3, PHASE=4, MIXER LEVEL=5
+    names = {0: "level_a", 1: "pan_a", 2: "level_b", 3: "pan_b",
+             4: "phase", 5: "mixer_level"}
+    updates = [(0, level_a), (1, pan_a), (2, level_b), (3, pan_b),
+               (4, None if phase is None else (1.0 if phase else 0.0)),
+               (5, mixer_level)]
+    done = {}
+    for idx, val in updates:
+        if val is not None:
+            qc.set_lane_param(row, "mixer", idx, float(val), column=column)
+            done[names[idx]] = float(val)
+            time.sleep(0.05)
+    if not done:
+        return "No mixer values given (nothing sent)."
+    return f"Set lane {row} mixer {done}."
+
+
+@mcp.tool()
 def set_preset_meta(name: str = None, tempo: int = None, default_scene: int = None,
                     scene_labels: list = None, scene_colors: list = None) -> str:
     """WRITE: set preset metadata on the LIVE preset. scene_labels / scene_colors (up

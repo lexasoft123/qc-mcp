@@ -10,6 +10,7 @@ dist/
 interceptor/CortexControl-instrumented.app/
 interceptor/interpose.dylib
 interceptor/ent.plist
+interceptor/entitlements.plist
 
 # Captured HID traffic + decoded messages — may contain your session id, cloud
 # auth token, and preset data. Never commit these.

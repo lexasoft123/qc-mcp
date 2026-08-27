@@ -3,6 +3,8 @@
 MCP server that controls a **Neural DSP Quad Cortex** over its reverse-engineered
 internal **USB-HID / protobuf** protocol (not MIDI). See `PROTOCOL.md` for the wire
 protocol and `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes.
+Supports **CorOS 4.0 and 4.1** — the schema is picked per connection from the
+device's firmware (PROTOCOL.md §12).
 
 ## Layout
 - `src/qc_mcp/`
@@ -10,7 +12,9 @@ protocol and `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes.
   - `bridge.py` — FIFO bridge: share Cortex Control's live session via the DYLD
     interposer (run MCP + the app at once). No handshake/heartbeat (the app owns them).
   - `protocol.py` — framing (128-byte reports, flag bits, 8-byte command trailer,
-    gzip), `COMMANDS`, encode/decode, `Reassembler`; loads the protobuf descriptor pool.
+    gzip), `COMMANDS`, encode/decode, `Reassembler`; **version negotiation**
+    (`generation`/`set_version`/`supports`/`require`) + a descriptor pool per CorOS
+    generation from `descriptors/qc_descriptors-<gen>.pb`.
   - `transport.py` — `QuadCortex`: open/handshake/heartbeat, read state, edit grid
     (add/delete block, params, per-scene params, splits/mixers, routing, bypass,
     captures, IRs), recall/save, list_directory.
@@ -26,11 +30,15 @@ protocol and `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes.
 - `interceptor/` — DYLD interposer C + build/run scripts (capture + bridge). Logs and
   `catalog.json` are **gitignored** (contain library names / session ids).
 - `tools/` — RE utilities; `tools/gui/` — GUI-automation harness + tests (below).
+  After a CorOS update run all three: `interceptor/build.sh` (re-instrument the
+  updated app), `tools/build_descriptors.py build <gen>` (new wire schema),
+  `tools/dump_model_repo.py --diff` then without `--diff` (new device catalog).
 - `.claude/skills/` — reusable reverse-engineering skills.
 
 ## Running
 - `python3` alone lacks pyobjc; use `.venv/bin/python`. GUI tools auto-reexec into `.venv`.
-- Tests: `.venv/bin/python tests/test_directory.py` (offline, no device).
+- Tests: `.venv/bin/python tests/test_directory.py` and
+  `tests/test_protocol_versions.py` (both offline, no device).
 - Device/GUI tools need the instrumented Cortex Control running (bridge) — see
   `interceptor/run-bridge.sh`.
 
@@ -94,6 +102,17 @@ Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
   UPDATE is silently refused (device echoes the unchanged position back). `recall_preset`
   now defaults to the current folder and verifies the position actually moved.
 - Value taper: `min>0 and max/min>=5` ⇒ power taper (k≈1.667), else linear.
+- **One bridge reader at a time.** The out FIFO is a single stream: if the MCP
+  server holds a bridge connection and a script opens another, they steal each
+  other's frames and reads silently return `None` (telemetry still flows, so it
+  looks like a dead session). `disconnect` the MCP before driving the device from
+  a script.
+- **CorOS version matters.** `connect`/`device_info` report `firmware` +
+  `protocol_generation`; 4.1-only tools gate on `P.require(...)`. The device's
+  human version is in `Version.zenos_git_hash` — `app_fw_version` is a build hash.
+- **Device presets (4.1)**: `list_device_presets` / `load_device_preset`. Loading
+  is a **Grid UPDATE with `update_type=MODEL_PRESET`**, not a ModelPreset write.
+  *Saving* a user device preset is NOT reversed yet (as with stomp assignment).
 
 ## Conventions
 - This is for interop/debugging on hardware you own + licensed software. Keep capture logs

@@ -45,6 +45,10 @@ mcp = FastMCP("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
    volumes ~0.5 so the parallel sum doesn't clip.
 6. Save: save_preset / save_preset_as (File CREATE; guarded against clobbering).
    A success string is not proof — verify via current_preset_position + read.
+7. CorOS 4.1+ only: load_device_preset(row, col, name) drops a whole dialled-in
+   knob set onto a block (list_device_presets to see them) — a fast first pass
+   before fine-tuning. device_info reports firmware + which features this unit
+   has; 4.1 tools say "needs CorOS 4.1" on older firmware instead of no-op'ing.
 
 Deeper knowledge (routing recipes for shared-front multi-amp rigs, CPU model,
 protocol docs, GUI verification harness) lives in the qc-mcp repo — sessions
@@ -116,7 +120,13 @@ def _launch_bridge(timeout_s=45):
 
 
 def _fields(msg):
-    return {f.name: getattr(msg, f.name) for f, _ in msg.ListFields()}
+    """Set fields of a protobuf message as a JSON-safe dict (bytes -> hex)."""
+    out = {}
+    for f, value in msg.ListFields():
+        if isinstance(value, bytes):
+            value = value.hex()
+        out[f.name] = value
+    return out
 
 
 def _preset_summary(bp):
@@ -213,9 +223,10 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
         return {"error": f"unknown mode {mode!r} — use 'auto', 'bridge' or 'direct'."}
     try:
         qc = _conn()
-        v = qc.read_state("Version")
-        return {"status": f"Connected ({mode}). Firmware "
-                          f"{getattr(v, 'zenos_git_hash', '?')}."}
+        qc.read_state("Version")
+        name = f" [{qc.custom_name}]" if qc.custom_name else ""
+        return {"status": f"Connected ({mode}). CorOS {qc.firmware or '?'}"
+                          f"{name}, protocol generation {qc.protocol_version}."}
     except QCError as e:
         return {"error": f"Connect failed: {e}"}
 
@@ -230,9 +241,22 @@ def disconnect() -> str:
 
 @mcp.tool()
 def device_info() -> dict:
-    """Read the Quad Cortex firmware / device info. Read-only."""
-    v = _conn().read_state("Version")
-    return _fields(v)
+    """Firmware, device identity, and which protocol features this unit supports.
+
+    `firmware` is the CorOS version (the device reports it in the oddly-named
+    `zenos_git_hash`); `protocol_generation` is the wire schema the MCP picked
+    for it, and `features` lists the version-gated capabilities. Read-only."""
+    qc = _conn()
+    v = qc.read_state("Version")
+    info = _fields(v)
+    info.update({
+        "firmware": qc.firmware or info.get("zenos_git_hash", "?"),
+        "device_name": qc.custom_name or "",
+        "device_type": qc.device_type or "",
+        "protocol_generation": qc.protocol_version,
+        "features": {name: P.supports(name) for name in sorted(P.FEATURES)},
+    })
+    return info
 
 
 @mcp.tool()
@@ -982,19 +1006,121 @@ def search_directory(query: str = "", category: str = "", limit: int = 30,
 
 
 @mcp.tool()
-def list_favorites(favorites: bool = True) -> list:
-    """The device's Favorites (favorites=True) or Recents (favorites=False) preset
-    list: [{name, folder_name, setlist_key, is_factory, is_plugin}]. Load one via
-    switch_preset. Read-only."""
-    items = _conn().list_recents_favorites(favorites=favorites)
-    if not items:
+def list_favorites(favorites: bool = True, kind: str = "preset") -> list:
+    """The device's Favorites (favorites=True) or Recents (favorites=False):
+    [{name, folder_name, setlist_key, is_factory, is_plugin}]. Load a preset one
+    via switch_preset. CorOS 4.1 keeps three separate lists — `kind` is
+    'preset', 'ir' or 'capture' (64 entries each); on 4.0 the device ignores it
+    and answers with its single combined list. Read-only."""
+    items = _conn().list_recents_favorites(favorites=favorites, kind=kind)
+    if not items and kind == "preset":
         # bridge read empty -> fall back to the snapshot's captured favorites/recents
         snap = _load_snapshot() or {}
         items = (snap.get("_favorites") or {}).get(
             "favorites" if favorites else "recents", [])
     return [{"name": it["name"], "folder_name": it["folder_name"],
              "setlist_key": it["folder_key"], "is_factory": it["is_factory"],
-             "is_plugin": it["is_plugin"]} for it in items]
+             "is_plugin": it["is_plugin"],
+             "product_key": it.get("product_key", "")} for it in items]
+
+
+@mcp.tool()
+def list_device_presets(model: str = "", limit: int = 40) -> dict:
+    """Device presets (CorOS 4.1+): saved settings for a single device — amp,
+    drive, reverb, utility — that can be recalled into any rig. `model` is a
+    block name or numeric hash (empty = summarise every model that has presets).
+    Read-only; load one with load_device_preset."""
+    gate = P.require("model_presets", "Device presets")
+    if gate:
+        return {"error": gate}
+    model_hash = _resolve_model(model) if model else None
+    if model and model_hash is None:
+        return {"error": f"no device matches {model!r} — try find_devices."}
+    presets = _conn().list_model_presets(model_hash)
+    if model_hash is not None:
+        info = catalog.lookup(model_hash) or {}
+        return {"model": info.get("name", model), "model_hash": model_hash,
+                "count": len(presets),
+                "presets": [{"id": p["id"], "name": p["name"],
+                             "is_factory": p["is_factory"],
+                             "is_default": p["is_default"]}
+                            for p in presets[:limit]]}
+    by_model = {}
+    for p in presets:
+        by_model.setdefault(p["model_hash"], []).append(p["name"])
+    rows = sorted(by_model.items(), key=lambda kv: -len(kv[1]))[:limit]
+    return {"total_presets": len(presets), "models_with_presets": len(by_model),
+            "top": [{"model_hash": h,
+                     "model": (catalog.lookup(h) or {}).get("name", f"#{h}"),
+                     "count": len(names), "examples": names[:5]}
+                    for h, names in rows]}
+
+
+@mcp.tool()
+def load_device_preset(row: int, column: int, preset: str,
+                       model: str = "", is_factory: bool = True) -> dict:
+    """WRITE (CorOS 4.1+): load a device preset onto the block at (row, column),
+    replacing that block's parameter settings. `preset` is an id or name from
+    list_device_presets; `model` defaults to whatever block currently sits there.
+    Sent as a Grid UPDATE with update_type=MODEL_PRESET. Verifies by reading the
+    block back."""
+    gate = P.require("model_presets", "Device presets")
+    if gate:
+        return {"error": gate}
+    qc = _conn()
+    block = _block_at(qc, row, column)
+    if block is None:
+        return {"error": f"no block at row {row}, column {column}."}
+    model_hash = _resolve_model(model) if model else block["hash"]
+    if model_hash is None:
+        return {"error": f"no device matches {model!r}."}
+    choices = qc.list_model_presets(model_hash)
+    match = next((p for p in choices
+                  if p["id"] == str(preset)
+                  or p["name"].lower() == str(preset).lower()), None)
+    if match is None:
+        return {"error": f"{(catalog.lookup(model_hash) or {}).get('name', model_hash)} "
+                         f"has no device preset {preset!r}.",
+                "available": [p["name"] for p in choices[:20]]}
+    before = block["params"]
+    qc.load_model_preset(row, column, model_hash, match["id"],
+                         is_factory=match["is_factory"])
+    after = (_block_at(qc, row, column) or {}).get("params", {})
+    return {"loaded": match["name"], "id": match["id"],
+            "block": (catalog.lookup(model_hash) or {}).get("name"),
+            "row": row, "column": column,
+            "params_changed": before != after, "params": after}
+
+
+def _resolve_model(model):
+    """A block name or numeric hash -> model hash, or None if ambiguous."""
+    text = str(model).strip()
+    if text.isdigit():
+        return int(text)
+    hits = catalog.find(text)
+    exact = [m for m in hits if m["name"].lower() == text.lower()]
+    if exact:
+        return exact[0]["id"]
+    return hits[0]["id"] if len(hits) == 1 else None
+
+
+def _block_at(qc, row, column):
+    """{hash, params} for the block at a grid position, or None."""
+    bp = qc.get_current_preset()
+    if bp is None or row >= len(bp.chains):
+        return None
+    models = bp.chains[row].models
+    if column >= len(models) or not models[column].hash:
+        return None
+    m = models[column]
+    info = catalog.lookup(m.hash) or {}
+    cparams = info.get("params", [])
+    params = {}
+    for pos, prm in enumerate(m.params):
+        if prm.param_values and pos < len(cparams):
+            params[cparams[pos]["name"]] = round(
+                catalog.to_display(m.hash, pos, prm.param_values[0].float_value), 3)
+    return {"hash": m.hash, "params": params}
 
 
 @mcp.tool()

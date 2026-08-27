@@ -156,9 +156,31 @@ was made robust this way (`bridge.py`, `transport.py`):
   **latest** message, not the first buffered one (drain, then read).
 - If reads still come back empty, **reconnect** (`disconnect`→`connect`) to revive a
   stale bridge session; `get_current_preset` also auto-reconnects+retries once.
+- **Only one reader on the bridge at a time.** The out FIFO is a single stream: if a
+  second process (a script alongside the MCP server) also reads it, the two steal each
+  other's frames and reads return empty while telemetry keeps flowing — it looks
+  exactly like a dead session. This is another reason to do everything through the
+  MCP tools rather than side scripts.
+- **After a CorOS update, re-instrument the app** (`interceptor/build.sh`): the bridge
+  runs a *copy* of Cortex Control, so an updated app leaves the old binary talking to
+  new firmware. Then refresh the schema and catalog — see CLAUDE.md.
 
 Bottom line: **build → read back split_points + routing → screenshot → cpu_load**. Only
 then is a preset "done."
+
+## 6. Device presets — don't dial from scratch (CorOS 4.1+)
+Every device carries saved settings: ~2750 factory ones across 602 models, plus up to 32
+user presets each. `list_device_presets("<model>")` shows them;
+`load_device_preset(row, column, "<name>")` applies one to the block at that position,
+replacing all its parameters at once.
+
+Use it as the **first pass on a block** — load the closest-named preset, then tweak — and
+for utility blocks (Output EQ, I/O Settings) where the factory presets encode real
+voicings. `device_info` reports `firmware` and `protocol_generation`; on CorOS 4.0 these
+tools return a "needs CorOS 4.1" error rather than failing silently. Loading is a Grid
+UPDATE under the hood, so verify it the same way as any other write (read the block back
+— `load_device_preset` returns `params_changed` and the new values). **Saving** a user
+device preset is not reversed yet; save the whole preset instead.
 
 ## MCP tools — the complete interface (no scripts needed)
 The bridge is reliable now, so **do everything through MCP tools** — never fall back to
@@ -188,8 +210,10 @@ ad-hoc scripts for device control. The full toolbox:
   The tool's success string is not proof of commit: verify with `current_preset_position`
   + the app header showing the name **without a `*`** (dirty marker). See the
   `save-empty-slot-hangs` memory.
+- **Device presets (CorOS 4.1+):** `list_device_presets(model)` /
+  `load_device_preset(row, column, preset)` — a whole knob set on one block (§6).
 - **Read / verify:** `get_current_preset`, `cpu_load(detail)`, `get_io_settings`,
-  `current_preset_position`. The only non-MCP helper is `tools/gui/gui.py shot` for a
+  `current_preset_position`, `device_info` (firmware + which features this unit has). The only non-MCP helper is `tools/gui/gui.py shot` for a
   *visual* wiring screenshot — verification, not control.
 
 If an operation has no tool yet, **add the MCP tool** rather than scripting it — keep the

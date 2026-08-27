@@ -37,6 +37,11 @@ class QuadCortex:
         self._send_lock = threading.Lock()
         self._hb_stop = None
         self._hb_thread = None
+        # Filled in by detect_version() once the device answers a Version READ.
+        self.firmware = None          # CorOS version, e.g. "4.1.0"
+        self.device_type = None       # "QC" | "ATMA" (Quad Cortex mini)
+        self.custom_name = ""         # user label, for multi-device setups (4.1+)
+        self.protocol_version = P.LATEST_VERSION
 
     # -- lifecycle --
     def open(self, handshake=True):
@@ -45,7 +50,40 @@ class QuadCortex:
         if handshake and not self.bridge:
             self._start_heartbeat()   # keep session "online" (required for reads)
             self._handshake()
+        # Bridge mode skips the handshake (the app owns it) but still needs the
+        # firmware to pick a schema, so ask here either way.
+        self.detect_version()
         return self
+
+    def detect_version(self):
+        """Read the device's firmware and select the matching wire schema.
+
+        CorOS releases change the protobuf schema (4.1 reuses GlobalEQ field 5
+        for something else, and adds ModelPreset/RemoteControl), so every
+        connection re-negotiates rather than assuming the newest generation.
+        """
+        try:
+            v = self.read_state("Version", timeout_ms=3000)
+        except Exception:
+            return self.protocol_version
+        # Confusingly, the human CorOS version ("4.1.0") lives in zenos_git_hash;
+        # app_fw_version holds an actual build hash ("d14e"). Prefer the former,
+        # and only accept something that parses as a version number.
+        for field in ("zenos_git_hash", "app_fw_version"):
+            value = getattr(v, field, "") or ""
+            if P.parse_version(value):
+                self.firmware = value
+                break
+        else:
+            self.firmware = None
+        self.custom_name = getattr(v, "custom_name", "") or ""
+        try:
+            dt = v.DESCRIPTOR.fields_by_name["device_type"].enum_type
+            self.device_type = dt.values_by_number[v.device_type].name
+        except Exception:
+            self.device_type = None
+        self.protocol_version = P.set_version(self.firmware)
+        return self.protocol_version
 
     def close(self):
         self._stop_heartbeat()
@@ -83,7 +121,16 @@ class QuadCortex:
     def __exit__(self, *a):
         self.close()
 
-    def _handshake(self, client_version="4.0.1"):
+    def _reported_firmware(self):
+        """Firmware string from any Version reply already in the pending queue."""
+        for cmd, obj, _raw, _pb in self._pending:
+            if cmd == P.NAME_TO_CMD["Version"] and obj is not None:
+                fw = getattr(obj, "app_fw_version", "")
+                if fw:
+                    return fw
+        return None
+
+    def _handshake(self, client_version=None):
         # Faithfully mirror Cortex Control's connect sequence, which the QC
         # requires before it will stream state and accept grid edits.
         try:
@@ -95,9 +142,13 @@ class QuadCortex:
             self.send("ResetCommsBuffers", rcb)
             self._collect(0.15)
 
-            # READ then announce our client version (compatibility check)
+            # READ then announce our client version (compatibility check).
+            # Mirror back whatever firmware the device reports, so we always
+            # claim a matching Cortex Control rather than a hardcoded release.
             self.send("Version", P.message_class("Version")(action=P.ACTION["READ"]))
             self._collect(0.15)
+            if client_version is None:
+                client_version = self._reported_firmware() or f"{P.LATEST_VERSION}.0"
             vmsg = P.message_class("Version")()
             vmsg.action = P.ACTION["UPDATE"]
             vmsg.request_id = self.next_request_id()
@@ -794,14 +845,24 @@ class QuadCortex:
         return {"folder_key": obj.folder_key, "position": obj.position,
                 "is_factory": obj.is_factory}
 
-    def list_recents_favorites(self, favorites=False, timeout_ms=3000):
+    FAVORITE_KINDS = {"preset": 0, "ir": 1, "capture": 2}
+
+    def list_recents_favorites(self, favorites=False, kind="preset", timeout_ms=3000):
         """RecentsFavorites READ. favorites=True -> favorites list, else recents.
-        Returns [{name, folder_key, folder_name, is_factory, is_plugin}]."""
+
+        CorOS 4.1 split the list into three: presets, impulse responses and
+        neural captures (64 entries each). `kind` picks one; on 4.0 the field
+        does not exist and the device answers with the single combined list.
+        Returns [{name, folder_key, folder_name, is_factory, is_plugin,
+        product_key}]."""
         cls = P.message_class("RecentsFavorites")
+        fields = [f.name for f in cls.DESCRIPTOR.fields]
         m = cls(action=P.ACTION["READ"])
-        if "is_favorites" in [f.name for f in cls.DESCRIPTOR.fields]:
+        if "is_favorites" in fields:
             m.is_favorites = bool(favorites)
-        if "request_id" in [f.name for f in cls.DESCRIPTOR.fields]:
+        if "type" in fields:
+            m.type = self.FAVORITE_KINDS.get(str(kind).lower(), 0)
+        if "request_id" in fields:
             m.request_id = self.next_request_id()
         _c, obj, _r = self.request("RecentsFavorites", m, timeout_ms=timeout_ms)
         if obj is None:
@@ -809,7 +870,50 @@ class QuadCortex:
         return [{"name": it.name, "folder_key": it.folder_key,
                  "folder_name": it.folder_name,
                  "is_factory": getattr(it, "is_factory", False),
-                 "is_plugin": getattr(it, "is_plugin", False)} for it in obj.items]
+                 "is_plugin": getattr(it, "is_plugin", False),
+                 "product_key": getattr(it, "product_key", "")} for it in obj.items]
+
+    # -- device presets (CorOS 4.1): per-model saved settings --
+    def list_model_presets(self, model_hash=None, timeout_ms=25000):
+        """ModelPreset(71) READ -> every device preset the QC holds.
+
+        One READ returns the whole index (~2750 factory entries in 4.1.0) as
+        {id{value, is_factory, hash}, name, is_default}; `hash` is the model the
+        preset belongs to, so filter by it for one block's presets.
+        """
+        msg = self.read_state("ModelPreset", timeout_ms=timeout_ms)
+        out = []
+        for pr in getattr(msg, "presets", []):
+            if model_hash is not None and pr.id.hash != int(model_hash):
+                continue
+            out.append({"id": pr.id.value, "name": pr.name,
+                        "model_hash": pr.id.hash,
+                        "is_factory": pr.id.is_factory,
+                        "is_default": pr.is_default})
+        return out
+
+    def load_model_preset(self, row, column, model_hash, preset_id,
+                          is_factory=True, settle_s=1.5):
+        """Apply a device preset to the block at (row, column).
+
+        Not a ModelPreset(71) write — the device takes this as a **Grid UPDATE**
+        with `update_type=MODEL_PRESET`, the preset id in `model_preset_to_load`,
+        and a one-block grid naming the target (verified on 4.1.0).
+        """
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        g.update_type = 1                       # GridMessage.UpdateType.MODEL_PRESET
+        g.model_preset_to_load.value = str(preset_id)
+        g.model_preset_to_load.is_factory = bool(is_factory)
+        g.model_preset_to_load.hash = int(model_hash)
+        ch = g.preset.chains.add()
+        ch.row = int(row)
+        mm = ch.models.add()
+        mm.hash = int(model_hash)
+        mm.column = int(column)
+        self.send("Grid", g)
+        time.sleep(settle_s)
 
     def read_state(self, command, timeout_ms=2500):
         cls = P.message_class(command)

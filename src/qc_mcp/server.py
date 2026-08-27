@@ -47,8 +47,12 @@ mcp = FastMCP("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
    A success string is not proof — verify via current_preset_position + read.
 7. CorOS 4.1+ only: load_device_preset(row, col, name) drops a whole dialled-in
    knob set onto a block (list_device_presets to see them) — a fast first pass
-   before fine-tuning. device_info reports firmware + which features this unit
-   has; 4.1 tools say "needs CorOS 4.1" on older firmware instead of no-op'ing.
+   before fine-tuning; save_device_preset stores one back. device_info reports
+   firmware + which features this unit has; 4.1 tools say "needs CorOS 4.1" on
+   older firmware instead of no-op'ing.
+8. Footswitches: assign_stomp(row, col, 'A'-'H') binds a block to a stomp switch
+   (unassign_stomp removes it). Pair stomps with scenes for players in Hybrid
+   mode — scenes carry the tone, stomps toggle drives/boosts/delays.
 
 Deeper knowledge (routing recipes for shared-front multi-amp rigs, CPU model,
 protocol docs, GUI verification harness) lives in the qc-mcp repo — sessions
@@ -169,8 +173,14 @@ def _preset_summary(bp):
                        "split_points": split_points, "blocks": blocks,
                        "input_block": lane_ctrl(ch.input_control),
                        "output_block": lane_ctrl(ch.output_control)})
+    stomps = [{"footswitch": "ABCDEFGH"[a.stomp_index] if a.stomp_index < 8
+                              else a.stomp_index,
+               "row": a.row, "column": a.column,
+               "momentary": bool(dict(bp.stomp_is_momentary).get(a.stomp_index))}
+              for a in bp.stomp_mode_assignments]
     return {"name": bp.name, "tempo": bp.tempo, "default_scene": bp.default_scene,
             "scene_labels": [s for s in bp.scene_labels],
+            "stomp_assignments": stomps,
             "num_chains": len(bp.chains), "chains": chains}
 
 
@@ -1090,6 +1100,122 @@ def load_device_preset(row: int, column: int, preset: str,
             "block": (catalog.lookup(model_hash) or {}).get("name"),
             "row": row, "column": column,
             "params_changed": before != after, "params": after}
+
+
+@mcp.tool()
+def save_device_preset(row: int, column: int, name: str,
+                       is_default: bool = False) -> dict:
+    """WRITE (CorOS 4.1+): save the block at (row, column)'s current settings as
+    a reusable **user device preset** (max 32 per device), so the same dialled-in
+    amp/drive/reverb can be recalled into any rig.
+
+    The device REFUSES a save whose parameters already match an existing preset
+    for that model ("Preset Conflict" in the app) — change something first, or
+    just load the existing preset instead."""
+    gate = P.require("model_presets", "Device presets")
+    if gate:
+        return {"error": gate}
+    qc = _conn()
+    block = _block_at(qc, row, column)
+    if block is None:
+        return {"error": f"no block at row {row}, column {column}."}
+    before = {p["id"] for p in qc.list_model_presets(block["hash"])}
+    created = qc.save_model_preset(row, column, name, block["hash"],
+                                   is_default=is_default)
+    if created is None:
+        after = [p for p in qc.list_model_presets(block["hash"])
+                 if p["id"] not in before]
+        if not after:
+            return {"error": "device refused the save — its parameters are "
+                             "already stored in an existing preset for this "
+                             "device. Tweak a parameter, or load that preset.",
+                    "block": (catalog.lookup(block["hash"]) or {}).get("name")}
+        created = after[0]
+    return {"saved": created["name"], "id": created["id"],
+            "block": (catalog.lookup(block["hash"]) or {}).get("name"),
+            "row": row, "column": column, "is_default": is_default}
+
+
+@mcp.tool()
+def delete_device_preset(preset: str, model: str) -> dict:
+    """WRITE (CorOS 4.1+): delete one of YOUR device presets. Factory presets
+    cannot be removed. `preset` is an id or name from list_device_presets."""
+    gate = P.require("model_presets", "Device presets")
+    if gate:
+        return {"error": gate}
+    model_hash = _resolve_model(model)
+    if model_hash is None:
+        return {"error": f"no device matches {model!r}."}
+    qc = _conn()
+    choices = qc.list_model_presets(model_hash)
+    match = next((p for p in choices if not p["is_factory"]
+                  and (p["id"] == str(preset)
+                       or p["name"].lower() == str(preset).lower())), None)
+    if match is None:
+        return {"error": f"no user preset {preset!r} on that device.",
+                "your_presets": [p["name"] for p in choices if not p["is_factory"]]}
+    qc.delete_model_preset(match["id"], model_hash)
+    left = [p["name"] for p in qc.list_model_presets(model_hash)
+            if not p["is_factory"]]
+    return {"deleted": match["name"], "gone": match["name"] not in left,
+            "your_presets_left": left}
+
+
+@mcp.tool()
+def assign_stomp(row: int, column: int, footswitch: str,
+                 kind: str = "primary", momentary: bool = False) -> dict:
+    """WRITE: bind a footswitch to a block, so it can be stomped live in Stomp
+    (or Hybrid) mode. `footswitch` is 'A'-'H' or 0-7.
+
+    A block holds ONE assignment per kind — assigning again moves it. `kind`
+    'secondary' is the CorOS 4.1 Dual Footswitch feature: a second function on
+    its own switch, for devices that have one (Vintage Digital, Aeons Reverb);
+    on other devices it does nothing useful. `momentary=True` = active only
+    while held, otherwise latching. Verifies by reading the preset back."""
+    index = _stomp_index(footswitch)
+    if index is None:
+        return {"error": f"footswitch must be A-H or 0-7, not {footswitch!r}."}
+    if kind == "secondary" and not P.supports("dual_footswitch"):
+        return {"error": P.require("dual_footswitch", "Secondary footswitch assignments")}
+    qc = _conn()
+    if _block_at(qc, row, column) is None:
+        return {"error": f"no block at row {row}, column {column}."}
+    qc.assign_stomp(row, column, index, kind=kind, momentary=momentary)
+    return {"assigned": "ABCDEFGH"[index], **_stomp_state(qc, row, column, index)}
+
+
+@mcp.tool()
+def unassign_stomp(row: int, column: int, footswitch: str) -> dict:
+    """WRITE: unbind a footswitch from a block. 'A'-'H' or 0-7."""
+    index = _stomp_index(footswitch)
+    if index is None:
+        return {"error": f"footswitch must be A-H or 0-7, not {footswitch!r}."}
+    qc = _conn()
+    qc.unassign_stomp(row, column, index)
+    return {"unassigned": "ABCDEFGH"[index], **_stomp_state(qc, row, column, index)}
+
+
+def _stomp_index(footswitch):
+    text = str(footswitch).strip().upper()
+    if text.isdigit() and 0 <= int(text) <= 7:
+        return int(text)
+    return "ABCDEFGH".index(text) if text in "ABCDEFGH" and len(text) == 1 else None
+
+
+def _stomp_state(qc, row, column, index):
+    """Assignments + momentary flags as the device now reports them."""
+    bp = qc.get_current_preset()
+    if bp is None:
+        return {"note": "could not read the preset back to verify"}
+    from . import preset as _preset
+    assignments = _preset.describe(bp)["stomp_assignments"]
+    momentary = dict(bp.stomp_is_momentary)
+    return {"assignments": [{**a, "footswitch": "ABCDEFGH"[a["stomp_index"]],
+                             "momentary": bool(momentary.get(a["stomp_index"]))}
+                            for a in assignments],
+            "still_bound": any(a["row"] == row and a["column"] == column
+                               and a["stomp_index"] == index
+                               for a in assignments)}
 
 
 def _resolve_model(model):

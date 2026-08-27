@@ -121,8 +121,22 @@ def _png_size(path):
     return w, h
 
 
+def activate(app=APP, settle=0.5):
+    """Bring the app to the front. `screencapture -R` grabs a screen *region*,
+    not a window, so anything overlapping the app lands in the shot instead —
+    and a click would hit that other window too. Front it before every
+    capture/click rather than trusting whatever had focus."""
+    subprocess.run(["osascript", "-e",
+                    f'tell application "System Events" to set frontmost of '
+                    f'(first process whose name contains "{app}") to true'],
+                   capture_output=True)
+    time.sleep(settle)
+
+
 # --------------------------------------------------------------------------- capture
-def screenshot(path=SHOT, app=APP):
+def screenshot(path=SHOT, app=APP, front=True):
+    if front:
+        activate(app)
     b = window_bounds(app)
     if not b:
         raise RuntimeError(f"{app!r} window not found")
@@ -145,6 +159,7 @@ def _px_to_point(px, py, info):
 def click(px, py, info=None, double=False, app=APP):
     """Click at screenshot-pixel coords (auto-converts to screen points)."""
     info = info or screenshot(app=app)
+    activate(app, settle=0.25)      # focus can drift between commands
     x, y = _px_to_point(px, py, info)
     verb = "dc" if double else "c"
     subprocess.run(["cliclick", f"{verb}:{int(round(x))},{int(round(y))}"], check=True)

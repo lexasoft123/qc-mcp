@@ -456,12 +456,58 @@ matching hooks (`IOSettingsMessage.preset_to_load`,
   the target (`preset.chains[]{row}` + `models[]{hash, column}`). The block's
   parameters are replaced in place; read it back to confirm. Loading ids 1–4 onto
   a Myth Drive gave four distinct GAIN/TREBLE/LEVEL sets.
-- **Save (NOT reversed):** `ModelPresetMessage` has `create_from_row` /
-  `create_from_column` / `create_from_hash`, which read like "build a user preset
-  from this grid block", but CREATE and UPDATE variants of that message were all
-  silently ignored (user-preset count stayed at 0). Needs a GUI capture of the
-  app's own "save device preset". Same status as the stomp-assignment write op.
-- MCP: `list_device_presets`, `load_device_preset`.
+- **Select the slot first — this is the trick.** The device tracks exactly *one*
+  active grid slot for device-preset writes; the app's own resource file says the
+  loaded-preset field "is correct only for the open panel / selected grid slot".
+  Cortex Control sends this the instant a block editor opens:
+
+      ModelPreset { request_id, loaded_row, loaded_column }      # no action field
+
+  Note **no `action`** — i.e. CREATE(0), which here means *subscribe*. The device
+  answers with `loaded_preset_id`, the preset that block currently holds:
+  `""` = its settings match no preset, `"SpecialFactoryModelPresetID"` = factory
+  defaults. Skip this and every write below is silently ignored.
+- **Save** a user device preset (32 max per device) — again with no action field,
+  and note there is **no parameter payload and no `create_from_*`**: the device
+  snapshots the selected block itself.
+
+      ModelPreset { request_id,
+                    presets[0] { id{ is_factory:false, hash:<model> },
+                                 name, is_default } }
+
+  The reply echoes the created preset with its assigned `id.value` ("1", "2", …),
+  followed by a second message updating `loaded_preset_id` for the slot.
+  **The device refuses a save whose parameters already match an existing preset
+  for that model** — the app shows "Preset Conflict: … already stored in an
+  existing Preset", and the menu item greys out. Change a parameter first.
+- **Delete:** `ModelPreset{action=DELETE, presets[0].id{value, is_factory:false,
+  hash}}`. Factory presets can't be removed.
+- MCP: `list_device_presets`, `load_device_preset`, `save_device_preset`,
+  `delete_device_preset`.
+
+## 12b. Footswitch (stomp) assignments — `Grid`(1)
+
+Binding a block to a footswitch turned out to live on the **Grid** message, not a
+message of its own — a Grid UPDATE whose preset carries *only* the assignment:
+
+    Grid { action=UPDATE, request_id,
+           preset { stomp_mode_assignments[0] { row, column, stomp_index, type } } }
+
+`stomp_index` 0-7 = footswitches A-H; `type` is the CorOS 4.1 Dual Footswitch
+field (`PRIMARY`=0 bypass, `SECONDARY`=1 the device's second function, on the
+devices that have one). A block holds one assignment per kind — assigning again
+moves it. **Unassign is the same message with `action=DELETE`**, which also
+clears the switch's momentary flag.
+
+**Latching vs momentary must be a separate message.** The preset's
+`stomp_is_momentary` map (`{stomp_index: bool}`) is writable by Grid UPDATE, but
+only on its own: the device answers an assignment with its own
+`stomp_is_momentary` echo, which overwrites a flag sent in the same message.
+
+MCP: `assign_stomp`, `unassign_stomp`; `get_current_preset` reports
+`stomp_assignments`.
+
+## 12c. Still unreversed
 
 **`RemoteControl`(72)** — `RemoteControlMouse` (PRESS/RELEASE/MOVE/TAP/DRAG),
 `RemoteControlScreenshot {payload, x, y, w, h}`, `RemoteControlGraphicsTree` —

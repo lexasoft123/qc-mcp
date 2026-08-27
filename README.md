@@ -21,8 +21,10 @@ https://github.com/lexasoft123/qc-mcp
   catalog, lay out parallel/multiamp topologies with splitters + routing, set
   parameters, and save. (Reproduces complex multi-amp presets faithfully.)
 - **Live control** — switch presets, scenes (A–H), performance modes, master volume.
-- **Device presets** (CorOS 4.1) — list and recall a device's saved settings onto
-  any block, instead of dialling it in from scratch.
+- **Device presets** (CorOS 4.1) — list, recall and save a device's settings, so a
+  dialled-in amp or drive can be reused in any rig instead of rebuilt.
+- **Footswitch assignments** — bind blocks to stomp switches A–H (latching or
+  momentary), including 4.1's secondary/dual assignments.
 - **Two connection modes** — seize the device directly, or run **alongside a live
   Cortex Control** via a shared session (bridge mode).
 - **Works across firmware** — CorOS 4.0 and 4.1 both supported; the wire schema is
@@ -93,6 +95,8 @@ See [interceptor/](interceptor/) and PROTOCOL.md §11.
 | `clear_grid` | **write** | reset the grid to a clean single chain |
 | `switch_preset` / `switch_scene` / `switch_mode` | **write** | navigate presets, scenes A–H, modes |
 | `list_device_presets` / `load_device_preset` | read / **write** | a device's saved settings (CorOS 4.1+), recalled onto a block |
+| `save_device_preset` / `delete_device_preset` | **write** | store a block's current knobs as a reusable user device preset |
+| `assign_stomp` / `unassign_stomp` | **write** | bind a block to a footswitch (A–H), latching or momentary |
 | `set_master_volume`, `save_preset`, `connect`/`disconnect`, `device_info`, `cpu_load` | | |
 
 The Python API (`qc_mcp.transport.QuadCortex`, `qc_mcp.preset.PresetBuilder`) exposes
@@ -125,8 +129,9 @@ chunked 128‑byte reports. This project:
 
 Working: reading, live control, and **accurate preset building** (topology, routing,
 splitters/mixers, and parameters in real units). See [PLAN.md](PLAN.md).
-In progress: **scenes/stomps** — per‑scene parameter/bypass values and footswitch
-(stomp) assignments.
+Also working: per‑scene parameter/bypass values, footswitch (stomp) assignments,
+and device presets. Not yet reversed: `RemoteControl`(72), the 4.1 command for
+driving the QC's own screen.
 
 ## Layout
 

@@ -45,6 +45,9 @@ device's firmware (PROTOCOL.md §12).
 ## GUI harness + tests (`tools/gui/`)
 Drives Cortex Control (screenshot + click) and correlates the interposer protocol log.
 Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
+`screencapture -R` grabs a screen *region*, so `gui.py` now **fronts the app**
+before every shot/click — otherwise an overlapping window lands in the image and
+swallows the click.
 - `gui.py` — `bounds`/`home`/`shot`/`click`/`type`/`key`/`act`/`decode`. **`home`
   first** — clicks only map on the main Retina display (see `drive-gui-correlate-protocol`).
 - `mine_log.py` / `dump_catalog.py` — decode captured traffic, build a catalog snapshot.
@@ -110,9 +113,19 @@ Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
 - **CorOS version matters.** `connect`/`device_info` report `firmware` +
   `protocol_generation`; 4.1-only tools gate on `P.require(...)`. The device's
   human version is in `Version.zenos_git_hash` — `app_fw_version` is a build hash.
-- **Device presets (4.1)**: `list_device_presets` / `load_device_preset`. Loading
-  is a **Grid UPDATE with `update_type=MODEL_PRESET`**, not a ModelPreset write.
-  *Saving* a user device preset is NOT reversed yet (as with stomp assignment).
+- **Device presets (4.1)**: `list_device_presets` / `load_device_preset` /
+  `save_device_preset` / `delete_device_preset`. Loading is a **Grid UPDATE with
+  `update_type=MODEL_PRESET`**, not a ModelPreset write. Saving needs the device
+  to know which block you mean: `select_model_slot(row, col)` first (a
+  `ModelPreset` with **no action field** + `loaded_row`/`loaded_column`) — without
+  it every write is silently ignored. The device also **refuses a save whose
+  params match an existing preset** ("Preset Conflict"); tweak something first.
+- **Stomp assignments live on `Grid`**, not their own message: Grid UPDATE with
+  `preset.stomp_mode_assignments[]{row, column, stomp_index, type}` (A-H = 0-7;
+  `type` PRIMARY/SECONDARY = the 4.1 dual-footswitch). DELETE unassigns.
+  **Latching/momentary must be its own Grid UPDATE** (`stomp_is_momentary` map) —
+  sent alongside an assignment it's overwritten by the device's echo.
+  MCP: `assign_stomp` / `unassign_stomp`.
 
 ## Conventions
 - This is for interop/debugging on hardware you own + licensed software. Keep capture logs

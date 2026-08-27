@@ -892,6 +892,126 @@ class QuadCortex:
                         "is_default": pr.is_default})
         return out
 
+    STOMP_TYPES = {"primary": 0, "secondary": 1}
+
+    def assign_stomp(self, row, column, stomp_index, kind="primary",
+                     momentary=None, settle_s=1.0):
+        """Bind a footswitch (0-7 = A-H) to the block at (row, column).
+
+        Decoded from Cortex Control's "Assign footswitch" menu: a **Grid**(1)
+        UPDATE whose preset carries only `stomp_mode_assignments[]{row, column,
+        stomp_index, type}` — no other grid state. `kind` is 'primary' (bypass,
+        the default) or 'secondary'; SECONDARY is the CorOS 4.1 Dual Footswitch
+        feature and only means something on devices that have a second function
+        (Vintage Digital, Aeons Reverb).
+
+        `momentary=True` makes the switch momentary rather than latching, via
+        the preset's `stomp_is_momentary` map — the device reports that back as
+        a separate echo.
+        """
+        if kind not in self.STOMP_TYPES:
+            raise QCError(f"kind must be 'primary' or 'secondary', not {kind!r}")
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        a = g.preset.stomp_mode_assignments.add()
+        a.row = int(row)
+        a.column = int(column)
+        a.stomp_index = int(stomp_index)
+        if "type" in [f.name for f in a.DESCRIPTOR.fields]:
+            a.type = self.STOMP_TYPES[kind]
+        self.send("Grid", g)
+        time.sleep(settle_s)
+        if momentary is not None:
+            # Must be its own message: the device answers an assignment with its
+            # own stomp_is_momentary echo, which overwrites a flag sent alongside.
+            m = P.message_class("Grid")()
+            m.action = P.ACTION["UPDATE"]
+            m.request_id = self.next_request_id()
+            m.preset.stomp_is_momentary[int(stomp_index)] = bool(momentary)
+            self.send("Grid", m)
+            time.sleep(settle_s)
+
+    def unassign_stomp(self, row, column, stomp_index, settle_s=1.0):
+        """Unbind a footswitch from a block — a Grid **DELETE** naming the same
+        assignment. The device also clears that switch's momentary flag."""
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["DELETE"]
+        g.request_id = self.next_request_id()
+        a = g.preset.stomp_mode_assignments.add()
+        a.row = int(row)
+        a.column = int(column)
+        a.stomp_index = int(stomp_index)
+        self.send("Grid", g)
+        time.sleep(settle_s)
+
+    def select_model_slot(self, row, column, timeout_ms=3000):
+        """Tell the device which grid slot's editor is open, and read back which
+        device preset that block currently holds.
+
+        The device tracks exactly **one** active slot for device-preset writes —
+        Cortex Control sends this the moment a block editor opens, and the
+        firmware's own comment says the loaded-preset field "is correct only for
+        the open panel / selected grid slot". Saving without it is silently
+        ignored, because the device has no idea which block you mean.
+
+        `ModelPreset`(71) with **no action field** (CREATE=0) plus loaded_row /
+        loaded_column. Returns {"value", "is_factory", "hash"} — a value of
+        "SpecialFactoryModelPresetID" means the block's settings don't match any
+        saved preset.
+        """
+        cls = P.message_class("ModelPreset")
+        m = cls()
+        m.request_id = self.next_request_id()
+        m.loaded_row = int(row)
+        m.loaded_column = int(column)
+        _c, obj, _r = self.request("ModelPreset", m, timeout_ms=timeout_ms)
+        pid = getattr(obj, "loaded_preset_id", None)
+        if pid is None:
+            return None
+        return {"value": pid.value, "is_factory": pid.is_factory, "hash": pid.hash}
+
+    def save_model_preset(self, row, column, name, model_hash,
+                          is_default=False, timeout_ms=5000):
+        """Save the block at (row, column)'s current settings as a **user device
+        preset** (max 32 per device). Decoded from Cortex Control's own
+        "Save Current Parameters as…".
+
+        Two steps: select the slot (above), then `ModelPreset`(71) — again with
+        no action field — carrying `presets[0]{id{is_factory:false, hash}, name,
+        is_default}`. Note there is no payload of parameter values and no
+        `create_from_*`: the device snapshots the selected block itself. Returns
+        the created preset's id.
+        """
+        self.select_model_slot(row, column)
+        cls = P.message_class("ModelPreset")
+        m = cls()
+        m.request_id = self.next_request_id()
+        pr = m.presets.add()
+        pr.id.is_factory = False
+        pr.id.hash = int(model_hash)
+        pr.name = name
+        pr.is_default = bool(is_default)
+        _c, obj, _r = self.request("ModelPreset", m, timeout_ms=timeout_ms)
+        for created in getattr(obj, "presets", []):
+            return {"id": created.id.value, "name": created.name,
+                    "model_hash": created.id.hash,
+                    "is_default": created.is_default}
+        return None
+
+    def delete_model_preset(self, preset_id, model_hash, timeout_ms=5000):
+        """Delete a **user** device preset. Factory presets can't be removed."""
+        cls = P.message_class("ModelPreset")
+        m = cls()
+        m.action = P.ACTION["DELETE"]
+        m.request_id = self.next_request_id()
+        pr = m.presets.add()
+        pr.id.value = str(preset_id)
+        pr.id.is_factory = False
+        pr.id.hash = int(model_hash)
+        self.send("ModelPreset", m)
+        time.sleep(1.0)
+
     def load_model_preset(self, row, column, model_hash, preset_id,
                           is_factory=True, settle_s=1.5):
         """Apply a device preset to the block at (row, column).

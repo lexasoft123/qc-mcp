@@ -179,8 +179,23 @@ for utility blocks (Output EQ, I/O Settings) where the factory presets encode re
 voicings. `device_info` reports `firmware` and `protocol_generation`; on CorOS 4.0 these
 tools return a "needs CorOS 4.1" error rather than failing silently. Loading is a Grid
 UPDATE under the hood, so verify it the same way as any other write (read the block back
-— `load_device_preset` returns `params_changed` and the new values). **Saving** a user
-device preset is not reversed yet; save the whole preset instead.
+— `load_device_preset` returns `params_changed` and the new values).
+
+`save_device_preset(row, column, name)` stores a block's current knobs as a reusable
+user preset (32 per device); `delete_device_preset` removes one. The device **refuses
+a save whose parameters already match an existing preset** for that model — change
+something, or just load the preset that already holds those values.
+
+## 7. Footswitch (stomp) assignments
+`assign_stomp(row, column, "E")` binds a block to a footswitch (A-H), so it can be
+toggled live in Stomp or Hybrid mode; `unassign_stomp` removes it, and
+`get_current_preset` reports `stomp_assignments`. A block holds one assignment —
+assigning again moves it. `momentary=True` = active only while held.
+
+`kind="secondary"` is the CorOS 4.1 Dual Footswitch feature: a second function on its
+own switch, and only meaningful on devices that have one (Vintage Digital, Aeons
+Reverb). For a player in Hybrid mode, plan stomps alongside scenes — drives, boosts
+and delay toggles are what a footswitch is for, while scenes carry the whole tone.
 
 ## MCP tools — the complete interface (no scripts needed)
 The bridge is reliable now, so **do everything through MCP tools** — never fall back to
@@ -211,7 +226,10 @@ ad-hoc scripts for device control. The full toolbox:
   + the app header showing the name **without a `*`** (dirty marker). See the
   `save-empty-slot-hangs` memory.
 - **Device presets (CorOS 4.1+):** `list_device_presets(model)` /
-  `load_device_preset(row, column, preset)` — a whole knob set on one block (§6).
+  `load_device_preset(row, column, preset)` — a whole knob set on one block (§6) —
+  plus `save_device_preset` / `delete_device_preset`.
+- **Footswitches:** `assign_stomp(row, column, 'A'-'H', kind, momentary)` /
+  `unassign_stomp` (§7).
 - **Read / verify:** `get_current_preset`, `cpu_load(detail)`, `get_io_settings`,
   `current_preset_position`, `device_info` (firmware + which features this unit has). The only non-MCP helper is `tools/gui/gui.py shot` for a
   *visual* wiring screenshot — verification, not control.

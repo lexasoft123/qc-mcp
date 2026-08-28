@@ -34,3 +34,5 @@ app/node_modules/
 app/out/
 app/dist/
 app/*.tsbuildinfo
+
+app/dist/

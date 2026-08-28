@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { existsSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import type { Paths, Platform } from '../shared/types.js'
@@ -17,13 +17,53 @@ function isRepo(dir: string): boolean {
   }
 }
 
+let staged: string | null | undefined
+
 /**
- * Find the qc-mcp checkout. In development the app runs from <repo>/app, so
- * walking up finds it; a packaged build has no such luck and falls back to the
- * conventional location, which Preferences can override.
+ * A packaged Patchbay carries the qc-mcp sources as extraResources, but that
+ * copy sits inside the app bundle: read-only, and on macOS covered by the
+ * signature. Everything qc-mcp needs to do writes NEXT TO those sources —
+ * `python -m venv .venv`, and interceptor/build.sh dropping interpose.dylib and
+ * the instrumented app beside itself.
+ *
+ * So the payload is staged into userData once, and used from there. What comes
+ * out is the layout of an ordinary checkout, which is the point: the launcher
+ * then has exactly one code path whether it was installed or run from the repo.
+ */
+function stagedRepo(): string | null {
+  if (staged !== undefined) return staged
+  staged = null
+  if (!app.isPackaged) return staged
+  const src = join(process.resourcesPath, 'qc-mcp')
+  if (!existsSync(src)) return staged
+  const dest = join(app.getPath('userData'), 'qc-mcp')
+  const stamp = join(dest, '.staged')
+  const version = app.getVersion()
+  try {
+    if (!existsSync(stamp) || readFileSync(stamp, 'utf8').trim() !== version) {
+      mkdirSync(dest, { recursive: true })
+      // Only the payload's own entries are copied, so a .venv already sitting
+      // in dest survives an upgrade — re-running setup after every update
+      // would be a poor trade for a source refresh.
+      cpSync(src, dest, { recursive: true, dereference: true, force: true })
+      writeFileSync(stamp, version + '\n', 'utf8')
+    }
+    staged = dest
+  } catch {
+    staged = existsSync(dest) ? dest : null
+  }
+  return staged
+}
+
+/**
+ * Find the qc-mcp checkout: an explicit override first, then the staged payload
+ * of a packaged build, then a walk up from the app path (which is what finds it
+ * in development, running from <repo>/app).
  */
 export function findRepo(override?: string | null): string {
   if (override && isRepo(override)) return override
+  const bundled = stagedRepo()
+  if (bundled && isRepo(bundled)) return bundled
   let dir = app.getAppPath()
   for (let i = 0; i < 6; i++) {
     if (isRepo(dir)) return dir

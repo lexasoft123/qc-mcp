@@ -1,0 +1,55 @@
+appId: com.lexasoft.patchbay
+productName: Patchbay
+directories:
+  output: dist
+files:
+  - '!src/*'
+  - '!scripts/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!electron-builder.yml'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{.gitignore,README.md,package-lock.json}'
+asar: true
+npmRebuild: false
+afterPack: scripts/afterPack.cjs
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+# The qc-mcp payload. It is staged out of the bundle into userData on first run
+# (stagedRepo() in src/main/paths.ts) because the venv and the instrumented
+# build both have to write next to these sources — and inside a signed .app
+# they cannot. Sources only: no .venv, no built dylib, no instrumented copy.
+extraResources:
+  - from: ../src
+    to: qc-mcp/src
+  - from: ../proto
+    to: qc-mcp/proto
+  - from: ../interceptor
+    to: qc-mcp/interceptor
+    filter: ['*.c', '*.sh']
+  - from: ../pyproject.toml
+    to: qc-mcp/pyproject.toml
+  - from: ../README.md
+    to: qc-mcp/README.md
+  - from: ../LICENSE
+    to: qc-mcp/LICENSE
+
+mac:
+  # No signing certificate wired up yet — ships unsigned (right-click → Open).
+  # To sign later: drop `identity`, add CSC_LINK / CSC_KEY_PASSWORD in CI.
+  identity: null
+  category: public.app-category.music
+  darkModeSupport: true
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+dmg:
+  title: ${productName}
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false

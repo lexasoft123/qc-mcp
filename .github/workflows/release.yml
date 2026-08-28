@@ -9,11 +9,6 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
-    # TEMPORARY: prove the packaging path on both runners before this merges.
-    # workflow_dispatch only works from the default branch, so a branch push is
-    # the only way to exercise it pre-merge. Nothing is published — the attach
-    # step is gated on a tag ref. Removed in the next commit.
-    branches: ['claude/ci-and-packaging']
   schedule:
     - cron: '31 5 * * 2'
 

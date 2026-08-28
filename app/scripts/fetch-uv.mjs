@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const UV_VERSION = '0.12.7'
+const UV_VERSION = '0.12.7'
 
 /** sha256 of each release archive, from the .sha256 files astral-sh publishes. */
 const TARGETS = {
@@ -45,17 +45,16 @@ const TARGETS = {
   }
 }
 
-/** electron-builder's (platform, arch) pair -> the uv target that runs there. */
-export function targetFor(platform, arch) {
-  if (platform === 'darwin') return arch === 'x64' ? 'x86_64-apple-darwin' : 'aarch64-apple-darwin'
-  if (platform === 'win32') return 'x86_64-pc-windows-msvc'
-  return null
+/** The targets a host can build for. Anything else has nothing to fetch. */
+const HOST_TARGETS = {
+  darwin: ['aarch64-apple-darwin', 'x86_64-apple-darwin'],
+  win32: ['x86_64-pc-windows-msvc']
 }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-export const UV_DIR = join(ROOT, 'resources', 'uv')
+const UV_DIR = join(ROOT, 'resources', 'uv')
 
-export const uvPathFor = (target) => join(UV_DIR, target, TARGETS[target].bin)
+const uvPathFor = (target) => join(UV_DIR, target, TARGETS[target].bin)
 
 async function fetchOne(target) {
   const spec = TARGETS[target]
@@ -100,9 +99,7 @@ async function fetchOne(target) {
 
 async function main() {
   const all = process.argv.includes('--all')
-  const wanted = all
-    ? Object.keys(TARGETS)
-    : Object.keys(TARGETS).filter((t) => t.includes(process.platform === 'win32' ? 'windows' : 'darwin'))
+  const wanted = all ? Object.keys(TARGETS) : (HOST_TARGETS[process.platform] ?? [])
   if (!wanted.length) {
     console.log(`uv: nothing to fetch for ${process.platform} (Patchbay ships macOS and Windows only)`)
     return
@@ -111,10 +108,7 @@ async function main() {
   for (const t of wanted) await fetchOne(t)
 }
 
-// Only run when invoked directly; afterPack imports uvPathFor/targetFor.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main().catch((e) => {
-    console.error(`\nuv download failed: ${e.message}`)
-    process.exit(1)
-  })
-}
+main().catch((e) => {
+  console.error(`\nuv download failed: ${e.message}`)
+  process.exit(1)
+})

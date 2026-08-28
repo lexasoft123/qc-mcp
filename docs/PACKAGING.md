@@ -68,6 +68,12 @@ which is what everything downstream already assumes: `pathsFor()` in
 [paths.ts](../app/src/main/paths.ts), and the command path Patchbay writes into
 each MCP client's config.
 
+The install is **editable** on purpose. `stagedRepo()` refreshes the payload
+whenever the app version changes, and an editable install already points at
+those same sources — so a Patchbay upgrade ships new qc-mcp code without
+rebuilding the environment, and the `.venv` inside the staging directory
+survives because only the payload's own entries are copied over it.
+
 **No extras.** `[gui]` is pyobjc (~35 MB) for the `tools/gui/` harness, and
 `tools/` is not part of the payload. Nothing under `src/qc_mcp` imports it — the
 macOS HID transport is ctypes against IOKit.
@@ -119,6 +125,10 @@ up inside a signed bundle. Bump both together.
 
 1. Run the offline Python suite. A red suite never gets packaged.
 2. `npm ci`, set the version from the tag, fetch uv (cached), build, package.
+   macOS packages **one arch per `electron-builder` invocation**. A single
+   `--mac` run builds both DMGs in parallel and each mounts its volume under
+   the same title, so they collide on `/Volumes/Patchbay` and `hdiutil detach`
+   fails every retry. Do not merge them back into one command.
 3. Upload artifacts on every run.
 4. On a `v*` tag only, create the release and attach the dmg/exe. A hyphenated
    tag (`v0.2.0-rc1`) is marked prerelease. `docs/release-notes/<tag>.md`, if

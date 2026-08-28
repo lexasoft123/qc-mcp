@@ -5,6 +5,7 @@ quit while connected. Note: IOHIDDeviceSetReport returns a benign 0xe0005000 on
 this device (the official app ignores it too) — it is NOT an error.
 """
 from __future__ import annotations
+import functools
 import threading
 import time
 
@@ -14,6 +15,22 @@ from .iohid import IOHIDTransport
 
 class QCError(Exception):
     pass
+
+
+def _serialized(method):
+    """Hold the device for one whole exchange (send, then collect the reply).
+
+    A read is send-then-consume-until-matching, and `_pending` is shared, so two
+    interleaved exchanges eat each other's replies and both come back empty —
+    the same failure as running two readers on the bridge FIFO. Harmless under
+    mcp 1.x, which runs sync tool handlers one at a time on the event loop, but
+    mcp 2.x dispatches them to worker threads and really does run them at once.
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._io_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 class QuadCortex:
@@ -35,6 +52,8 @@ class QuadCortex:
         self._session_id = session_id
         self._pending = []  # decoded (cmd, obj, raw) not yet consumed
         self._send_lock = threading.Lock()
+        # Re-entrant: the exchange methods below call _collect() while holding it.
+        self._io_lock = threading.RLock()
         self._hb_stop = None
         self._hb_thread = None
         # Filled in by detect_version() once the device answers a Version READ.
@@ -220,6 +239,7 @@ class QuadCortex:
             for rpt in reports:
                 self.io.set_report(P.REPORT_HOST_TO_QC, rpt[1:], include_id=True)
 
+    @_serialized
     def _collect(self, seconds):
         """Pump input, decode any complete messages into self._pending."""
         for report_id, data in self.io.read_reports(seconds):
@@ -233,6 +253,7 @@ class QuadCortex:
                     obj = None
                 self._pending.append((cmd, obj, raw, pb))
 
+    @_serialized
     def request(self, command, proto_message=None, proto_bytes=None,
                 expect=None, timeout_ms=2000):
         want = command if isinstance(command, int) else P.NAME_TO_CMD[command]
@@ -266,6 +287,7 @@ class QuadCortex:
             return best
         raise QCError(f"no response to {command} within {timeout_ms}ms")
 
+    @_serialized
     def add_block(self, model_hash, row=0, column=0, wait_echo_ms=800):
         """Place a device block on the grid at (row, column). Sends a Grid
         UPDATE carrying just that block; the device echoes it back on success.
@@ -306,6 +328,7 @@ class QuadCortex:
             bp = self._read_preset_once(timeout_ms)
         return bp
 
+    @_serialized
     def _read_preset_once(self, timeout_ms):
         cls = P.message_class("RecallPreset")
         m = cls(action=P.ACTION["READ"])
@@ -540,6 +563,7 @@ class QuadCortex:
         fi.name = name
         self.send("File", f)
 
+    @_serialized
     def read_message(self, command, timeout_ms=4000):
         """Send a READ and return the decoded reply message (or None)."""
         cls = P.message_class(command)
@@ -829,6 +853,7 @@ class QuadCortex:
             m.is_factory = is_factory
         self.send("SetlistPosition", m)
 
+    @_serialized
     def list_directory(self, timeout_ms=30000, quiet_ms=1500):
         """Send a File READ and collect the full stream of File UPDATE folder
         messages the device emits (presets, IRs, captures). Returns the structured

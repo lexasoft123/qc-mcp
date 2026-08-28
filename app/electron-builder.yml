@@ -12,6 +12,9 @@ files:
   - '!electron-builder.yml'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!{.gitignore,README.md,package-lock.json}'
+  # TypeScript's incremental build state — 84 KB of local build paths that were
+  # riding along inside the asar.
+  - '!*.tsbuildinfo'
 asar: true
 npmRebuild: false
 

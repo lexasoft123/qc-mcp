@@ -1,0 +1,209 @@
+<meta charset="utf-8" />
+<title>Patchbay __VERSION__ poster</title>
+<style>
+  @font-face {
+    font-family: 'Bricolage';
+    src: url('__REPO__/app/node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wght-normal.woff2') format('woff2');
+    font-weight: 200 800;
+  }
+  @font-face {
+    font-family: 'Martian';
+    src: url('__REPO__/app/node_modules/@fontsource-variable/martian-mono/files/martian-mono-latin-wght-normal.woff2') format('woff2');
+    font-weight: 100 800;
+  }
+
+  /* the app's own tokens — the poster should look like the product */
+  :root {
+    --bg: #0b0907;
+    --panel: #12100d;
+    --accent: #ffa028;
+    --hot: #ffd9a0;
+    --deep: #a8500f;
+    --text: #f6f1e8;
+    --dim: #a99e8a;
+    --faint: #7b7263;
+    --line: rgba(255, 240, 214, 0.12);
+    --ok: #7fd493;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1024px; height: 1280px;
+    background: var(--bg); color: var(--text);
+    font-family: 'Bricolage', system-ui, sans-serif;
+    overflow: hidden; position: relative;
+  }
+
+  /* Stage light: hot centre, dark corners — the studio at night */
+  .bloom {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(820px 660px at 50% 50%, rgba(255, 160, 40, 0.26), transparent 66%),
+      radial-gradient(560px 520px at 4% 86%, rgba(168, 80, 15, 0.18), transparent 70%),
+      radial-gradient(560px 460px at 97% 20%, rgba(255, 190, 88, 0.12), transparent 70%);
+  }
+  .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(1100px 900px at 50% 46%, transparent 46%, rgba(0, 0, 0, 0.72) 100%);
+  }
+  .grain {
+    position: absolute; inset: 0; opacity: 0.62; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='0.5'/></svg>");
+  }
+
+  .sheet { position: absolute; inset: 0; padding: 48px 52px 44px; display: flex; flex-direction: column; }
+
+  /* ---- masthead ---- */
+  .top { display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 17px; }
+  /* four bars — it is a Quad Cortex, and the Grid is four rows */
+  .bars { display: flex; flex-direction: column; gap: 5px; }
+  .bars i { display: block; height: 7px; border-radius: 4px; background: var(--accent); }
+  .bars i:nth-child(1) { width: 27px; opacity: .45; }
+  .bars i:nth-child(2) { width: 46px; }
+  .bars i:nth-child(3) { width: 34px; opacity: .8; }
+  .bars i:nth-child(4) { width: 40px; opacity: .6; }
+  .wordmark { font-size: 44px; font-weight: 800; letter-spacing: -0.025em; }
+  .wordmark b { color: var(--accent); font-style: italic; font-weight: 800; }
+  .ver {
+    font-family: 'Martian', monospace; font-size: 25px; font-weight: 600;
+    color: #241705; background: var(--accent);
+    padding: 10px 20px 9px; border-radius: 999px; letter-spacing: 0.01em;
+    box-shadow: 0 0 36px rgba(255, 160, 40, 0.5);
+  }
+
+  /* ---- thesis: few words, very large ---- */
+  h1 {
+    margin-top: 30px;
+    font-size: 96px; line-height: 0.9; font-weight: 800;
+    letter-spacing: -0.045em; text-wrap: balance;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .sub {
+    margin-top: 20px; font-size: 37px; line-height: 1.16;
+    color: var(--dim); font-weight: 500; letter-spacing: -0.015em;
+  }
+
+  /* the signal, as one rule */
+  .spectrum { margin-top: 24px; display: flex; gap: 5px; height: 9px; align-items: center; }
+  .spectrum i { border-radius: 4px; height: 9px; background: var(--accent); }
+  .spectrum i:nth-child(odd) { flex: 1; opacity: .32; }
+  .spectrum i:nth-child(even) { width: 46px; }
+
+  /* ---- collage: STRUCTURE ----
+     Chrome only — what makes a rectangle read as a plate. Every poster keeps
+     this block verbatim. The POSITION block below is the part re-composed per
+     release, and the two are separated because they were not: the absolutely
+     positioned classes used to sit between the positioned ones, so replacing
+     "the collage CSS" silently took them and every fragment fell into normal
+     flow. */
+  .collage { position: relative; height: 566px; margin: 20px -52px 0; }
+  .frag {
+    position: absolute; border-radius: 12px; overflow: hidden;
+    border: 1px solid var(--line); background: var(--panel);
+    box-shadow: 0 34px 70px rgba(0, 0, 0, 0.78), 0 6px 18px rgba(0, 0, 0, 0.6);
+  }
+  .frag img { display: block; }
+
+  /* The zoomed detail — one control, blown up, accent-glowed. */
+  .plate {
+    position: absolute; z-index: 6; border-radius: 14px; overflow: hidden;
+    border: 1px solid rgba(255, 160, 40, 0.55);
+    box-shadow: 0 0 52px rgba(255, 160, 40, 0.4), 0 22px 44px rgba(0, 0, 0, 0.8);
+  }
+  .plate img { display: block; }
+
+  /* ---- collage: POSITION ----
+     Per-release. Replace freely; the STRUCTURE block above must survive.
+     Widths on .frag/.plate are the BORDER box and each has a 1px border, so
+     they are 2px MORE than the image inside them. The content box must equal
+     the width in the manifest, or `img { width: 100% }` resamples at 0.99x —
+     same size on screen, every pixel softer, nothing reporting it.
+     `check-widths.cjs <poster.html> <widths.json>` is what catches it.
+
+     These are app windows at 1960x1432 (ratio 1.369). Never crop one shorter
+     to fit a box: a window that is not its own shape stops reading as a window.
+     Set the width, let the height follow, and let the plate carry the detail. */
+  /* Fully inside the bleed. This was at left:-74px, which sliced the window's
+     own wordmark — a fragment cut through text reads as a broken export, and
+     the rotation swings the corners ~13px further out, so the inset has to
+     clear that too. */
+  .f-home    { left: 16px;   top: 36px;  width: 602px; transform: rotate(-3.4deg); z-index: 2; }
+  .f-home img    { width: 600px; }
+
+  .f-console { right: 4px;   top: -6px;  width: 432px; transform: rotate(3.1deg); z-index: 3; }
+  .f-console img { width: 430px; }
+
+  .f-logs    { right: 52px;  top: 262px; width: 402px; transform: rotate(2.2deg); z-index: 4; }
+  .f-logs img    { width: 400px; }
+
+  /* The zoom comes out of the Console fragment, which is legitimate: at 430px
+     that card is texture, so the plate reads as a detail rather than a repeat.
+     The rejected version zoomed Home's signal path, which IS legible in its
+     fragment — that one read as a duplicate. */
+  .pl-dev    { left: 250px;  top: 404px; transform: rotate(-5.2deg); }
+  .pl-dev img    { width: 470px; }
+
+  .note {
+    position: absolute; font-family: 'Martian', monospace; font-size: 23px;
+    font-weight: 600; letter-spacing: 0.02em; color: var(--accent); z-index: 7;
+    text-shadow: 0 3px 16px rgba(0, 0, 0, 0.95);
+  }
+  .n1 { left: 262px; top: 528px; }
+
+  /* ---- what changed: three short lines, sized for a phone ---- */
+  .foot { margin-top: 22px; display: flex; flex-direction: column; gap: 15px; }
+  .bullet { display: flex; align-items: center; gap: 16px; font-size: 32px; letter-spacing: -0.02em; }
+  .bullet i { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--accent); }
+  .bullet b { font-weight: 700; }
+  .bullet span { color: var(--dim); font-weight: 500; }
+  .plat {
+    margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: 'Martian', monospace; font-size: 24px; letter-spacing: 0.03em;
+    color: var(--faint); text-transform: uppercase; font-weight: 500;
+  }
+  .plat b { color: var(--text); font-weight: 600; }
+</style>
+
+<div class="bloom"></div>
+<div class="vignette"></div>
+<div class="grain"></div>
+
+<div class="sheet">
+  <div class="top">
+    <div class="brand">
+      <div class="bars"><i></i><i></i><i></i><i></i></div>
+      <div class="wordmark">Patch<b>bay</b></div>
+    </div>
+    <div class="ver">__VERSION__</div>
+  </div>
+
+  <h1>Ask Claude <em>for a tone</em>.</h1>
+  <div class="sub">It builds it on your Quad Cortex.</div>
+
+  <div class="spectrum">
+    <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+  </div>
+
+  <div class="collage">
+    <div class="frag f-home"><img src="__SHOTS__/frag-home.png" /></div>
+    <div class="frag f-console"><img src="__SHOTS__/frag-console.png" /></div>
+    <div class="frag f-logs"><img src="__SHOTS__/frag-logs.png" /></div>
+
+    <div class="note n1">usb-hid · not midi</div>
+    <div class="plate pl-dev"><img src="__SHOTS__/zoom-device.png" /></div>
+  </div>
+
+  <div class="foot">
+    <div class="bullet"><i></i><b>One button.</b><span>It brings its own Python.</span></div>
+    <div class="bullet"><i></i><b>Cortex Control keeps running.</b><span>Same session, shared.</span></div>
+    <div class="bullet"><i></i><b>Every client at once.</b><span>One daemon owns the device.</span></div>
+  </div>
+
+  <div class="plat">
+    <div><b>macOS</b> · <b>Windows</b></div>
+    <div>Quad Cortex · CorOS 4.0 / 4.1</div>
+  </div>
+</div>

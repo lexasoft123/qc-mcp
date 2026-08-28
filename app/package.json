@@ -2,7 +2,7 @@
   "name": "patchbay",
   "version": "0.1.0",
   "private": true,
-  "description": "Launcher for qc-mcp — installs the MCP, runs the daemon, opens Cortex Control",
+  "description": "Launcher for qc-mcp \u2014 installs the MCP, runs the daemon, opens Cortex Control",
   "author": "lexasoft <lexasoft@gmail.com>",
   "license": "MIT",
   "main": "./out/main/index.js",
@@ -10,19 +10,23 @@
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
-  },
-  "dependencies": {
-    "@fontsource-variable/bricolage-grotesque": "^5.2.5",
-    "@fontsource-variable/martian-mono": "^5.1.1",
-    "@singz/ui": "https://github.com/lexasoft123/singz-ui/archive/refs/tags/v1.1.0.tar.gz"
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist": "npm run fetch:uv && npm run build && electron-builder",
+    "dist:mac": "npm run fetch:uv && npm run build && electron-builder --mac dmg:arm64 && electron-builder --mac dmg:x64",
+    "dist:win": "npm run fetch:uv && npm run build && electron-builder --win",
+    "fetch:uv": "node scripts/fetch-uv.mjs",
+    "icons": "electron build/icon/build-icons.cjs"
   },
   "devDependencies": {
+    "@fontsource-variable/bricolage-grotesque": "^5.2.5",
+    "@fontsource-variable/martian-mono": "^5.1.1",
+    "@singz/ui": "https://github.com/lexasoft123/singz-ui/archive/refs/tags/v1.1.0.tar.gz",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

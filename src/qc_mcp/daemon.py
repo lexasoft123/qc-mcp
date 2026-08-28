@@ -371,7 +371,7 @@ class SocketTransport:
             sock = _connect(self.path)
         except Exception as exc:
             raise BridgeError(
-                f"no qc-mcp daemon at {self.path} — start it with "
+                f"no qc-mcp daemon at {self.path}; start it with "
                 f"`qc-mcp --daemon --socket {self.path}`") from exc
         sock.settimeout(None)
         self.link = _Lines(sock)
@@ -437,7 +437,7 @@ def serve(socket_path: str, mode: str = "auto") -> int:
             share = sys.platform == "win32"   # a second, non-exclusive handle
         elif mode == "bridge":
             raise BridgeError(
-                "bridge mode needs Cortex Control running — the instrumented "
+                "bridge mode needs Cortex Control running: the instrumented "
                 "build on macOS (interceptor/run-bridge.sh), the stock app on "
                 "Windows")
 

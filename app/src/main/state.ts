@@ -5,7 +5,7 @@ import * as logs from './logs.js'
 import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
 import { IS_MAC, PLATFORM, findRepo, pathsFor } from './paths.js'
-import { cortexPid, findPython, hasClang, readCortex, readDevice } from './system.js'
+import { cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
 import { exists } from './util.js'
 
 let prefs: Prefs = prefsStore.DEFAULTS
@@ -51,10 +51,8 @@ function checksFrom(
   const list: Check[] = [
     {
       id: 'python',
-      title: 'Python 3.10 or newer',
-      detail: python.version
-        ? `<code>${python.path}</code> · ${python.version}`
-        : `<code>${python.path}</code> — not found`,
+      title: python.uv ? 'Python (bundled)' : 'Python 3.10 or newer',
+      detail: pythonDetail(python),
       status: python.ok ? 'ok' : 'missing',
       fixable: false
     },

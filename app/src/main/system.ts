@@ -1,14 +1,35 @@
 import { join } from 'node:path'
 import type { CortexInfo, DeviceInfo, InstrumentedInfo, Paths } from '../shared/types.js'
-import { IS_MAC, QC_PID, QC_VID, instrumentedApp } from './paths.js'
+import { IS_MAC, QC_PID, QC_VID, UV_PYTHON, instrumentedApp, uvBin } from './paths.js'
 import { exists, ps, run } from './util.js'
 
 // ── python ──────────────────────────────────────────────────────────────
 
-export interface PythonInfo { path: string; version: string | null; ok: boolean }
+export interface PythonInfo {
+  /** The command that builds the environment: bundled uv, or a system Python. */
+  path: string
+  version: string | null
+  ok: boolean
+  /** True when `path` is the bundled uv, which installs its own interpreter. */
+  uv: boolean
+}
 
-/** The interpreter used to CREATE the venv, not the one inside it. */
+/**
+ * What will BUILD the environment — not the interpreter that ends up inside it.
+ *
+ * The bundled uv wins whenever it is present, and it is the reason this check
+ * can pass on a stock machine at all: macOS's /usr/bin/python3 is 3.9.6, under
+ * the >=3.10 the package requires, and Windows ships no Python. Falling back to
+ * a system Python keeps a plain `git clone` + `npm run dev` working with no
+ * fetch step.
+ */
 export async function findPython(): Promise<PythonInfo> {
+  const uv = uvBin()
+  if (uv) {
+    const r = await run(uv, ['--version'], { timeout: 5000 })
+    const v = r.out.trim().match(/uv (\S+)/)?.[1] ?? null
+    if (r.code === 0) return { path: uv, version: v, ok: true, uv: true }
+  }
   const candidates = IS_MAC
     ? [['python3', []], ['/usr/bin/python3', []]] as const
     : [['py', ['-3']], ['python', []]] as const
@@ -17,9 +38,15 @@ export async function findPython(): Promise<PythonInfo> {
     const m = (r.out + r.err).match(/Python (\d+)\.(\d+)\.(\d+)/)
     if (!m) continue
     const ok = Number(m[1]) > 3 || (Number(m[1]) === 3 && Number(m[2]) >= 10)
-    return { path: pre.length ? `${cmd} ${pre.join(' ')}` : cmd, version: m[0].replace('Python ', ''), ok }
+    return { path: pre.length ? `${cmd} ${pre.join(' ')}` : cmd, version: m[0].replace('Python ', ''), ok, uv: false }
   }
-  return { path: IS_MAC ? 'python3' : 'py -3', version: null, ok: false }
+  return { path: IS_MAC ? 'python3' : 'py -3', version: null, ok: false, uv: false }
+}
+
+/** Human label for the python check — the uv case has nothing to install. */
+export function pythonDetail(p: PythonInfo): string {
+  if (p.uv) return `bundled <code>uv ${p.version ?? ''}</code> installs Python ${UV_PYTHON} — nothing to set up`
+  return p.version ? `<code>${p.path}</code> · ${p.version}` : `<code>${p.path}</code> — not found`
 }
 
 export async function hasClang(): Promise<boolean> {

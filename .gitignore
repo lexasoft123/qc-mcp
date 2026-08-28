@@ -3,8 +3,10 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-build/
-dist/
+# root-anchored: setuptools' build/ and dist/ live at the repo root, and an
+# unanchored rule also swallowed app/build/, where the app icons live
+/build/
+/dist/
 
 # Interceptor build artifacts — do NOT commit a copy of Cortex Control
 interceptor/CortexControl-instrumented.app/
@@ -34,3 +36,14 @@ app/node_modules/
 app/out/
 app/dist/
 app/*.tsbuildinfo
+
+app/dist/
+
+# fetched by app/scripts/fetch-uv.mjs, not committed (~40 MB each)
+app/resources/uv/
+
+# icon previews rendered by build/icon/render.cjs; the shipped icons
+# (app/build/icon.icns|.ico|.png) ARE committed
+app/build/icon/patchbay-*.png
+app/build/icon/Patchbay.iconset/
+app/build/icon/ico/

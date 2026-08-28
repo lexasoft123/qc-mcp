@@ -45,9 +45,12 @@ device's firmware (PROTOCOL.md §12).
 ## GUI harness + tests (`tools/gui/`)
 Drives Cortex Control (screenshot + click) and correlates the interposer protocol log.
 Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
-`screencapture -R` grabs a screen *region*, so `gui.py` now **fronts the app**
-before every shot/click — otherwise an overlapping window lands in the image and
-swallows the click.
+**Capture and reads no longer touch the screen:** `shot` uses `screencapture -l
+<winid>` (renders that window alone, occluded or parked off-screen), and `ax`
+reads JUCE's accessibility tree — labelled controls, live values, exact frames,
+no focus. Only clicking needs the screen (JUCE ignores AXPress and
+CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
+`park`/`home` move the window off every display and back.
 - `gui.py` — `bounds`/`home`/`shot`/`click`/`type`/`key`/`act`/`decode`. **`home`
   first** — clicks only map on the main Retina display (see `drive-gui-correlate-protocol`).
 - `mine_log.py` / `dump_catalog.py` — decode captured traffic, build a catalog snapshot.

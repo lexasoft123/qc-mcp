@@ -1,8 +1,10 @@
-"""High-level Quad Cortex transport over IOKit HID (see iohid.py).
+"""High-level Quad Cortex transport over the platform HID backend (see
+`backend.open_hid`: IOKit on macOS, hid.dll on Windows).
 
 Requires exclusive HID access (opens with seize), so Cortex Control must be
 quit while connected. Note: IOHIDDeviceSetReport returns a benign 0xe0005000 on
-this device (the official app ignores it too) — it is NOT an error.
+this device (the official app ignores it too) — it is NOT an error; the Windows
+backend returns 0 there. Nothing upstream inspects the value either way.
 """
 from __future__ import annotations
 import functools
@@ -10,7 +12,7 @@ import threading
 import time
 
 from . import protocol as P
-from .iohid import IOHIDTransport
+from .backend import open_bridge, open_hid
 
 
 class QCError(Exception):
@@ -34,15 +36,21 @@ def _serialized(method):
 
 
 class QuadCortex:
-    def __init__(self, session_id="claudemcp0000000000000000000000", bridge=False):
-        # bridge=True shares Cortex Control's live session over the interposer
-        # FIFOs (app + MCP run simultaneously); otherwise seize the device directly.
+    def __init__(self, session_id="claudemcp0000000000000000000000", bridge=False,
+                 share=False):
+        # Three ways in, all behind the same backend API:
+        #   bridge=True  share Cortex Control's session through the interposer
+        #                (macOS: the app seizes the device, so this is the only way)
+        #   share=True   our own NON-exclusive handle next to the running app
+        #                (Windows: the HID stack copies every input report to every
+        #                open handle, so no interposer is needed - see docs/WINDOWS.md)
+        #   neither      seize the device for ourselves
         self.bridge = bridge
+        self.shared = share
         if bridge:
-            from .bridge import FifoBridge
-            self.io = FifoBridge()
+            self.io = open_bridge()
         else:
-            self.io = IOHIDTransport(seize=True)
+            self.io = open_hid(seize=not share)
         self._rx = P.Reassembler()
         # High, distinctive base so our request_ids never collide with Cortex
         # Control's (small, incrementing) ids when sharing its session in bridge mode.
@@ -62,11 +70,16 @@ class QuadCortex:
         self.custom_name = ""         # user label, for multi-device setups (4.1+)
         self.protocol_version = P.LATEST_VERSION
         self.protocol_version_verified = False
+        # Non-benign set_report codes seen this session. Reads that time out with
+        # a non-zero count here mean our frames are not reaching the device.
+        self.write_errors = 0
+        self.last_write_error = None
 
     # -- lifecycle --
     def open(self, handshake=True):
         self.io.open()
         # In bridge mode Cortex Control already owns the handshake + heartbeat.
+        # A shared handle does NOT - it is our own session alongside the app's.
         if handshake and not self.bridge:
             self._start_heartbeat()   # keep session "online" (required for reads)
             self._handshake()
@@ -235,9 +248,20 @@ class QuadCortex:
         full = P.encode_message(command, proto_bytes)
         reports = P.message_to_reports(full)
         # serialize against the heartbeat thread so frames don't interleave.
+        benign = getattr(self.io, "BENIGN_WRITE_CODES", frozenset({0}))
         with self._send_lock:
             for rpt in reports:
-                self.io.set_report(P.REPORT_HOST_TO_QC, rpt[1:], include_id=True)
+                rc = self.io.set_report(P.REPORT_HOST_TO_QC, rpt[1:], include_id=True)
+                if rc is not None and rc not in benign:
+                    # NOT fatal: on Windows ERROR_GEN_FAILURE(31) comes back even
+                    # on an exclusive handle whose writes plainly do land (the
+                    # full preset build/save e2e runs through it), so raising here
+                    # breaks a working path. But it is also exactly what a write
+                    # that never reaches the device returns, which is how a shared
+                    # handle can look like it is controlling the QC while every
+                    # write is dropped. So: count it, expose it, don't guess.
+                    self.write_errors += 1
+                    self.last_write_error = rc
 
     @_serialized
     def _collect(self, seconds):

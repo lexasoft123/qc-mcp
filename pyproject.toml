@@ -6,6 +6,10 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 keywords = ["quad-cortex", "neural-dsp", "mcp", "guitar", "usb-hid", "reverse-engineering"]
+classifiers = [
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+]
 dependencies = [
     "mcp>=1.2",
     "protobuf>=5.0",
@@ -14,8 +18,9 @@ dependencies = [
 [project.optional-dependencies]
 # only needed for the reverse-engineering tools in tools/
 re = ["capstone>=5.0", "pyusb>=1.2", "python-rtmidi>=1.5"]
-# only needed for the GUI verification harness in tools/gui/ (screenshots/clicks)
-gui = ["pyobjc>=10"]
+# only needed for the GUI verification harness in tools/gui/ (macOS-only:
+# it drives Cortex Control via screencapture + the accessibility API)
+gui = ["pyobjc>=10; sys_platform == 'darwin'"]
 
 [project.urls]
 Homepage = "https://github.com/lexasoft123/qc-mcp"

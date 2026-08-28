@@ -23,11 +23,16 @@ restarts across multiple sessions):
   (e.g. Cortex Control was relaunched).
 """
 from __future__ import annotations
-import fcntl
 import os
-import select
 import threading
 import time
+
+try:
+    import fcntl
+    import select
+except ImportError as exc:      # no POSIX FIFOs: see backend.BRIDGE_PLATFORMS
+    raise ImportError("qc_mcp.bridge needs POSIX FIFOs — bridge mode is macOS-only "
+                      "(it rides the DYLD interposer). Use direct mode.") from exc
 
 INJECT_PATH = os.environ.get("QC_INJECT", "/tmp/qc_inject")
 OUT_PATH = os.environ.get("QC_OUT", "/tmp/qc_in")
@@ -35,11 +40,12 @@ OUT_PATH = os.environ.get("QC_OUT", "/tmp/qc_in")
 _RX_CAP = 20000          # keep the last N device->host reports if the consumer stalls
 
 
-class BridgeError(Exception):
-    pass
+from .backend import BridgeError      # re-exported: `from .bridge import BridgeError` still works
 
 
 class FifoBridge:
+    BENIGN_WRITE_CODES = frozenset({0})   # set_report raises on a failed write
+
     def __init__(self, inject_path=INJECT_PATH, out_path=OUT_PATH):
         self.inject_path = inject_path
         self.out_path = out_path

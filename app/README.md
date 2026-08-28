@@ -1,30 +1,76 @@
 # Patchbay
 
-The launcher for [qc-mcp](../README.md). It does the setup once, runs the
-daemon, and opens Cortex Control — so nobody has to remember `install.sh`,
+Ask Claude for a tone and it builds it on your Quad Cortex. Patchbay is the
+launcher that makes that true: it installs [qc-mcp](../README.md), registers the
+server with your MCP clients, runs the daemon that owns the device, and opens
+Cortex Control alongside it — so nobody has to remember `install.sh`,
 `interceptor/build.sh` and `run-bridge.sh` in the right order.
 
-Electron + React, built on [@singz/ui](https://github.com/lexasoft123/singz-ui)
-— the night-studio design language. Every colour is a `--sz-*` token and every
-control is a kit component, so the class names (`pill`, `dot`, `mode-seg`,
-`modal-card`) are the same contract SingZ uses.
+![Patchbay connected — the signal path from Claude through Patchbay to a Quad Cortex, all three hops lit, sharing Cortex Control's live session over the bridge](../docs/patchbay/home.png)
 
-```bash
-npm install     # electron's postinstall must run — approve it if npm asks
-npm run dev     # the app, with HMR
-npm run build   # typecheck + bundle into out/
-```
+Electron + React + TypeScript, built on
+[@singz/ui](https://github.com/lexasoft123/singz-ui) — the night-studio design
+language, in amber. Every colour is a `--sz-*` token and every control is a kit
+component, so the class names (`pill`, `dot`, `mode-seg`, `modal-card`) are the
+same contract SingZ uses.
 
-## The four screens
+**A fresh machine needs nothing pre-installed.** Not even Python: Patchbay
+ships `uv`, which fetches its own CPython 3.12 and builds the environment in
+about eight seconds. That gap is the whole reason — macOS's `/usr/bin/python3`
+is 3.9.6, under the 3.10 the package needs, and Windows has none at all.
 
-- **Home** — the whole thing in one button. It shows the signal path
-  (Claude → Patchbay → Quad Cortex) with each hop lit only when it is really
-  live, and **Set up and connect** runs whatever is missing, in order.
-- **Console** — three independent modules: which client configs hold the server
-  entry, the daemon (mode, pid, socket, measured reports/s), and Cortex Control.
-- **Setup** — the preflight checks, each one a real probe, with a fix for the
-  ones Patchbay can perform.
-- **Logs** — the interposer's frame log, parsed and filtered.
+## What it does
+
+- **One button** — Home shows the signal path, Claude → Patchbay → Quad Cortex,
+  with each hop lit only when it is really live. **Connect** runs whatever is
+  missing, in order: the environment, the instrumented build, the client
+  registration, Cortex Control, the daemon. Press it again to disconnect.
+- **Shares the device instead of fighting for it** — on macOS a DYLD interposer
+  rides Cortex Control's own HID session, so the app and Claude both talk to the
+  Quad Cortex at once. On Windows the daemon opens a second, non-exclusive
+  handle beside the app. Either way you keep using Cortex Control while Claude
+  edits presets.
+- **One daemon, every client** — the daemon owns the device and fans
+  device→host reports out to every attached MCP client, each with a disjoint
+  `request_id` range so two can never mistake each other's replies. Claude Code,
+  Claude Desktop, Cursor and VS Code can all be attached at the same time.
+- **Setup that actually checks** — seven probes on macOS, five on Windows, each
+  one a real measurement rather than a stored flag, with a fix for the ones
+  Patchbay can perform. It never asks for your password.
+- **The wire, live** — the Logs view parses the interposer's frame log as it is
+  written: direction, report size, hex, and a filter for errors.
+- **Your installed Cortex Control is never touched.** The instrumented build is
+  a *local copy*, re-signed ad-hoc with the app's own entitlements carried over.
+
+### Console — every module, measured
+
+![The Console view: the connected Quad Cortex, which MCP clients hold the server entry, and the running daemon with its mode, socket, session and live reports-per-second](../docs/patchbay/console.png)
+
+Three independent modules: which client configs hold the server entry, the
+daemon (mode, pid, socket, measured reports/s), and Cortex Control. The mode
+selector switches auto / bridge / direct on a running daemon.
+
+### Setup — seven real probes
+
+![The Setup view with all seven checks green: bundled Python, the virtual environment, command line tools, Cortex Control 4.1.0, the instrumented copy, client registration and the Quad Cortex on USB](../docs/patchbay/setup.png)
+
+### Logs — the interposer's frame log
+
+![The Logs view streaming HID reports with timestamps, direction, byte counts and hex, with failed writes highlighted](../docs/patchbay/logs.png)
+
+## Install
+
+Download the installer for your platform from
+[Releases](https://github.com/lexasoft123/qc-mcp/releases) — `.dmg` on macOS
+(Apple silicon and Intel), `.exe` on Windows.
+
+Neither is signed with a paid certificate yet, so the first launch needs one
+extra step: on macOS right-click → **Open** (the bundle *is* ad-hoc signed, so
+you get "unidentified developer", not "damaged"); on Windows, **More info** →
+**Run anyway** past SmartScreen.
+
+Then press **Connect**. First run takes a couple of minutes, mostly building the
+instrumented copy; after that it is a few seconds.
 
 ## What is real
 
@@ -47,10 +93,7 @@ line, `claude mcp add` when the CLI is present (and a careful JSON merge into
 the other clients when it is not — the server entry is the only key Patchbay
 ever touches).
 
-**Patchbay does not need a Python on the machine.** It ships `uv`, which fetches
-its own CPython 3.12 and builds the environment in about eight seconds — the
-gap that matters, because macOS's `/usr/bin/python3` is 3.9.6 and Windows has
-none at all. What ships and what gets built locally, and why:
+What ships in the installer and what gets built on your machine, and why:
 **[docs/PACKAGING.md](../docs/PACKAGING.md)**.
 
 ## The daemon
@@ -66,7 +109,7 @@ qc-mcp --attach --socket PATH          stdio MCP server riding the daemon
 
 The split sits as low as it can: the daemon moves *HID reports*, and framing,
 gzip, protobuf, the catalog and the preset model still run inside each client.
-Device->host reports are broadcast to every attached client — the same fan-out
+Device→host reports are broadcast to every attached client — the same fan-out
 the interposer's FIFO already does — and each client is handed a disjoint
 request_id range at hello so two of them can never mistake each other's replies
 for their own.
@@ -74,6 +117,12 @@ for their own.
 Patchbay spawns it, waits for the endpoint to actually accept a connection (a
 socket file outlives a crashed daemon, so existence alone lies), and reports the
 real stderr if it refuses to start.
+
+**Order matters on macOS.** The daemon picks bridge vs direct once, at startup,
+from whether the instrumented Cortex Control is already up — so Connect launches
+the app *first* and waits for both FIFOs and the process before starting the
+daemon. Starting the daemon first silently produces direct mode, which seizes
+the device and leaves the interposer unused.
 
 ## Platform differences
 
@@ -85,7 +134,7 @@ reports its own platform and the UI follows.
 | sharing the device | DYLD interposer in a re-signed copy of Cortex Control | a second, non-exclusive HID handle |
 | setup checks | 7 | 5 — no compiler, no instrumented copy |
 | Cortex Control module | maintained (build, verify, rebuild on drift) | observed; the daemon works with the app closed |
-| endpoint | unix socket | named pipe |
+| endpoint | unix socket | loopback port + a `.port` file |
 | backdrop blur | yes | **no** — a Windows iGPU pays a full-window re-raster per blurred surface, which is why the kit's own `chrome.css` already drops it from the scrim |
 
 Both paths are exercised on real hardware: the daemon, its tests and two
@@ -97,6 +146,30 @@ Windows **shared mode** is verified too — with Cortex Control running, the
 daemon picks the second non-exclusive handle and serves attached clients while
 the app keeps its own session. That is the case the "independent writers"
 caution in the Console describes.
+
+## Develop
+
+```bash
+npm install     # electron's postinstall must run — approve it if npm asks
+npm run dev     # the app, with HMR
+npm run build   # typecheck + bundle into out/
+npm run icons   # redraw build/icon.icns + .ico from build/icon/forge.html
+```
+
+The icon is drawn on canvas and cut with the same Chromium the app runs, so what
+`forge.html` draws is what ships — a signal chain across the Quad Cortex Grid,
+spiking. The full mark holds down to 48 px; 16 and 32 get a simplified one.
+
+## Build & releases
+
+```bash
+npm run dist:mac     # -> dist/*.dmg  (arm64 and x64, one arch per invocation)
+npm run dist:win     # -> dist/*.exe  (nsis)
+```
+
+`dist:*` fetches the pinned `uv` first. Tagging `v*` and pushing runs
+[.github/workflows/release.yml](../.github/workflows/release.yml), which gates on
+the offline Python suite, packages both platforms, and attaches the artifacts.
 
 ## One caveat worth knowing
 

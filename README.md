@@ -13,6 +13,21 @@ https://github.com/lexasoft123/qc-mcp
 
 ---
 
+## Patchbay — the app
+
+There is a launcher, so none of the setup below has to be done by hand. It
+installs qc-mcp (bringing its own Python), registers the server with your MCP
+clients, runs the daemon that owns the device, and opens Cortex Control
+alongside it. One button.
+
+[![Patchbay connected — the signal path from Claude through Patchbay to a Quad Cortex, all three hops lit, sharing Cortex Control's live session](docs/patchbay/home.png)](app/README.md)
+
+Download it from [Releases](https://github.com/lexasoft123/qc-mcp/releases)
+(`.dmg` / `.exe`), or read **[app/README.md](app/README.md)**. Everything below
+is the server itself, and still works standalone.
+
+---
+
 ## What it can do
 
 - **Read** the full live preset the way Cortex Control does on boot — every block,

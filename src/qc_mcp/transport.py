@@ -76,6 +76,10 @@ class QuadCortex:
             # 4.1-only gates would all pass.
             self.firmware = None
             self.protocol_version_verified = False
+            # Report whatever is actually encoding messages: a previous
+            # connection may have left the process-global gate elsewhere, and
+            # claiming this connection's default would misreport the schema.
+            self.protocol_version = P.active_version()
             return self.protocol_version
         # Confusingly, the human CorOS version ("4.1.0") lives in zenos_git_hash;
         # app_fw_version holds an actual build hash ("d14e"). Prefer the former,

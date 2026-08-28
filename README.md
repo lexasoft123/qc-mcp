@@ -101,6 +101,7 @@ See [interceptor/](interceptor/) and PROTOCOL.md §11.
 | `save_device_preset` / `delete_device_preset` | **write** | store a block's current knobs as a reusable user device preset |
 | `assign_stomp` / `unassign_stomp` | **write** | bind a block to a footswitch (A–H), latching or momentary |
 | `list_settings_presets` / `load_settings_preset` | read / **write** | Global EQ and I/O Settings presets (CorOS 4.1+) |
+| `set_global_eq` | **write** | write Global EQ parameters back — the exact undo for a preset load |
 | `set_io_port` | **write** | hardware input/output level, impedance, type, ground lift, mute |
 | `get_tempo` | read | preset tempo + external MIDI-clock BPM and out-of-range flag |
 | `set_master_volume`, `save_preset`, `connect`/`disconnect`, `device_info`, `cpu_load` | | |

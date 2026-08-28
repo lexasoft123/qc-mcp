@@ -271,6 +271,7 @@ def device_info() -> dict:
         "device_name": qc.custom_name or "",
         "device_type": qc.device_type or "",
         "protocol_generation": qc.protocol_version,
+        "protocol_generation_verified": getattr(qc, "protocol_version_verified", True),
         "features": {name: P.supports(name) for name in sorted(P.FEATURES)},
     })
     return info
@@ -1167,24 +1168,65 @@ def load_settings_preset(target: str, preset: str, confirm: bool = False) -> dic
     if match is None:
         return {"error": f"no {target} preset {preset!r}.",
                 "available": [c["name"] for c in choices[:20]]}
+    if target == "io_settings" and "error" in _io_snapshot(qc):
+        return {"error": "refusing to load an I/O preset: the current settings "
+                         "could not be read, so there would be no way back."}
     if target == "io_settings" and not confirm:
         return {"error": "loading an I/O Settings preset rewrites the hardware "
                          "input levels/impedance/type for every preset. Pass "
                          "confirm=True if that is what you want.",
                 "would_load": match["name"]}
-    before = (_io_snapshot(qc) if target == "io_settings"
-              else {"global_eq": qc.read_global_eq()[0], "bypassed": qc.read_global_eq()[1]})
+    def snapshot():
+        if target == "io_settings":
+            return _io_snapshot(qc)
+        params, bypassed = qc.read_global_eq()
+        return {"global_eq": [[i, round(v, 6)] for i, v in params],
+                "bypassed": bypassed}
+
+    before = snapshot()
     qc.load_settings_preset(target, match["id"], is_factory=match["is_factory"])
-    after = (_io_snapshot(qc) if target == "io_settings"
-             else {"global_eq": qc.read_global_eq()[0]})
+    after = snapshot()
+    undo = ("set_global_eq(previous['global_eq'], previous['bypassed'])"
+            if target == "global_eq" else
+            "set_io_port for each entry in previous['in_ports']")
     return {"loaded": match["name"], "target": target,
             "changed": before != after, "previous": before,
-            "note": "keep `previous` — that is the only way back."}
+            "note": f"keep `previous` — undo with {undo}."}
+
+
+@mcp.tool()
+def set_global_eq(parameters: list, bypassed: bool = None) -> dict:
+    """WRITE: set the Global EQ parameters — the undo for load_settings_preset.
+
+    Global EQ is a **global** 5-band output EQ applied to every preset, not preset
+    content. `parameters` is a list of [index, value] pairs in the 0-27 layout
+    load_settings_preset returns as `previous['global_eq']` (five bands of
+    GAIN/FREQ/Q/TYPE/BYPASS, then OUTPUT and two EQ assignments), values
+    normalized 0-1."""
+    qc = _conn()
+    try:
+        pairs = [(int(i), float(v)) for i, v in parameters]
+    except (TypeError, ValueError):
+        return {"error": "parameters must be a list of [index, value] pairs."}
+    if not pairs:
+        return {"error": "nothing to set — pass at least one [index, value] pair."}
+    qc.write_global_eq(pairs, bypassed)
+    now, now_bypassed = qc.read_global_eq()
+    applied = dict(now)
+    return {"set": len(pairs), "bypassed": now_bypassed,
+            "matches_request": all(abs(applied.get(i, 0) - v) < 1e-4 for i, v in pairs),
+            "global_eq": [[i, round(v, 6)] for i, v in now]}
 
 
 def _io_snapshot(qc):
-    """The input-port fields an I/O preset overwrites."""
-    io = qc.read_state("IOSettings")
+    """The input-port fields an I/O preset overwrites, or an explicit failure.
+
+    This is the only record of what to restore after an irreversible I/O load, so
+    an empty read has to be visible rather than silently becoming `{}`.
+    """
+    io = qc.read_message("IOSettings")
+    if io is None or not io.HasField("settings"):
+        return {"error": "could not read I/O settings — nothing captured to undo with"}
     return {"in_ports": [{"port": p.input_port_id, "level": round(p.level, 6),
                           "impedance": round(p.input_zmode, 6),
                           "type": round(p.input_type, 6),
@@ -1213,7 +1255,7 @@ def set_io_port(kind: str, port: int, level: float = None, impedance: float = No
         return {"error": "nothing to set — pass at least one field."}
     try:
         qc.set_io_port(kind, port, **fields)
-    except QCError as e:
+    except (QCError, AttributeError) as e:
         return {"error": str(e)}
     return {"set": fields, "kind": kind, "port": port, "now": _io_snapshot(qc)}
 
@@ -1326,7 +1368,7 @@ def assign_stomp(row: int, column: int, footswitch: str,
     if _block_at(qc, row, column) is None:
         return {"error": f"no block at row {row}, column {column}."}
     qc.assign_stomp(row, column, index, kind=kind, momentary=momentary)
-    return {"assigned": "ABCDEFGH"[index], **_stomp_state(qc, row, column, index)}
+    return {"assigned": _switch_name(index), **_stomp_state(qc, row, column, index)}
 
 
 @mcp.tool()
@@ -1337,7 +1379,11 @@ def unassign_stomp(row: int, column: int, footswitch: str) -> dict:
         return {"error": f"footswitch must be A-H or 0-7, not {footswitch!r}."}
     qc = _conn()
     qc.unassign_stomp(row, column, index)
-    return {"unassigned": "ABCDEFGH"[index], **_stomp_state(qc, row, column, index)}
+    return {"unassigned": _switch_name(index), **_stomp_state(qc, row, column, index)}
+
+
+def _switch_name(index):
+    return "ABCDEFGH"[index] if 0 <= index < 8 else index
 
 
 def _stomp_index(footswitch):
@@ -1355,7 +1401,7 @@ def _stomp_state(qc, row, column, index):
     from . import preset as _preset
     assignments = _preset.describe(bp)["stomp_assignments"]
     momentary = dict(bp.stomp_is_momentary)
-    return {"assignments": [{**a, "footswitch": "ABCDEFGH"[a["stomp_index"]],
+    return {"assignments": [{**a, "footswitch": _switch_name(a["stomp_index"]),
                              "momentary": bool(momentary.get(a["stomp_index"]))}
                             for a in assignments],
             "still_bound": any(a["row"] == row and a["column"] == column

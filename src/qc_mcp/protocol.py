@@ -104,8 +104,16 @@ def active_version():
 
 def supports(feature, version=None):
     """True if `feature` (a FEATURES key, or a bare version like '4.1') exists
-    on the active — or given — generation."""
+    on the active — or given — generation.
+
+    A name that is neither raises: `parse_version` returns () for it, and every
+    version compares >= (), so a typo'd or renamed gate would silently pass and
+    only fail later where the message is actually built.
+    """
     need = FEATURES.get(feature, feature)
+    if not parse_version(need):
+        raise KeyError(f"unknown feature {feature!r}; "
+                       f"expected one of {sorted(FEATURES)} or a version string")
     return parse_version(version or _active_version) >= parse_version(need)
 
 

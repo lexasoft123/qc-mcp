@@ -57,10 +57,17 @@ load_settings_preset("global_eq", "Bass 8x10 Punch")
 > reloading a preset does not undo them.
 
 Global EQ is fully reversible — `load_settings_preset` returns the previous 28
-parameter values, and writing them back restores it exactly. **I/O Settings is
-not**: loading one rewrites the hardware input levels, impedance and type, so it
-requires `confirm=True` and you must keep the returned `previous` snapshot. Put
-values back with `set_io_port`:
+parameter values, and `set_global_eq` writes them back exactly:
+
+```
+prev = load_settings_preset("global_eq", "Bass 8x10 Punch")["previous"]
+set_global_eq(prev["global_eq"], prev["bypassed"])      # exact undo
+```
+
+**I/O Settings is not reversible that cheaply**: loading one rewrites the hardware
+input levels, impedance and type, so it requires `confirm=True`, and it is refused
+outright if the current settings can't be read first (there would be no way back).
+Put values back with `set_io_port`, one port at a time:
 
 ```
 set_io_port("in", 2, level=0.3196, impedance=0.125, input_type=1.0)

@@ -42,6 +42,7 @@ class QuadCortex:
         self.device_type = None       # "QC" | "ATMA" (Quad Cortex mini)
         self.custom_name = ""         # user label, for multi-device setups (4.1+)
         self.protocol_version = P.LATEST_VERSION
+        self.protocol_version_verified = False
 
     # -- lifecycle --
     def open(self, handshake=True):
@@ -62,9 +63,19 @@ class QuadCortex:
         for something else, and adds ModelPreset/RemoteControl), so every
         connection re-negotiates rather than assuming the newest generation.
         """
-        try:
-            v = self.read_state("Version", timeout_ms=3000)
-        except Exception:
+        v = None
+        for attempt in range(3):
+            try:
+                v = self.read_state("Version", timeout_ms=3000)
+                break
+            except Exception:
+                time.sleep(0.5)
+        if v is None:
+            # Unknown firmware: keep the newest schema (the common case) but say
+            # so — on a 4.0 device it would mis-encode GlobalEQ field 5, and the
+            # 4.1-only gates would all pass.
+            self.firmware = None
+            self.protocol_version_verified = False
             return self.protocol_version
         # Confusingly, the human CorOS version ("4.1.0") lives in zenos_git_hash;
         # app_fw_version holds an actual build hash ("d14e"). Prefer the former,
@@ -83,6 +94,7 @@ class QuadCortex:
         except Exception:
             self.device_type = None
         self.protocol_version = P.set_version(self.firmware)
+        self.protocol_version_verified = self.firmware is not None
         return self.protocol_version
 
     def close(self):
@@ -122,12 +134,18 @@ class QuadCortex:
         self.close()
 
     def _reported_firmware(self):
-        """Firmware string from any Version reply already in the pending queue."""
+        """CorOS version from any Version reply already in the pending queue.
+
+        Same field order as detect_version: zenos_git_hash carries the human
+        version, app_fw_version a build hash — announcing the latter back as our
+        `cortex_control_version` would fail the device's compatibility check.
+        """
         for cmd, obj, _raw, _pb in self._pending:
             if cmd == P.NAME_TO_CMD["Version"] and obj is not None:
-                fw = getattr(obj, "app_fw_version", "")
-                if fw:
-                    return fw
+                for field in ("zenos_git_hash", "app_fw_version"):
+                    value = getattr(obj, field, "") or ""
+                    if P.parse_version(value):
+                        return value
         return None
 
     def _handshake(self, client_version=None):
@@ -1006,6 +1024,11 @@ class QuadCortex:
         m.request_id = self.next_request_id()
         port = (m.settings.in_port if kind == "in" else m.settings.out_port).add()
         setattr(port, f"{'input' if kind == 'in' else 'output'}_port_id", int(port_id))
+        valid = {f.name for f in port.DESCRIPTOR.fields}
+        unknown = [n for n in fields if n not in valid]
+        if unknown:
+            raise QCError(f"{sorted(unknown)} not settable on an {kind} port; "
+                          f"it has {sorted(valid)}")
         for name, value in fields.items():
             setattr(port, name, value)
         self.send("IOSettings", m)
@@ -1058,8 +1081,16 @@ class QuadCortex:
         pr.id.hash = int(model_hash)
         pr.name = name
         pr.is_default = bool(is_default)
+        rid = m.request_id
         _c, obj, _r = self.request("ModelPreset", m, timeout_ms=timeout_ms)
+        # request() falls back to a command-only match, and the device broadcasts
+        # its whole 2700-entry preset index unprompted — without the id check a
+        # REFUSED save would report some factory preset as the one just created.
+        if obj is None or int(getattr(obj, "request_id", 0) or 0) != rid:
+            return None
         for created in getattr(obj, "presets", []):
+            if created.id.is_factory:
+                continue
             return {"id": created.id.value, "name": created.name,
                     "model_hash": created.id.hash,
                     "is_default": created.is_default}

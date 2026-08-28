@@ -49,6 +49,20 @@ def test_feature_gating_reports_the_needed_release():
     assert P.supports("model_presets") and P.require("model_presets") is None
 
 
+def test_unknown_feature_key_raises_instead_of_passing():
+    """A typo'd gate must not sail through: parse_version() returns () for a
+    non-version string, and every version compares >= (), so the check would
+    silently pass and fail later where the message is built."""
+    P.set_version("4.0.1")
+    for bogus in ("model_preset", "dual-footswitch", "typo"):
+        try:
+            P.supports(bogus)
+            raise AssertionError(f"supports({bogus!r}) should raise")
+        except KeyError:
+            pass
+    assert P.supports("4.0") and not P.supports("4.1")   # bare versions still work
+
+
 def test_globaleq_field_5_differs_between_generations():
     """The one genuinely incompatible change — same field number, new meaning."""
     names = {}

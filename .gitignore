@@ -19,6 +19,7 @@ interceptor/hid_log.txt
 interceptor/msgs/
 interceptor/target_preset.json
 interceptor/catalog.json
+interceptor/archive/
 /tmp/
 
 # macOS

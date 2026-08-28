@@ -112,11 +112,20 @@ function handlers(): void {
   })
 
   ipcMain.handle('cortex:launch', async () => {
-    const err = await cortex.launch(state.getPaths())
+    const paths = state.getPaths()
+    const err = await cortex.launch(paths)
     if (err) emit('progress', { label: err, done: 0, total: 0, finished: true, error: err })
-    // the app takes a moment to appear in the process table
-    setTimeout(() => void state.push(true), 2500)
-    return state.push()
+    // Wait for the bridge rather than just for the process: whoever starts the
+    // daemon next needs it actually open, or auto silently picks direct.
+    if (!err && IS_MAC && state.getPrefs().mode !== 'direct') {
+      emit('progress', { label: 'Opening Cortex Control', done: 0, total: 0 })
+      const ok = await cortex.waitForBridge(paths.repo)
+      emit('progress', {
+        label: ok ? 'Cortex Control is up' : 'Cortex Control did not open in time; using direct mode',
+        done: 0, total: 0, finished: true
+      })
+    }
+    return state.push(true)
   })
   ipcMain.handle('cortex:quit', async () => {
     await cortex.quit()

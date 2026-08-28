@@ -102,6 +102,14 @@ export const instrumentedApp = (repo: string): string =>
 export const buildScript = (repo: string): string => join(repo, 'interceptor', 'build.sh')
 export const bridgeScript = (repo: string): string => join(repo, 'interceptor', 'run-bridge.sh')
 
+/**
+ * The interposer's two FIFOs, as bridge.py names them (INJECT_PATH / OUT_PATH).
+ * Their mere existence does not mean the bridge is live — they are plain
+ * filesystem objects and outlive the app — so they are only ever checked
+ * together with the instrumented process being alive.
+ */
+export const BRIDGE_FIFOS = ['/tmp/qc_inject', '/tmp/qc_in']
+
 /** The device, as the transport already knows it (iohid.py: vid 0x152A, pid 0x880A). */
 export const QC_VID = 0x152a
 export const QC_PID = 0x880a

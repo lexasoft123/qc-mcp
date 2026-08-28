@@ -13,8 +13,12 @@ import { Strip } from '../components/Bits.js'
 async function connect(): Promise<void> {
   let s = await window.patchbay.snapshot()
   if (setupPending(s)) s = await window.patchbay.runSetup()
-  if (s.daemon.state !== 'running') s = await window.patchbay.daemonStart()
+  // Cortex Control FIRST on macOS. The daemon picks bridge vs direct ONCE, at
+  // startup, from whether the instrumented app is already up — so starting it
+  // first silently produced direct mode every time, seizing the device and
+  // leaving the interposer unused. cortexLaunch waits for the bridge to open.
   if (isMac(s) && s.prefs.mode !== 'direct' && !s.cortex.running) s = await window.patchbay.cortexLaunch()
+  if (s.daemon.state !== 'running') s = await window.patchbay.daemonStart()
   publish(s)
   if (s.daemon.state === 'running') say('Connected — Claude can reach your Quad Cortex')
   else if (s.daemon.error) say(s.daemon.error, true)

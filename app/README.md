@@ -86,6 +86,11 @@ concurrent attached clients have been run against a Quad Cortex on macOS and on
 Windows 10, and the device probe, the loopback endpoint and the `.port` file are
 verified there rather than inferred.
 
+Windows **shared mode** is verified too — with Cortex Control running, the
+daemon picks the second non-exclusive handle and serves attached clients while
+the app keeps its own session. That is the case the "independent writers"
+caution in the Console describes.
+
 ## One caveat worth knowing
 
 A GUI-launched app on macOS does not inherit your shell's `PATH` — `launchctl

@@ -136,6 +136,10 @@ Verified on real hardware on **both platforms**: two concurrent clients reading
 the same live preset through one daemon, on macOS (unix socket) and on Windows
 (loopback endpoint plus a `.port` file, since AF_UNIX is not dependable there).
 
+On Windows, `--mode auto` was also verified **beside a running Cortex Control**:
+the daemon selects the shared, non-exclusive handle, and both the app and two
+attached MCP clients read the same device at once with the app unaffected.
+
 **Patchbay**, the launcher in [app/](app/), does all of this from a window:
 the preflight checks, the venv, the instrumented build, the client configs, and
 starting and stopping the daemon.

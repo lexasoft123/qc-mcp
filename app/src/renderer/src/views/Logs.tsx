@@ -47,7 +47,7 @@ export function Logs({ snap }: { snap: Snapshot }): React.JSX.Element {
         />
         <span className="grow" />
         <span className="fine mono">
-          {snap.prefs.verbose ? `${snap.paths.logPath} · ${mb(size)}` : 'frame log is off'}
+          {snap.prefs.verbose ? `${snap.paths.show.logPath} · ${mb(size)}` : 'frame log is off'}
         </span>
         <Button
           size="sm"

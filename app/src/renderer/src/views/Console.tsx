@@ -109,7 +109,7 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
               ))}
             </div>
             <p className="fine">
-              Every client points at the same binary — <code>{snap.paths.bin}</code>. Move the repo
+              Every client points at the same binary — <code>{snap.paths.show.bin}</code>. Move the repo
               and Patchbay rewrites all of them.
             </p>
           </div>
@@ -185,7 +185,7 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
             <Facts
               rows={[
                 ['status', live ? `pid ${snap.daemon.pid} · up ${uptime(snap.daemon.startedAt)}` : 'not running', live ? '' : 'off'],
-                [mac ? 'socket' : 'named pipe', snap.paths.socket, live ? 'muted' : 'off'],
+                [mac ? 'socket' : 'named pipe', snap.paths.show.socket, live ? 'muted' : 'off'],
                 ['session', live ? sessionFact(snap) : '—', live ? '' : 'off'],
                 ['attached clients', live ? (snap.daemon.clients.join(', ') || 'none') : '—', live ? 'muted' : 'off']
               ]}

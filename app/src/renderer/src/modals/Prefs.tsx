@@ -98,7 +98,7 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
         <div className="pref-row">
           <div className="meta">
             <div className="n">Frame log</div>
-            <div className="d"><code>{p.verbose ? snap.paths.logPath : 'not being written'}</code></div>
+            <div className="d"><code>{p.verbose ? snap.paths.show.logPath : 'not being written'}</code></div>
           </div>
           <Button size="sm" disabled={!p.verbose} onClick={() => { void window.patchbay.clearLog(); say('Frame log cleared') }}>
             Clear
@@ -109,11 +109,11 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
       <div className="pref-group">
         <span className="eyebrow">Locations</span>
         <div className="pref-row">
-          <div className="meta"><div className="n">qc-mcp</div><div className="d"><code>{snap.paths.repo}</code></div></div>
+          <div className="meta"><div className="n">qc-mcp</div><div className="d"><code>{snap.paths.show.repo}</code></div></div>
           <Button size="sm" onClick={() => void act(() => window.patchbay.choosePath('repo'))}>Change…</Button>
         </div>
         <div className="pref-row">
-          <div className="meta"><div className="n">Cortex Control</div><div className="d"><code>{snap.paths.cortex}</code></div></div>
+          <div className="meta"><div className="n">Cortex Control</div><div className="d"><code>{snap.paths.show.cortex}</code></div></div>
           <Button size="sm" onClick={() => void act(() => window.patchbay.choosePath('cortex'))}>Change…</Button>
         </div>
       </div>

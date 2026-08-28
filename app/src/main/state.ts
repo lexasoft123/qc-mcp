@@ -77,7 +77,7 @@ function checksFrom(
   list.push({
     id: 'app',
     title: 'Cortex Control',
-    detail: `<code>${paths.cortex}</code>${cortex.version ? ` · ${cortex.version}` : ' — not installed'}`,
+    detail: `<code>${paths.show.cortex}</code>${cortex.version ? ` · ${cortex.version}` : ' — not installed'}`,
     status: cortex.installed ? 'ok' : 'missing',
     fixable: false
   })

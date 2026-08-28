@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { ClientTarget, Paths } from '../shared/types.js'
-import { IS_MAC } from './paths.js'
+import { IS_MAC, tilde } from './paths.js'
 import { exists, run } from './util.js'
 
 const HOME = homedir()
@@ -78,7 +78,7 @@ export function list(): ClientTarget[] {
     return {
       id: t.id,
       name: t.name,
-      path: t.file.replace(HOME, '~'),
+      path: tilde(t.file),
       found: found(t),
       installed: Boolean(entryVal),
       stale: Boolean(entryVal) && !(Array.isArray(args) && args.includes('--attach'))

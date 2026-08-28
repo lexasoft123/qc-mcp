@@ -8,6 +8,13 @@ export const PLATFORM: Platform = process.platform === 'win32' ? 'win' : 'mac'
 export const IS_MAC = PLATFORM === 'mac'
 const HOME = homedir()
 
+/**
+ * `/Users/someone/Library/...` -> `~/Library/...`, for anything a person reads.
+ * Display only — every path that gets spawned, opened or written into a client
+ * config stays absolute.
+ */
+export const tilde = (p: string): string => (p.startsWith(HOME) ? '~' + p.slice(HOME.length) : p)
+
 function isRepo(dir: string): boolean {
   try {
     const f = join(dir, 'pyproject.toml')
@@ -79,7 +86,7 @@ export const DEFAULT_CORTEX = IS_MAC
   : 'C:\\Program Files\\Neural DSP\\Cortex Control\\Cortex Control.exe'
 
 export function pathsFor(repo: string, cortexOverride?: string | null): Paths {
-  return {
+  const p = {
     repo,
     bin: IS_MAC ? join(repo, '.venv', 'bin', 'qc-mcp') : join(repo, '.venv', 'Scripts', 'qc-mcp.exe'),
     python: IS_MAC ? join(repo, '.venv', 'bin', 'python') : join(repo, '.venv', 'Scripts', 'python.exe'),
@@ -94,6 +101,13 @@ export function pathsFor(repo: string, cortexOverride?: string | null): Paths {
     socket: IS_MAC
       ? join(HOME, 'Library', 'Application Support', 'qc-mcp', 'daemon.sock')
       : join(process.env.LOCALAPPDATA || join(HOME, 'AppData', 'Local'), 'qc-mcp', 'daemon.sock')
+  }
+  return {
+    ...p,
+    show: {
+      repo: tilde(p.repo), bin: tilde(p.bin), cortex: tilde(p.cortex),
+      logPath: tilde(p.logPath), socket: tilde(p.socket)
+    }
   }
 }
 

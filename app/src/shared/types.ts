@@ -81,6 +81,14 @@ export interface Paths {
   cortex: string
   logPath: string
   socket: string
+  /** The same paths with $HOME collapsed to `~`, for display. */
+  show: {
+    repo: string
+    bin: string
+    cortex: string
+    logPath: string
+    socket: string
+  }
 }
 
 export interface Prefs {

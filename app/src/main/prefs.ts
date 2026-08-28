@@ -11,7 +11,12 @@ export const DEFAULTS: Prefs = {
   quitApp: false,
   verbose: true,
   autoRebuild: false,
-  mode: 'bridge',
+  // 'auto', not 'bridge'. Bridge is the preferred mode WHEN Cortex Control is
+  // up, but as a default it makes the daemon refuse to start on a fresh
+  // install with the app closed — which is the first thing the Connect button
+  // on Home does. Auto picks bridge/shared when the app is running and direct
+  // when it is not.
+  mode: 'auto',
   repo: null,
   cortex: null
 }

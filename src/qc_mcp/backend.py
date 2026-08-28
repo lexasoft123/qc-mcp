@@ -78,6 +78,6 @@ def open_hid(**kwargs):
         from .winhid import WinHIDTransport
         return WinHIDTransport(**kwargs)
     raise RuntimeError(
-        f"no HID backend for {sys.platform} — qc-mcp speaks to the Quad Cortex "
+        f"no HID backend for {sys.platform}: qc-mcp speaks to the Quad Cortex "
         "on macOS (IOKit) and Windows (hid.dll). Linux would need a hidraw "
         "backend implementing the same open/set_report/read_reports/close API.")

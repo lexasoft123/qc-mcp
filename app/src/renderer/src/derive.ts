@@ -1,4 +1,4 @@
-import type { Snapshot } from '@shared/types'
+import type { ClientTarget, Snapshot } from '@shared/types'
 
 export const isMac = (s: Snapshot): boolean => s.platform === 'mac'
 
@@ -16,6 +16,9 @@ export const isLinked = (s: Snapshot): boolean =>
   (s.prefs.mode === 'direct' || !isMac(s) || s.cortex.running)
 
 export const regCount = (s: Snapshot): number => s.clients.filter((c) => c.installed).length
+
+/** Registered before the daemon existed — they still seize the device. */
+export const staleClients = (s: Snapshot): ClientTarget[] => s.clients.filter((c) => c.stale)
 
 export const clash = (s: Snapshot): boolean =>
   s.daemon.state === 'running' && s.prefs.mode === 'direct' && s.cortex.running

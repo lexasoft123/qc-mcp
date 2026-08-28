@@ -80,3 +80,17 @@ reports its own platform and the UI follows.
 | Cortex Control module | maintained (build, verify, rebuild on drift) | observed; the daemon works with the app closed |
 | endpoint | unix socket | named pipe |
 | backdrop blur | yes | **no** — a Windows iGPU pays a full-window re-raster per blurred surface, which is why the kit's own `chrome.css` already drops it from the scrim |
+
+Both paths are exercised on real hardware: the daemon, its tests and two
+concurrent attached clients have been run against a Quad Cortex on macOS and on
+Windows 10, and the device probe, the loopback endpoint and the `.port` file are
+verified there rather than inferred.
+
+## One caveat worth knowing
+
+A GUI-launched app on macOS does not inherit your shell's `PATH` — `launchctl
+getenv PATH` is usually unset, so `~/.local/bin` is invisible and the `claude`
+CLI cannot be found. Registration then falls back to editing each client's JSON
+directly. That fallback is correct, but it means Claude Code's own config file
+is rewritten by us rather than by its CLI, so prefer launching Patchbay from a
+shell (or install `claude` somewhere on the default path) if you can.

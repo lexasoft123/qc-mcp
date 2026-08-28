@@ -67,12 +67,21 @@ export function list(): ClientTarget[] {
   return targets().map((t) => {
     let node: unknown = readJson(t.file)
     for (const key of t.at) node = (node as Record<string, unknown> | undefined)?.[key]
+    const entryVal = node && typeof node === 'object'
+      ? (node as Record<string, unknown>)[SERVER_KEY]
+      : undefined
+    // An install.sh-era entry runs the stdio server with no arguments, so it
+    // opens the device for itself and fails the moment a daemon holds one.
+    const args = entryVal && typeof entryVal === 'object'
+      ? (entryVal as { args?: unknown }).args
+      : undefined
     return {
       id: t.id,
       name: t.name,
       path: t.file.replace(HOME, '~'),
       found: found(t),
-      installed: Boolean(node && typeof node === 'object' && SERVER_KEY in (node as object))
+      installed: Boolean(entryVal),
+      stale: Boolean(entryVal) && !(Array.isArray(args) && args.includes('--attach'))
     }
   })
 }
@@ -83,8 +92,15 @@ function entry(paths: Paths): Record<string, unknown> {
   return { command: paths.bin, args: ['--attach', '--socket', paths.socket] }
 }
 
-export function write(paths: Paths, wanted: string[]): void {
+/**
+ * `skip` is not the same as "not wanted": a target someone else owns (Claude
+ * Code, whose own CLI manages ~/.claude.json) must be left alone entirely.
+ * Merely leaving it out of `wanted` makes the loop below DELETE its entry —
+ * which silently undid the `claude mcp add` that had just written it.
+ */
+export function write(paths: Paths, wanted: string[], skip: string[] = []): void {
   for (const t of targets()) {
+    if (skip.indexOf(t.id) >= 0) continue
     if (!found(t) && wanted.indexOf(t.id) < 0) continue
     const doc = readJson(t.file)
     const node = bucket(doc, t.at)

@@ -128,7 +128,13 @@ edit the same live device at once:
 
 `--mode auto|bridge|direct` chooses how the daemon opens the device (bridge when
 the instrumented Cortex Control is up, direct otherwise). Plain `qc-mcp` with no
-arguments is unchanged, so existing registrations keep working.
+arguments is unchanged, so existing registrations keep working — though a client
+registered that way opens the device for itself and will fail while a daemon
+holds it, so re-register it with `--attach`.
+
+Verified on real hardware on **both platforms**: two concurrent clients reading
+the same live preset through one daemon, on macOS (unix socket) and on Windows
+(loopback endpoint plus a `.port` file, since AF_UNIX is not dependable there).
 
 **Patchbay**, the launcher in [app/](app/), does all of this from a window:
 the preflight checks, the venv, the instrumented build, the client configs, and

@@ -30,6 +30,9 @@ export interface ClientTarget {
   found: boolean
   /** our server entry is present in its config */
   installed: boolean
+  /** installed, but from before the daemon: it still opens the device itself,
+   *  so it will fail while the daemon holds one */
+  stale: boolean
 }
 
 export interface InstrumentedInfo {

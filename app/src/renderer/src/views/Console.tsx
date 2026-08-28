@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Badge, Button, Modal, ModalActions, SegmentedControl, StatusDot } from '@singz/ui'
 import type { Mode, Snapshot } from '@shared/types'
-import { clash, isMac, sessionFact, sharedWriters, uptime } from '../derive.js'
+import { clash, isMac, sessionFact, sharedWriters, staleClients, uptime } from '../derive.js'
 import { act, say, useProgress } from '../store.js'
 import { Facts, Strip, Tag } from '../components/Bits.js'
 import { Sparkline } from '../components/Sparkline.js'
@@ -85,14 +85,25 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
             </div>
           </div>
           <div className="mod-body">
+            {staleClients(snap).length > 0 && (
+              <Strip>
+                <span className="grow">
+                  {staleClients(snap).map((c) => c.name).join(', ')}{' '}
+                  {staleClients(snap).length === 1 ? 'was' : 'were'} registered before the daemon and
+                  still open the device directly, so {staleClients(snap).length === 1 ? 'it' : 'they'}{' '}
+                  will fail while the daemon holds it.
+                </span>
+                <Button size="sm" onClick={() => setSheet('clients')}>Re-point</Button>
+              </Strip>
+            )}
             <div className="clients">
               {snap.clients.filter((c) => c.found || c.installed).map((c) => (
                 <div className="client-row" key={c.id}>
-                  <StatusDot tone={c.installed ? 'ok' : 'idle'} />
+                  <StatusDot tone={c.installed ? (c.stale ? 'warn' : 'ok') : 'idle'} />
                   <span className="name">{c.name}</span>
                   <span className="path mono">{c.path}</span>
-                  <span className={c.installed ? 'state on' : 'state'}>
-                    {c.installed ? 'installed' : 'not installed'}
+                  <span className={c.installed && !c.stale ? 'state on' : 'state'}>
+                    {!c.installed ? 'not installed' : c.stale ? 'opens the device itself' : 'installed'}
                   </span>
                 </div>
               ))}

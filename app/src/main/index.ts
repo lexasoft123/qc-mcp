@@ -94,7 +94,7 @@ function handlers(): void {
   ipcMain.handle('clients:set', async (_e, ids: string[]) => {
     const paths = state.getPaths()
     const viaCli = await clients.writeClaudeCode(paths, ids.includes('code'))
-    clients.write(paths, viaCli ? ids.filter((i) => i !== 'code') : ids)
+    clients.write(paths, ids, viaCli ? ['code'] : [])
     return state.push(true)
   })
 
@@ -182,7 +182,7 @@ async function registerDefaults(): Promise<void> {
   const paths = state.getPaths()
   const found = clients.list().filter((c) => c.found).map((c) => c.id)
   const viaCli = await clients.writeClaudeCode(paths, found.includes('code'))
-  clients.write(paths, viaCli ? found.filter((i) => i !== 'code') : found)
+  clients.write(paths, found, viaCli ? ['code'] : [])
 }
 
 // ── lifecycle ───────────────────────────────────────────────────────────

@@ -14,7 +14,8 @@
     "dist": "npm run fetch:uv && npm run build && electron-builder",
     "dist:mac": "npm run fetch:uv && npm run build && electron-builder --mac dmg:arm64 && electron-builder --mac dmg:x64",
     "dist:win": "npm run fetch:uv && npm run build && electron-builder --win",
-    "fetch:uv": "node scripts/fetch-uv.mjs"
+    "fetch:uv": "node scripts/fetch-uv.mjs",
+    "icons": "electron build/icon/build-icons.cjs"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.5",

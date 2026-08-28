@@ -14,6 +14,12 @@ files:
   - '!{.gitignore,README.md,package-lock.json}'
 asar: true
 npmRebuild: false
+
+# Chromium ships 57 locale .pak files, ~40 MB unpacked, for an app whose own
+# strings are English only. Both names are listed because the two platforms
+# spell it differently: macOS keeps en.lproj, Windows locales/en-US.pak.
+electronLanguages: [en, en-US]
+compression: maximum
 afterPack: scripts/afterPack.cjs
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
@@ -37,6 +43,7 @@ extraResources:
     to: qc-mcp/LICENSE
 
 mac:
+  icon: build/icon.icns
   # No signing certificate wired up yet — ships unsigned (right-click → Open).
   # To sign later: drop `identity`, add CSC_LINK / CSC_KEY_PASSWORD in CI.
   identity: null
@@ -47,8 +54,12 @@ mac:
       arch: [arm64, x64]
 dmg:
   title: ${productName}
+  # lzfse rather than the default zlib. ULMO (LZMA) compresses better still
+  # but needs electron-builder 27; this project is on 25.
+  format: ULFO
 
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]

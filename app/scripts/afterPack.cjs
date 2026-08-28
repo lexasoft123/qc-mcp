@@ -9,7 +9,7 @@
  * binary is covered by it.
  */
 const { execFileSync } = require('node:child_process')
-const { copyFileSync, existsSync, mkdirSync } = require('node:fs')
+const { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } = require('node:fs')
 const path = require('node:path')
 const { Arch } = require('electron-builder')
 
@@ -49,12 +49,52 @@ function placeUv(context) {
   console.log(`  • bundled uv (${target})`)
 }
 
+/**
+ * Drop the Chromium locales we do not ship — ~40 MB of real bytes across 54
+ * .pak files, for an app whose own strings are English only.
+ *
+ * electron-builder's own `electronLanguages` cannot do this on macOS: it looks
+ * in Contents/Resources, which holds nothing but EMPTY stub .lproj directories,
+ * so it deletes 54 zero-byte folders and reports success while every actual
+ * locale.pak survives inside the framework. The real ones live here. On Windows
+ * its path (resources/../locales) is right, so this is a no-op there.
+ *
+ * Must run before the signature below — removing files from a signed bundle
+ * invalidates it.
+ */
+function trimLocales(context) {
+  if (context.electronPlatformName !== 'darwin') return
+  const wanted = new Set(
+    (context.packager.config.electronLanguages || ['en']).concat('en')
+  )
+  const dir = path.join(
+    resourcesDir(context), '..', 'Frameworks', 'Electron Framework.framework',
+    'Versions', 'A', 'Resources'
+  )
+  if (!existsSync(dir)) return
+  let freed = 0
+  let removed = 0
+  for (const entry of readdirSync(dir)) {
+    if (!entry.endsWith('.lproj')) continue
+    if (wanted.has(entry.slice(0, -'.lproj'.length))) continue
+    const full = path.join(dir, entry)
+    for (const f of readdirSync(full)) {
+      try { freed += statSync(path.join(full, f)).size } catch { /* gone */ }
+    }
+    rmSync(full, { recursive: true, force: true })
+    removed++
+  }
+  if (removed) console.log(`  • dropped ${removed} Chromium locales (${(freed / 1e6).toFixed(1)} MB)`)
+}
+
 module.exports = async function afterPack(context) {
   if (process.env.PATCHBAY_NO_UV === '1') {
     console.log('  • PATCHBAY_NO_UV=1 — building without uv; setup will need a system Python 3.10+')
   } else {
     placeUv(context)
   }
+
+  trimLocales(context)
 
   if (context.electronPlatformName !== 'darwin') return
   // Real signing configured? electron-builder already signed with the actual

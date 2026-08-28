@@ -48,22 +48,36 @@ echo "[2/5] copying app -> $OUT_APP"
 rm -rf "$OUT_APP"
 cp -R "$SRC_APP" "$OUT_APP"
 
-echo "[3/5] writing entitlements"
-cat > "$ENT" <<'PLIST'
+echo "[3/5] writing entitlements (read from the original, not hand-kept)"
+# READ the source app's entitlements rather than carrying a copy. The copy that
+# used to live here was labelled "from the original app" and had drifted: it was
+# silently dropping com.apple.security.automation.apple-events and
+# com.apple.security.scripting-targets, so every instrumented build ran with
+# fewer privileges than the app it was cloned from.
+if ! codesign -d --entitlements :- "$SRC_APP" 2>/dev/null | tr -d '\0' > "$ENT" \
+   || ! plutil -lint "$ENT" >/dev/null 2>&1; then
+    echo "  ! could not read the original entitlements; starting from empty"
+    cat > "$ENT" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <!-- from the original app -->
-  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-  <key>com.apple.security.device.audio-input</key><true/>
-  <!-- needed so DYLD_INSERT_LIBRARIES loads our (ad-hoc) dylib -->
-  <key>com.apple.security.cs.disable-library-validation</key><true/>
-  <key>com.apple.security.cs.allow-dyld-environment-variables</key><true/>
-  <key>com.apple.security.get-task-allow</key><true/>
-</dict>
-</plist>
+<plist version="1.0"><dict/></plist>
 PLIST
+fi
+
+# ...then add only what injection itself requires.
+for key in com.apple.security.cs.disable-library-validation \
+           com.apple.security.cs.allow-dyld-environment-variables \
+           com.apple.security.cs.allow-unsigned-executable-memory \
+           com.apple.security.get-task-allow; do
+    # PlistBuddy, not plutil: plutil treats '.' in a key as a key-PATH
+    # separator, so com.apple.security.cs.* is read as five nested dicts and
+    # every insert fails with "Key path not found". PlistBuddy separates with
+    # ':' so dotted keys work. Getting this wrong silently strips the very
+    # entitlements injection depends on and leaves the copy unusable.
+    /usr/libexec/PlistBuddy -c "Add :$key bool true" "$ENT" >/dev/null 2>&1 \
+        || /usr/libexec/PlistBuddy -c "Set :$key true" "$ENT" >/dev/null
+done
+echo "  entitlements: $(grep -c '<key>' "$ENT") keys merged"
 
 echo "[4/5] re-signing app (ad-hoc, no hardened runtime)"
 # sign the main executable then the bundle; NO '--options runtime' => hardened
@@ -72,6 +86,19 @@ codesign -f -s - --entitlements "$ENT" "$OUT_APP/Contents/MacOS/Cortex Control"
 codesign -f -s - --entitlements "$ENT" "$OUT_APP"
 
 echo "[5/5] verifying"
+# Every entitlement the original declared must still be present. This is the
+# check that would have caught the drift above.
+SRC_KEYS=$(codesign -d --entitlements :- "$SRC_APP" 2>/dev/null | tr -d '\0' \
+           | grep -oE "<key>[^<]+</key>" | sort -u || true)
+OUT_KEYS=$(codesign -d --entitlements :- "$OUT_APP" 2>/dev/null | tr -d '\0' \
+           | grep -oE "<key>[^<]+</key>" | sort -u || true)
+MISSING=$(comm -23 <(echo "$SRC_KEYS") <(echo "$OUT_KEYS") || true)
+if [ -n "$MISSING" ]; then
+    echo "  ! entitlements LOST relative to the original:"
+    echo "$MISSING" | sed 's/^/      /'
+else
+    echo "  entitlements: none lost relative to the original"
+fi
 FLAGS="$(codesign -dvvv "$OUT_APP" 2>&1 | grep -i '^CodeDirectory' | grep -oi 'flags=[^ ]*' || true)"
 echo "  app codesign $FLAGS"
 echo "$FLAGS" | grep -qi runtime && fail "hardened runtime still set — injection would be blocked"

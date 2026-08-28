@@ -117,6 +117,15 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   label|color}` — a Grid UPDATE with preset-level `scene_labels[]` is a silent no-op.
   Preset **name** is set by the save (File CREATE), not settable on the live grid.
   Unlabeled scenes with data show "Undefined" on-device.
+- **The instrumented copy must keep the ORIGINAL's entitlements.** `build.sh`
+  reads them off the source app now and adds only the four injection needs on
+  top; it used to carry a hand-written "from the original app" list that had
+  drifted and was silently dropping `automation.apple-events` and
+  `scripting-targets`. It verifies nothing was lost, so the drift cannot come
+  back quietly. Use **PlistBuddy, not plutil**, to add these keys: plutil reads
+  `.` as a key-PATH separator, so `com.apple.security.cs.*` parses as five
+  nested dicts and every insert fails with "Key path not found" — which strips
+  exactly the entitlements injection depends on.
 - **Captures**: block hash 14000(V1)/14001(V2) + param[5] `file_name`=`<64hex key><name>`;
   also list the key in the preset's `factory_/product_dependencies`.
 - **Loading Downloads/Plugin presets** uses `key_in_downloads` (cloud_id) / plugin key, not

@@ -31,14 +31,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Both mac arches from the one runner: electron-builder pulls the
-          # x64 Electron itself, and afterPack picks the matching uv per arch.
+          # Both mac arches from the one runner — electron-builder pulls the
+          # x64 Electron itself and afterPack picks the matching uv — but ONE
+          # ARCH PER INVOCATION. A single `--mac` run builds both DMGs in
+          # parallel and each mounts /Volumes/Patchbay; they collide, and
+          # `hdiutil detach -quiet /Volumes/Patchbay` then fails all five
+          # retries. That is what broke the first release build here.
           - os: macos-latest
             name: macOS (dmg, arm64 + x64)
-            args: --mac --arm64 --x64
+            package: |
+              npx electron-builder --mac dmg:arm64 --publish never
+              npx electron-builder --mac dmg:x64 --publish never
           - os: windows-latest
             name: Windows (nsis, x64)
-            args: --win
+            package: npx electron-builder --win --publish never
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -83,7 +89,7 @@ jobs:
       # Pinned version, pinned sha256 — see scripts/fetch-uv.mjs. Cached
       # because it is ~40 MB per target off GitHub releases on every run.
       - name: Cache uv
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: app/resources/uv
           key: uv-${{ runner.os }}-${{ hashFiles('app/scripts/fetch-uv.mjs') }}
@@ -98,7 +104,8 @@ jobs:
 
       - name: Package
         working-directory: app
-        run: npx electron-builder ${{ matrix.args }} --publish never
+        shell: bash
+        run: ${{ matrix.package }}
 
       # Every run keeps its artifacts, tag or not — that is what makes the
       # weekly run a usable smoke test rather than just a green tick.

@@ -18,7 +18,7 @@
  */
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -89,7 +89,9 @@ async function fetchOne(target) {
     if (!existsSync(inner)) throw new Error(`${spec.bin} not found in ${spec.archive}`)
     mkdirSync(dirname(dest), { recursive: true })
     rmSync(dest, { force: true })
-    renameSync(inner, dest)
+    // copy, not rename: on the Windows runner the temp dir is on C: and the
+    // workspace on D:, and rename across devices is EXDEV.
+    copyFileSync(inner, dest)
     writeFileSync(stamp, UV_VERSION + '\n', 'utf8')
   } finally {
     rmSync(work, { recursive: true, force: true })

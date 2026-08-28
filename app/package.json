@@ -12,7 +12,7 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "dist": "npm run fetch:uv && npm run build && electron-builder",
-    "dist:mac": "npm run fetch:uv && npm run build && electron-builder --mac",
+    "dist:mac": "npm run fetch:uv && npm run build && electron-builder --mac dmg:arm64 && electron-builder --mac dmg:x64",
     "dist:win": "npm run fetch:uv && npm run build && electron-builder --win",
     "fetch:uv": "node scripts/fetch-uv.mjs"
   },

@@ -438,6 +438,8 @@ Mostly additive, with **one genuinely incompatible field**:
 
 ## 12a. Device presets — `ModelPreset`(71), CorOS 4.1
 
+*(For how to actually use these from the MCP, see [docs/COROS-4.1.md](docs/COROS-4.1.md).)*
+
 Per-device saved settings ("save your favourite amp/drive/reverb settings and
 recall them in any rig"). 4.1.0 ships **2751 factory presets across 602 models**;
 the manual caps **user** presets at 32 per device. I/O Settings and Global EQ get

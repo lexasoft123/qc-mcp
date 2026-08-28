@@ -53,6 +53,13 @@ mcp = FastMCP("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
 8. Footswitches: assign_stomp(row, col, 'A'-'H') binds a block to a stomp switch
    (unassign_stomp removes it). Pair stomps with scenes for players in Hybrid
    mode — scenes carry the tone, stomps toggle drives/boosts/delays.
+9. GLOBAL settings (affect every preset, not just the open one):
+   list_settings_presets / load_settings_preset cover Global EQ and I/O Settings;
+   set_io_port sets input level/impedance/type and output level/mute. Treat as
+   destructive — an I/O preset rewrites the user's hardware input setup and
+   needs confirm=True; keep the `previous` snapshot it returns, since that is
+   the only way back. get_tempo reads preset tempo + external MIDI-clock BPM.
+   Ask before changing anything global; it is not undone by reloading a preset.
 
 Deeper knowledge (routing recipes for shared-front multi-amp rigs, CPU model,
 protocol docs, GUI verification harness) lives in the qc-mcp repo — sessions
@@ -319,7 +326,11 @@ def recall_preset(position: int, setlist_key: str = "", is_factory: bool = False
 
 @mcp.tool()
 def set_master_volume(volume: float, engaged: bool = True) -> str:
-    """WRITE: set master volume (0.0-1.0)."""
+    """WRITE: set the device's master output volume, 0.0-1.0.
+
+    This is the physical big knob, not a preset value — it is global, survives
+    preset changes, and is not saved into a preset. `engaged=False` releases the
+    knob without changing the level."""
     qc = _conn()
     m = P.message_class("MasterVolume")(action=P.ACTION["UPDATE"],
                                         request_id=qc.next_request_id(),
@@ -512,11 +523,24 @@ def set_mode_cycle(modes: list) -> dict:
             "cycle": [MODE_NAMES.get(i, f"#{i}") for i in ids]}
 
 
+INPUT_TYPES = {0.0: "instrument", 0.5: "mic", 1.0: "line"}
+
+
+def _input_type_name(value):
+    """`input_type` is a 3-position normalized control, not a boolean."""
+    return INPUT_TYPES.get(round(float(value) * 2) / 2, f"unknown({value:.3f})")
+
+
 @mcp.tool()
 def get_io_settings() -> dict:
-    """Read the hardware I/O port settings: inputs (level, type instrument/line,
-    impedance/Z-mode, ground lift, plugged), outputs (level, mute, ground lift),
-    headphones, USB, and input/output pairing. Read-only."""
+    """Read the hardware I/O port settings: inputs (level, type, impedance/Z-mode,
+    ground lift, plugged), outputs (level, mute, ground lift), headphones, USB,
+    and input/output pairing.
+
+    Input `type` is one of instrument / mic / line — a 3-position control
+    (0.0 / 0.5 / 1.0). Cortex Control's own panel only offers instrument and mic,
+    so a port set to line on the unit itself can be read and restored here but
+    not through the app. Read-only; write with set_io_port."""
     io = _conn().read_message("IOSettings")
     if io is None or not io.HasField("settings"):
         return {"note": "no IO settings returned"}
@@ -524,7 +548,7 @@ def get_io_settings() -> dict:
     def ins(p):
         return {"port": p.input_port_id, "plugged": p.plugged,
                 "level": round(p.level, 3),
-                "type": "instrument" if round(p.input_type) == 0 else "line/mic",
+                "type": _input_type_name(p.input_type),
                 "impedance": round(p.input_zmode, 3),
                 "ground_lift": bool(p.ground_lift)}
     def outs(p):
@@ -1287,8 +1311,11 @@ def assign_stomp(row: int, column: int, footswitch: str,
 
     A block holds ONE assignment per kind — assigning again moves it. `kind`
     'secondary' is the CorOS 4.1 Dual Footswitch feature: a second function on
-    its own switch, for devices that have one (Vintage Digital, Aeons Reverb);
-    on other devices it does nothing useful. `momentary=True` = active only
+    its own switch, for devices that have one (Vintage Digital, Aeons Reverb) —
+    such a block can hold PRIMARY and SECONDARY at once, on two switches. The
+    device does NOT check: it accepts 'secondary' on any block, and on one with
+    no second function the switch is simply consumed and does nothing, so only
+    use it where you know the device has one. `momentary=True` = active only
     while held, otherwise latching. Verifies by reading the preset back."""
     index = _stomp_index(footswitch)
     if index is None:

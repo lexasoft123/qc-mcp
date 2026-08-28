@@ -31,6 +31,9 @@ https://github.com/lexasoft123/qc-mcp
   chosen per connection from the device's version, and newer‑only tools say so
   rather than failing silently.
 
+New in CorOS 4.1 — device presets, dual footswitch assignments, Global EQ / I/O
+Settings presets, and 100 new devices: see **[docs/COROS-4.1.md](docs/COROS-4.1.md)**.
+
 ## Requirements
 
 - macOS (uses IOKit HID via ctypes; the interposer/bridge is macOS‑specific)

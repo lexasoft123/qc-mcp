@@ -2,7 +2,9 @@
 
 MCP server that controls a **Neural DSP Quad Cortex** over its reverse-engineered
 internal **USB-HID / protobuf** protocol (not MIDI). See `PROTOCOL.md` for the wire
-protocol and `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes.
+protocol, `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes,
+and `docs/COROS-4.1.md` for the 4.1 feature set (device presets, stomps,
+Global EQ / I/O presets) with usage examples.
 Supports **CorOS 4.0 and 4.1** — the schema is picked per connection from the
 device's firmware (PROTOCOL.md §12).
 
@@ -37,8 +39,9 @@ device's firmware (PROTOCOL.md §12).
 
 ## Running
 - `python3` alone lacks pyobjc; use `.venv/bin/python`. GUI tools auto-reexec into `.venv`.
-- Tests: `.venv/bin/python tests/test_directory.py` and
-  `tests/test_protocol_versions.py` (both offline, no device).
+- Tests (all offline, no device): `.venv/bin/python tests/test_directory.py`,
+  `tests/test_protocol_versions.py`, `tests/test_tool_docs.py` (the last one keeps
+  the MCP self-describing — every gated feature must have a tool behind it).
 - Device/GUI tools need the instrumented Cortex Control running (bridge) — see
   `interceptor/run-bridge.sh`.
 

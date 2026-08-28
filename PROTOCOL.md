@@ -485,6 +485,43 @@ matching hooks (`IOSettingsMessage.preset_to_load`,
 - MCP: `list_device_presets`, `load_device_preset`, `save_device_preset`,
   `delete_device_preset`.
 
+### Global EQ and I/O Settings presets
+
+The manual's "most virtual devices, **I/O Settings, and Global EQ**" is literal:
+both are ordinary entries in the same `ModelPreset` index, on pseudo-models —
+**Global EQ = catalog hash `4004` "Output Equalizer"** (its 28 params line up 1:1
+with `GlobalEQMessage.parameters` indices 0-27: five bands of
+GAIN/FREQ/Q/TYPE/BYPASS, then OUTPUT and two ASSIGN_EQ slots; 23 factory presets)
+and **I/O Settings = `31000`** (one factory preset, "Neural DSP® Default").
+
+They are *applied* through their own message, not the Grid:
+
+    GlobalEQ   { action=UPDATE, model_preset_to_load{value, is_factory, hash=4004} }
+    IOSettings { action=UPDATE, preset_to_load     {value, is_factory, hash=31000} }
+
+**Both overwrite global state that every preset sees.** Capture the current
+values first — `GlobalEQ` READ returns all 28 parameters and they can be written
+straight back, which makes a Global EQ load fully reversible. An I/O Settings
+load is *not* reversible from the message alone: it resets input levels,
+impedance and type, so snapshot them first (`load_settings_preset` returns the
+previous values and requires `confirm=True`).
+
+MCP: `list_settings_presets`, `load_settings_preset`, `set_io_port`.
+
+### Writing hardware I/O settings
+
+`IOSettings` UPDATE accepts `settings{in_port{…}}` / `out_port{…}` — but **only
+with the fields you are changing set**. A full port record (every field, e.g. a
+protobuf `CopyFrom` of one the device just sent) is *silently rejected*, which is
+what makes I/O writes look impossible. Confirmed by writing the same port three
+ways: `{port_id, level}` and `{port_id, level, plugged}` both landed; the full
+record did nothing.
+
+`input_type` is a **3-position normalized control**, not a boolean:
+`0.0` Instrument · `0.5` Mic · `1.0` Line. Cortex Control's panel only exposes
+Instrument/Mic, so a port set to Line from the unit's own screen can be read and
+restored over the protocol but not through the app.
+
 ## 12b. Footswitch (stomp) assignments — `Grid`(1)
 
 Binding a block to a footswitch turned out to live on the **Grid** message, not a
@@ -495,9 +532,15 @@ message of its own — a Grid UPDATE whose preset carries *only* the assignment:
 
 `stomp_index` 0-7 = footswitches A-H; `type` is the CorOS 4.1 Dual Footswitch
 field (`PRIMARY`=0 bypass, `SECONDARY`=1 the device's second function, on the
-devices that have one). A block holds one assignment per kind — assigning again
-moves it. **Unassign is the same message with `action=DELETE`**, which also
-clears the switch's momentary flag.
+devices that have one). A block holds **one assignment per kind** — verified on a
+Vintage Digital reverb holding E as PRIMARY and F as SECONDARY simultaneously;
+assigning the same kind again moves it. **Unassign is the same message with
+`action=DELETE`**, which also clears the switch's momentary flag.
+
+The device does **not** guard SECONDARY: it accepts the assignment on any block,
+including ones with no second function (tested on a Myth Drive), where the
+footswitch is simply consumed and does nothing. Only assign it to devices that
+have a second function.
 
 **Latching vs momentary must be a separate message.** The preset's
 `stomp_is_momentary` map (`{stomp_index: bool}`) is writable by Grid UPDATE, but

@@ -945,6 +945,72 @@ class QuadCortex:
         self.send("Grid", g)
         time.sleep(settle_s)
 
+    # -- settings presets: Global EQ and I/O Settings ride pseudo-models --
+    SETTINGS_MODELS = {"global_eq": 4004, "io_settings": 31000}
+
+    def load_settings_preset(self, target, preset_id, is_factory=True, settle_s=2.0):
+        """Apply a Global EQ or I/O Settings preset (CorOS 4.1).
+
+        These are device presets on pseudo-models — Global EQ is catalog hash
+        4004 "Output Equalizer" (its 28 params line up 1:1 with GlobalEQ's 28
+        parameter indices), I/O Settings is 31000 — but each is applied through
+        its OWN message rather than the Grid: `GlobalEQ.model_preset_to_load` /
+        `IOSettings.preset_to_load`.
+        """
+        if target not in self.SETTINGS_MODELS:
+            raise QCError(f"target must be one of {sorted(self.SETTINGS_MODELS)}")
+        command = "GlobalEQ" if target == "global_eq" else "IOSettings"
+        field = "model_preset_to_load" if target == "global_eq" else "preset_to_load"
+        m = P.message_class(command)()
+        m.action = P.ACTION["UPDATE"]
+        m.request_id = self.next_request_id()
+        pid = getattr(m, field)
+        pid.value = str(preset_id)
+        pid.is_factory = bool(is_factory)
+        pid.hash = self.SETTINGS_MODELS[target]
+        self.send(command, m)
+        time.sleep(settle_s)
+
+    def read_global_eq(self):
+        """[(parameter_index, value)] plus the bypass flag."""
+        g = self.read_state("GlobalEQ")
+        return ([(p.parameter_index, p.value) for p in g.parameters],
+                bool(g.bypassed))
+
+    def write_global_eq(self, params, bypassed=None, settle_s=1.5):
+        """Write Global EQ parameters back — the restore path for a preset load."""
+        m = P.message_class("GlobalEQ")()
+        m.action = P.ACTION["UPDATE"]
+        m.request_id = self.next_request_id()
+        for index, value in params:
+            pp = m.parameters.add()
+            pp.parameter_index = int(index)
+            pp.value = float(value)
+        if bypassed is not None:
+            m.bypassed = bool(bypassed)
+        self.send("GlobalEQ", m)
+        time.sleep(settle_s)
+
+    def set_io_port(self, kind, port_id, settle_s=1.5, **fields):
+        """Set individual hardware I/O port fields (`kind` 'in' or 'out').
+
+        **Send only the fields you are changing.** A full port record — every
+        field at once, e.g. a protobuf CopyFrom of one the device sent — is
+        silently rejected, which is what makes I/O writes look impossible. One
+        field per call is always safe.
+        """
+        if kind not in ("in", "out"):
+            raise QCError("kind must be 'in' or 'out'")
+        m = P.message_class("IOSettings")()
+        m.action = P.ACTION["UPDATE"]
+        m.request_id = self.next_request_id()
+        port = (m.settings.in_port if kind == "in" else m.settings.out_port).add()
+        setattr(port, f"{'input' if kind == 'in' else 'output'}_port_id", int(port_id))
+        for name, value in fields.items():
+            setattr(port, name, value)
+        self.send("IOSettings", m)
+        time.sleep(settle_s)
+
     def select_model_slot(self, row, column, timeout_ms=3000):
         """Tell the device which grid slot's editor is open, and read back which
         device preset that block currently holds.

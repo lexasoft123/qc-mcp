@@ -1103,6 +1103,124 @@ def load_device_preset(row: int, column: int, preset: str,
 
 
 @mcp.tool()
+def list_settings_presets(target: str = "global_eq") -> dict:
+    """Global EQ / I/O Settings presets (CorOS 4.1+). `target` is 'global_eq' or
+    'io_settings'. These ride pseudo-models in the same device-preset index —
+    Global EQ is catalog hash 4004, I/O Settings 31000. Read-only."""
+    gate = P.require("model_presets", "Settings presets")
+    if gate:
+        return {"error": gate}
+    qc = _conn()
+    model_hash = qc.SETTINGS_MODELS.get(target)
+    if model_hash is None:
+        return {"error": f"target must be 'global_eq' or 'io_settings', not {target!r}."}
+    presets = qc.list_model_presets(model_hash)
+    return {"target": target, "model_hash": model_hash, "count": len(presets),
+            "presets": [{"id": p["id"], "name": p["name"],
+                         "is_factory": p["is_factory"], "is_default": p["is_default"]}
+                        for p in presets]}
+
+
+@mcp.tool()
+def load_settings_preset(target: str, preset: str, confirm: bool = False) -> dict:
+    """WRITE (CorOS 4.1+): apply a Global EQ or I/O Settings preset.
+
+    **This overwrites global device settings, not preset content** — it affects
+    every preset on the unit. `target='io_settings'` in particular rewrites the
+    hardware input levels, impedance and types, so it needs `confirm=True` and
+    the previous values are returned so they can be put back with `set_io_port`.
+    Global EQ is captured and returned the same way."""
+    gate = P.require("model_presets", "Settings presets")
+    if gate:
+        return {"error": gate}
+    qc = _conn()
+    if target not in qc.SETTINGS_MODELS:
+        return {"error": f"target must be 'global_eq' or 'io_settings', not {target!r}."}
+    choices = qc.list_model_presets(qc.SETTINGS_MODELS[target])
+    match = next((c for c in choices
+                  if c["id"] == str(preset)
+                  or c["name"].lower() == str(preset).lower()), None)
+    if match is None:
+        return {"error": f"no {target} preset {preset!r}.",
+                "available": [c["name"] for c in choices[:20]]}
+    if target == "io_settings" and not confirm:
+        return {"error": "loading an I/O Settings preset rewrites the hardware "
+                         "input levels/impedance/type for every preset. Pass "
+                         "confirm=True if that is what you want.",
+                "would_load": match["name"]}
+    before = (_io_snapshot(qc) if target == "io_settings"
+              else {"global_eq": qc.read_global_eq()[0], "bypassed": qc.read_global_eq()[1]})
+    qc.load_settings_preset(target, match["id"], is_factory=match["is_factory"])
+    after = (_io_snapshot(qc) if target == "io_settings"
+             else {"global_eq": qc.read_global_eq()[0]})
+    return {"loaded": match["name"], "target": target,
+            "changed": before != after, "previous": before,
+            "note": "keep `previous` — that is the only way back."}
+
+
+def _io_snapshot(qc):
+    """The input-port fields an I/O preset overwrites."""
+    io = qc.read_state("IOSettings")
+    return {"in_ports": [{"port": p.input_port_id, "level": round(p.level, 6),
+                          "impedance": round(p.input_zmode, 6),
+                          "type": round(p.input_type, 6),
+                          "ground_lift": round(p.ground_lift, 6)}
+                         for p in io.settings.in_port],
+            "xlr1_2_linked": io.xlr1_2_linked, "out3_4_linked": io.out3_4_linked}
+
+
+@mcp.tool()
+def set_io_port(kind: str, port: int, level: float = None, impedance: float = None,
+                input_type: float = None, ground_lift: float = None,
+                mute: bool = None) -> dict:
+    """WRITE: set hardware I/O port fields (`kind` 'in' or 'out'), normalized 0-1.
+
+    Only the arguments you pass are sent — and that matters: the device
+    **silently rejects a write carrying a full port record**, so this is also the
+    way to undo a `load_settings_preset('io_settings', …)` from its `previous`
+    snapshot. `input_type` is a 3-position control (0=Instrument, 0.5=Mic,
+    1.0=Line); Cortex Control only exposes the first two."""
+    qc = _conn()
+    fields = {k: v for k, v in (("level", level), ("input_zmode", impedance),
+                                ("input_type", input_type),
+                                ("ground_lift", ground_lift), ("mute", mute))
+              if v is not None}
+    if not fields:
+        return {"error": "nothing to set — pass at least one field."}
+    try:
+        qc.set_io_port(kind, port, **fields)
+    except QCError as e:
+        return {"error": str(e)}
+    return {"set": fields, "kind": kind, "port": port, "now": _io_snapshot(qc)}
+
+
+@mcp.tool()
+def get_tempo() -> dict:
+    """Preset tempo and MIDI-clock status. CorOS 4.1 reports an incoming external
+    MIDI clock's tempo and whether it is out of the device's usable range —
+    useful when the QC is slaved to a DAW or drum machine. Read-only."""
+    qc = _conn()
+    out = {}
+    try:
+        tempo = qc.read_state("GlobalTempo")
+        values = [p.param_values[0].float_value for p in tempo.params
+                  if p.param_values]
+        out["tempo_params"] = [round(v, 4) for v in values]
+    except QCError:
+        out["tempo_params"] = None
+    settings = qc.read_state("GeneralSettings")
+    if P.supports("midi_clock_readout"):
+        out["external_midi_clock_bpm"] = round(
+            getattr(settings, "external_midi_clock_tempo", 0.0), 3)
+        out["external_midi_clock_out_of_range"] = bool(
+            getattr(settings, "external_midi_clock_out_of_range", False))
+        out["external_clock_present"] = out["external_midi_clock_bpm"] > 0
+    else:
+        out["note"] = P.require("midi_clock_readout", "External MIDI clock readout")
+    return out
+
+
+@mcp.tool()
 def save_device_preset(row: int, column: int, name: str,
                        is_default: bool = False) -> dict:
     """WRITE (CorOS 4.1+): save the block at (row, column)'s current settings as

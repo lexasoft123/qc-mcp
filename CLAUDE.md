@@ -123,11 +123,24 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   `ModelPreset` with **no action field** + `loaded_row`/`loaded_column`) — without
   it every write is silently ignored. The device also **refuses a save whose
   params match an existing preset** ("Preset Conflict"); tweak something first.
+- **Settings presets (4.1)**: Global EQ and I/O Settings are device presets on
+  pseudo-models (`4004` Output Equalizer / `31000` IOSettings) applied through
+  their OWN message (`GlobalEQ.model_preset_to_load` / `IOSettings.preset_to_load`).
+  Both overwrite **global** state; a Global EQ load is reversible (read all 28
+  params first, write them back), an I/O load is not — `load_settings_preset`
+  snapshots and demands `confirm=True`.
+- **Writing I/O settings**: send ONLY the fields you're changing. A full port
+  record (every field, e.g. a protobuf `CopyFrom`) is silently rejected — that's
+  why I/O writes look impossible. `input_type` is 3-position: 0=Instrument,
+  0.5=Mic, 1.0=Line (the app only offers the first two).
 - **Stomp assignments live on `Grid`**, not their own message: Grid UPDATE with
   `preset.stomp_mode_assignments[]{row, column, stomp_index, type}` (A-H = 0-7;
   `type` PRIMARY/SECONDARY = the 4.1 dual-footswitch). DELETE unassigns.
   **Latching/momentary must be its own Grid UPDATE** (`stomp_is_momentary` map) —
   sent alongside an assignment it's overwritten by the device's echo.
+  A block holds one assignment **per kind** (verified: Vintage Digital on E
+  PRIMARY + F SECONDARY at once). The device does NOT guard SECONDARY — it
+  accepts it on blocks with no second function, silently wasting a switch.
   MCP: `assign_stomp` / `unassign_stomp`.
 
 ## Conventions

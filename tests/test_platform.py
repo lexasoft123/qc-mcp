@@ -28,9 +28,12 @@ def _backends():
     if sys.platform == "darwin":
         from qc_mcp.iohid import IOHIDTransport
         out.append(IOHIDTransport)
-    if B.bridge_supported():
+    if sys.platform != "win32":        # bridge.py needs POSIX fcntl/select
         from qc_mcp.bridge import FifoBridge
         out.append(FifoBridge)
+    else:
+        from qc_mcp.winbridge import WinBridge
+        out.append(WinBridge)
     return out
 
 
@@ -54,10 +57,39 @@ def test_backend_signatures_match():
 def test_platform_support_matrix():
     assert B.direct_supported("darwin") and B.direct_supported("win32")
     assert not B.direct_supported("linux")
-    # Bridge mode rides a DYLD interposer, so it exists on macOS alone.
-    assert B.bridge_supported("darwin")
-    assert not B.bridge_supported("win32")
+    # Both can run alongside the app, by different means (interposer / shared
+    # handle); neither mechanism exists elsewhere.
+    assert B.bridge_supported("darwin") and B.bridge_supported("win32")
+    assert not B.bridge_supported("linux")
+    # Every enabled bridge platform needs endpoints; the reverse need not hold —
+    # win32 keeps its pipe names for the interposer even though its bridge is off.
+    assert set(B.BRIDGE_PLATFORMS) <= set(B.BRIDGE_ENDPOINTS)
     assert B.platform_name("win32") == "Windows"
+
+
+def test_shared_mode_asks_for_a_non_seizing_handle():
+    """share=True must NOT seize: that is the whole point on Windows, where the
+    app keeps its own handle open."""
+    import qc_mcp.transport as T
+    seen = {}
+
+    def fake_open_hid(**kw):
+        seen.update(kw)
+        raise RuntimeError("stop here - we only care about the arguments")
+
+    real = T.open_hid
+    try:
+        T.open_hid = fake_open_hid
+        for share, want_seize in ((True, False), (False, True)):
+            seen.clear()
+            try:
+                T.QuadCortex(share=share)
+            except RuntimeError:
+                pass
+            assert seen.get("seize") is want_seize, \
+                f"share={share} should pass seize={want_seize}, got {seen}"
+    finally:
+        T.open_hid = real
 
 
 def test_open_hid_picks_the_backend_for_the_platform():
@@ -95,6 +127,38 @@ def test_win32_struct_layouts():
     # SetupAPI validates cbSize against the *C* declaration, not our buffer.
     assert winhid._DETAIL_CBSIZE == (8 if ctypes.sizeof(ctypes.c_void_p) == 8 else 6)
     assert winhid.SP_DEVICE_INTERFACE_DETAIL_DATA_W.DevicePath.offset == 4
+
+
+def test_refused_writes_are_counted_not_swallowed():
+    """A refused HID write must leave a trace. It is NOT fatal — Windows returns
+    ERROR_GEN_FAILURE(31) even on handles whose writes do land — but silently
+    dropping it is how a connection can look healthy while every write vanishes."""
+    import threading
+    import qc_mcp.transport as T
+
+    class Refusing:
+        BENIGN_WRITE_CODES = frozenset({0})
+
+        def set_report(self, report_id, data, include_id=False):
+            return 31                      # ERROR_GEN_FAILURE
+
+    qc = T.QuadCortex.__new__(T.QuadCortex)
+    qc.io = Refusing()
+    qc._send_lock = threading.Lock()
+    qc.write_errors = 0
+    qc.last_write_error = None
+    qc.send("Version", proto_bytes=b"")    # must not raise
+    assert qc.write_errors == 1 and qc.last_write_error == 31
+
+    class BenignOnMac(Refusing):
+        BENIGN_WRITE_CODES = frozenset({0, 0xe0005000})
+
+        def set_report(self, report_id, data, include_id=False):
+            return 0xe0005000              # IOKit's harmless code
+
+    qc.io = BenignOnMac()
+    qc.send("Version", proto_bytes=b"")
+    assert qc.write_errors == 1, "IOKit's benign code must not be counted"
 
 
 def test_device_ids_recoverable_from_the_interface_path():
@@ -146,7 +210,7 @@ def test_server_hides_bridge_mode_where_it_cannot_run():
     real = B.bridge_supported
     try:
         B.bridge_supported = lambda platform=None: False
-        assert S._bridge_fifos() is False, "no bridge FIFOs off macOS, even if /tmp has them"
+        assert S._bridge_endpoints() is False, "no bridge endpoints where bridge mode cannot run"
         assert S._bridge_running() is False
         assert S._launch_bridge() == S._NO_BRIDGE
     finally:
@@ -154,9 +218,12 @@ def test_server_hides_bridge_mode_where_it_cannot_run():
 
 
 def test_connect_docstring_states_the_platform_limits():
+    """A client only ever sees the docstring, so it has to say how each platform
+    actually runs alongside the app — they are not the same mechanism."""
     doc = S.connect.__doc__ or ""
-    assert "macOS only" in doc, "connect() must say bridge mode is macOS-only"
-    assert "Windows" in doc
+    assert "macOS" in doc and "Windows" in doc
+    assert "interposer" in doc, "must explain the macOS mechanism"
+    assert "NON-exclusive" in doc, "must explain the Windows mechanism"
 
 
 if __name__ == "__main__":

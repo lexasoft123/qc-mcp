@@ -1,0 +1,6 @@
+hid_log.txt
+*.obj
+*.dll
+*.exe
+*.lib
+*.exp

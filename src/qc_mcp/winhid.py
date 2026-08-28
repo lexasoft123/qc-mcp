@@ -297,6 +297,12 @@ def enumerate_devices(vid=None, pid=None):
 class WinHIDTransport:
     """Drop-in for `iohid.IOHIDTransport` on Windows."""
 
+    #: ERROR_GEN_FAILURE(31) is NOISE on this device, not a failed write — the
+    #: Windows counterpart of IOKit's 0xe0005000. Measured: a direct-mode session
+    #: that provably landed its writes (VOLUME 6.0 -> 4.0, read back 4.0) still
+    #: reported 60 of them. Treat it as sent; judge writes by reading back.
+    BENIGN_WRITE_CODES = frozenset({0, 31})
+
     def __init__(self, vid=0x152A, pid=0x880A, report_size=128, seize=False):
         self.vid, self.pid = vid, pid
         self.report_size = report_size

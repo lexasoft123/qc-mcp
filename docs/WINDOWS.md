@@ -61,17 +61,106 @@ It separates the three ways this fails and tells you which one you hit:
 `--list` dumps every HID interface on the machine without opening anything, which
 is what to attach to a bug report when the QC doesn't show up.
 
-## What's macOS-only, and why
+## Running alongside Cortex Control
 
-**Bridge mode** (running the MCP *alongside* a live Cortex Control, sharing its
-session) works by `DYLD_INSERT_LIBRARIES`-injecting a small dylib into the app
-that mirrors its HID traffic onto two FIFOs. That is a Mach-O/dyld mechanism with
-no direct Windows equivalent — a Windows port would need DLL injection plus a
-`HidD_*`/`WriteFile` hook (Detours or MinHook) into `Cortex Control.exe`, and its
-own IPC (named pipes rather than FIFOs). The Python side is already
-platform-agnostic: `bridge.FifoBridge` implements the same four-method backend
-API as the HID transports, so a `WinBridge` would slot in at
-`backend.BRIDGE_PLATFORMS` without touching the transport.
+This works on Windows, and needs **no interposer at all**.
+
+macOS needs one because IOKit gives the device to a single owner: the only way in
+is to inject a dylib into Cortex Control and share its session. Windows behaves
+differently — the HID class driver **copies every input report to every open
+handle**, and Cortex Control opens the device with `FILE_SHARE_READ|WRITE`. So
+the MCP just opens its own non-exclusive handle next to the app:
+
+```python
+QuadCortex(share=True)      # open_hid(seize=False)
+```
+
+`connect(mode='bridge')` does this for you, starting the stock app first if it
+isn't running. Verified with the app running: `CorOS 4.1.0`, live
+preset/position/mode reads, and a **write** — amp VOLUME 6.0 → 4.0, read back
+4.0, then restored — with Cortex Control alive throughout. Control, not just
+eavesdropping.
+
+### ERROR_GEN_FAILURE(31) is noise here, not a failed write
+
+`WriteFile` on this device returns `31` constantly on paths whose writes provably
+land: the direct-mode session that wrote VOLUME and read the new value back
+reported **60** of them. It is the Windows counterpart of IOKit's harmless
+`0xe0005000`, and `WinHIDTransport.BENIGN_WRITE_CODES` lists it as such.
+
+Do not use it to decide whether a write worked — **read the value back**. Chasing
+it cost a long detour here, and twice led to the wrong conclusion that a second
+handle could not send. `QuadCortex` counts non-benign codes in `write_errors` /
+`last_write_error` if you need a signal, but a genuine lost write shows up as a
+read-back mismatch, not as an error code.
+
+One more trap from that detour: **pick a continuous parameter when testing
+writes.** Param 0 of an amp is `INPUT`, a discrete selector that clamps — writing
+2.0 reads back 1.0 and looks exactly like a dropped write, in direct mode too.
+
+### The caveat: two writers on one endpoint
+
+The app and the MCP are then independent writers on the same HID endpoint, with
+nothing sequencing them. A single-report message is one `WriteFile` and is
+atomic, but a message split across several reports can interleave with the
+other side's and corrupt both.
+
+Measured over one app session (`interceptor-win`'s log, flags byte of each
+host→device report):
+
+| flags | meaning | count |
+|-------|---------|-------|
+| `c0` | SINGLE (whole message in one report) | 76 |
+| `40` | FIRST of a multi-report message | 1 |
+| `80` | LAST of a multi-report message | 1 |
+
+So ~97% of the app's traffic can't interleave at all, and the exposure is the
+occasional multi-report message (startup here; preset saves and uploads are the
+other case). State divergence is *not* a concern — the device pushes state to
+every open handle, so the app's UI keeps up with changes the MCP makes.
+
+Practical rule, which `connect()` returns as a `caution` when it shares:
+**reads and light edits alongside the app are fine; for building or saving
+presets, use `connect(mode='direct', quit_app=True)`** so nothing else is
+writing.
+
+## The interposer (`interceptor-win/`) — capture only
+
+The Windows twin of `interceptor/`, for reverse-engineering rather than for
+bridge mode. `qclaunch.exe` starts Cortex Control suspended, `LoadLibrary`s
+`qcinject.dll` into it, and resumes; the DLL patches five KERNEL32 import slots.
+
+It works because Cortex Control (x64, one static exe) imports **no `hid.dll`**
+and has no delay-load table — it reaches the device purely through `CreateFileW`
+/ `ReadFile` / `WriteFile` / `GetOverlappedResult`, all in the plain import
+table. So IAT patching is enough; no Detours or MinHook.
+
+```powershell
+.\interceptor-winuild.ps1       # needs VS Build Tools (C++ workload)
+.\interceptor-win
+un-bridge.ps1  # launches the app with QC_LOG/QC_VERBOSE set
+```
+
+Verified capture on CorOS 4.1.0: 61 host→device and 1432 device→host frames in
+one session, framing decoding exactly as PROTOCOL.md §2 describes.
+
+Two things to know:
+
+- **Enumeration opens the device with access 0** just to read its ids, then
+  closes it. Latch onto one of those and you lose the real handle the moment it
+  closes — filter on `access & (GENERIC_READ|GENERIC_WRITE)`.
+- **Injection is unverified.** Frames queued from the pipe are written to the
+  device, but a forced pipe-bridge session never got a reply to its own request,
+  so something in the path is wrong. Note the diagnosis attempted at the time —
+  "ERROR_GEN_FAILURE means a concurrent/second-handle write was refused" — is
+  now known to be **false**: 31 is noise (above), so those runs proved nothing
+  either way and the question is simply open. Nothing needs it: shared handles
+  cover running alongside the app. It would matter only if a future CorOS
+  started opening the device exclusively, which is also when
+  `qc_mcp/winbridge.py` — the tested named-pipe client for this DLL — would
+  become the transport.
+
+## Still macOS-only
 
 **The GUI harness** (`tools/gui/`) drives Cortex Control by window-id
 `screencapture` and reads its JUCE accessibility tree through AppKit. Both are
@@ -87,12 +176,16 @@ offline tests are not.
 ```
 transport.QuadCortex
       |
-      +-- backend.open_hid()        picks by sys.platform
-             |
-             +-- iohid.IOHIDTransport    macOS   (IOKit HID via ctypes)
-             +-- winhid.WinHIDTransport  Windows (setupapi + hid.dll via ctypes)
+      +-- backend.open_hid(seize=)   picks by sys.platform
+      |      |                       seize=False = the Windows "alongside" mode
+      |      +-- iohid.IOHIDTransport    macOS   (IOKit HID via ctypes)
+      |      +-- winhid.WinHIDTransport  Windows (setupapi + hid.dll via ctypes)
       |
-      +-- bridge.FifoBridge          macOS only, chosen by connect(mode='bridge')
+      +-- backend.open_bridge()      chosen by connect(mode='bridge') on macOS
+             |
+             +-- bridge.FifoBridge      macOS, over the DYLD interposer's FIFOs
+             +-- winbridge.WinBridge    Windows, over the DLL's named pipes
+                                        (built + tested, not currently used)
 ```
 
 All three implement `open()` / `set_report()` / `read_reports()` / `close()` and
@@ -146,10 +239,20 @@ CorOS 4.1.0 | schema 4.1 | type QC | name 'QC MAX'
   `CreateFile error 32` (ERROR_SHARING_VIOLATION) and the "quit Cortex Control"
   message; `win_hid_check.py` exits 4.
 
-Not yet exercised on Windows: **writes** (building presets, saving, footswitch
-assignment, Global EQ / I/O). They use the same `set_report` path as the reads
-above and the same protocol layer as macOS, so there is no Windows-specific code
-left untested — but no preset has actually been written from a Windows host.
+Writes verified end-to-end from Windows (into an empty slot, never a named
+preset): `build_preset` (5 blocks), `set_parameter`, `set_parameter_scenes`,
+per-scene `set_block_bypass`, `set_preset_meta` scene labels, `assign_stomp`,
+`list_device_presets`, `save_preset_as`, `switch_scene`. The save was confirmed
+committed by re-reading the device's own directory, which lists the new preset at
+the target position — not just by the success string.
+
+Running alongside the app verified too, reads *and* writes: with the stock Cortex
+Control up, `connect(mode='bridge')` joined on a shared handle (`shared=True,
+exclusive=False`), read firmware/preset/position/mode, wrote an amp VOLUME and
+read the new value back, and left the app running.
+
+Not verified: the interposer's **injection** path (open — see above), and Global
+EQ / I/O writes, which are global and destructive and were left alone.
 
 Console note: runtime messages are plain ASCII on purpose. A Windows console on a
 legacy codepage (e.g. cp866) renders em-dashes as `?`, so the Windows-facing

@@ -66,8 +66,10 @@ Done. $reg
 Note: the repo's skills + CLAUDE.md knowledge still load only for sessions
 opened INSIDE this repo; from other folders you get device control alone.
 
-Windows runs DIRECT mode only (exclusive USB-HID): quit Cortex Control before
-connecting. Bridge mode and the GUI harness are macOS-only - see docs/WINDOWS.md.
+Windows can seize the device (direct mode, Cortex Control closed) or run
+alongside the app on a shared handle - connect(mode='bridge') does the latter and
+needs no setup. Heavy write work is safest in direct mode; see docs/WINDOWS.md.
+The GUI verification harness is macOS-only.
 Check the device is reachable with:
   .venv\Scripts\python.exe tools\win_hid_check.py
 "@

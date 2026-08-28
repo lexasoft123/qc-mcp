@@ -40,11 +40,12 @@ OUT_PATH = os.environ.get("QC_OUT", "/tmp/qc_in")
 _RX_CAP = 20000          # keep the last N device->host reports if the consumer stalls
 
 
-class BridgeError(Exception):
-    pass
+from .backend import BridgeError      # re-exported: `from .bridge import BridgeError` still works
 
 
 class FifoBridge:
+    BENIGN_WRITE_CODES = frozenset({0})   # set_report raises on a failed write
+
     def __init__(self, inject_path=INJECT_PATH, out_path=OUT_PATH):
         self.inject_path = inject_path
         self.out_path = out_path

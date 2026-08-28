@@ -33,11 +33,11 @@ from . import catalog
 from . import backend
 from .transport import QuadCortex, QCError
 
-#: Why bridge mode isn't on offer here. The interposer is a DYLD library, so
-#: sharing Cortex Control's session is macOS-only; everywhere else it's direct.
-_NO_BRIDGE = (f"bridge mode is macOS-only (this is {backend.platform_name()}) — "
-              "it shares Cortex Control's session through a DYLD interposer. "
-              "Use mode='direct' with Cortex Control closed.")
+#: Why running alongside Cortex Control isn't on offer here. macOS shares the
+#: app's session through a DYLD interposer, Windows opens a second non-exclusive
+#: handle; other platforms have neither.
+_NO_BRIDGE = (f"running alongside Cortex Control isn't supported on "
+              f"{backend.platform_name()}. Use mode='direct' with the app closed.")
 
 mcp = _Server("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
 (guitar amp modeler) over its internal USB protocol. Core workflow for building:
@@ -87,11 +87,13 @@ def _conn():
             # Auto-detect: if the instrumented Cortex Control is running (bridge
             # FIFOs present), share its session so both run at once; otherwise
             # seize the device directly. QC_BRIDGE=0 forces direct mode.
-            bridge = _bridge_fifos() and os.environ.get("QC_BRIDGE") != "0"
+            share = os.environ.get("QC_SHARE") == "1"
+            bridge = (not share and _bridge_endpoints()
+                      and os.environ.get("QC_BRIDGE") != "0")
             try:
-                _qc = QuadCortex(bridge=bridge).open(handshake=True)
+                _qc = QuadCortex(bridge=bridge, share=share).open(handshake=True)
             except Exception:
-                if bridge:   # bridge failed (app not really there) — fall back
+                if bridge or share:   # app not really there — fall back to seizing
                     _qc = QuadCortex(bridge=False).open(handshake=True)
                 else:
                     raise
@@ -132,16 +134,30 @@ def _cortex_running():
                         else "Cortex Control.exe")
 
 
-def _bridge_fifos():
-    """Do the interposer FIFOs exist? (False wherever bridge mode can't run.)"""
-    return (backend.bridge_supported()
-            and os.path.exists("/tmp/qc_inject") and os.path.exists("/tmp/qc_in"))
+def _bridge_endpoints():
+    """Has an interposer published its two endpoints? (False where bridge mode
+    can't run at all.) FIFOs on macOS; named pipes on Windows, which don't answer
+    os.path.exists reliably, so list the pipe filesystem instead."""
+    if not backend.bridge_supported():
+        return False
+    inject, out = backend.BRIDGE_ENDPOINTS[sys.platform]
+    if sys.platform == "win32":
+        try:
+            live = set(os.listdir(r"\\.\pipe"))
+        except OSError:
+            return False
+        return {inject.rsplit("\\", 1)[-1], out.rsplit("\\", 1)[-1]} <= live
+    return os.path.exists(inject) and os.path.exists(out)
 
 
 def _bridge_running():
     """Bridge is usable = FIFOs exist AND the instrumented app is alive (the FIFOs
     are plain filesystem objects and outlive the app — existence alone lies)."""
-    return _bridge_fifos() and _app_running("CortexControl-instrumented")
+    # Windows needs no interposer: the precondition is just that the app is up,
+    # since we then open our own shared handle beside it.
+    if sys.platform == "win32":
+        return _cortex_running()
+    return _bridge_endpoints() and _app_running("CortexControl-instrumented")
 
 
 def _quit_cortex():
@@ -163,11 +179,21 @@ def _launch_bridge(timeout_s=45):
     import subprocess, time
     if not backend.bridge_supported():
         return _NO_BRIDGE
-    script = os.path.join(_repo_root(), "interceptor", "run-bridge.sh")
-    if not os.path.exists(script):
-        return f"run-bridge.sh not found at {script}"
-    subprocess.Popen([script], cwd=_repo_root(), start_new_session=True,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if sys.platform == "win32":
+        # Nothing to instrument: start the stock app, then open our own handle.
+        app = r"C:\Program Files\Neural DSP\Cortex Control\Cortex Control.exe"
+        if not os.path.exists(app):
+            return f"Cortex Control not found at {app}"
+        cmd = [app]
+        kwargs = {"creationflags": 0x00000008}      # DETACHED_PROCESS
+    else:
+        script = os.path.join(_repo_root(), "interceptor", "run-bridge.sh")
+        if not os.path.exists(script):
+            return f"run-bridge.sh not found at {script}"
+        cmd = [script]
+        kwargs = {"start_new_session": True}
+    subprocess.Popen(cmd, cwd=_repo_root(),
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         if _bridge_running():
@@ -246,9 +272,15 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
         relay the choice to the user, then call connect(mode=...) with their answer.
         Where bridge mode doesn't exist (Windows) there is nothing to ask, so
         'auto' goes straight to direct.
-      * 'bridge' — launches interceptor/run-bridge.sh ITSELF if needed (starts the
-        instrumented Cortex Control; app + MCP share the device) and connects.
-        Takes ~20s on a cold start. macOS only (it rides a DYLD interposer).
+      * 'bridge' — run alongside Cortex Control, both controlling the device.
+        Starts the app itself if it isn't up. Verified on both platforms; the
+        mechanism differs:
+          macOS   launches interceptor/run-bridge.sh (an instrumented copy) and
+                  shares the app's own session through the DYLD interposer,
+                  because IOKit gives the device to one owner. ~20s cold start.
+          Windows opens a second NON-exclusive handle beside the stock app. The
+                  HID stack copies input reports to every handle and takes output
+                  reports from ours, so no interposer is involved.
       * 'direct' — exclusive USB-HID, on macOS and Windows alike. If any Cortex
         Control is running it holds the device: refuses unless quit_app=True
         (then quits the app first).
@@ -279,6 +311,8 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
             err = _launch_bridge()
             if err:
                 return {"error": err}
+        if sys.platform == "win32":
+            os.environ["QC_SHARE"] = "1"    # alongside the app = a shared handle
     elif mode == "direct":
         if _bridge_running() or _cortex_running():
             if not quit_app:
@@ -288,6 +322,7 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
                                  "Pass quit_app=True to quit it and connect direct"
                                  + alt}
             _quit_cortex()
+        os.environ.pop("QC_SHARE", None)
         os.environ["QC_BRIDGE"] = "0"     # _conn() honors this: force direct
     else:
         return {"error": f"unknown mode {mode!r} — use 'auto', 'bridge' or 'direct'."}
@@ -295,8 +330,21 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
         qc = _conn()
         qc.read_state("Version")
         name = f" [{qc.custom_name}]" if qc.custom_name else ""
-        return {"status": f"Connected ({mode}). CorOS {qc.firmware or '?'}"
-                          f"{name}, protocol generation {qc.protocol_version}."}
+        how = "shared handle" if qc.shared else ("interposer" if qc.bridge else "exclusive")
+        out = {"status": f"Connected ({mode}, {how}). CorOS {qc.firmware or '?'}"
+                         f"{name}, protocol generation {qc.protocol_version}."}
+        if qc.shared:
+            # Two independent writers on one HID endpoint. Single-report messages
+            # (~97% of the app's traffic, and most of ours) are atomic, but a
+            # multi-report message from each side can interleave and corrupt both.
+            out["caution"] = (
+                "Sharing the device with a running Cortex Control. Reads and "
+                "writes both work, but the two of you are independent writers on "
+                "one endpoint: a multi-report message from each side can "
+                "interleave (~97% of the app's traffic is single-report, so this "
+                "is narrow but real). For preset building/saving, prefer "
+                "connect(mode='direct', quit_app=True).")
+        return out
     except QCError as e:
         return {"error": f"Connect failed: {e}"}
 

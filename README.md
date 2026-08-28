@@ -40,11 +40,14 @@ Settings presets, and 100 new devices: see **[docs/COROS-4.1.md](docs/COROS-4.1.
 - A Quad Cortex on USB, and **Cortex Control** installed (CorOS 4.0 or 4.1)
 - Python 3.10+
 
-Windows runs direct mode only — every device tool works, but bridge mode and the
-GUI harness are macOS‑specific (they need dyld injection and macOS screen/
-accessibility APIs). Verified on Windows 10 22H2 x64 against a QC on CorOS 4.1.0,
-including the full 8336‑capture directory stream. See
-**[docs/WINDOWS.md](docs/WINDOWS.md)**.
+Both platforms run direct mode and can run *alongside* Cortex Control — macOS
+through the DYLD interposer, Windows by simply opening a second, non‑exclusive
+HID handle (Windows copies input reports to every handle, so no injection is
+needed). Only the GUI verification harness is macOS‑specific. Verified on
+Windows 10 22H2 x64 against a QC on CorOS 4.1.0: preset building and saving, the
+full 8336‑capture directory stream, and concurrent operation with the app. See
+**[docs/WINDOWS.md](docs/WINDOWS.md)** — including the one caveat, that two
+independent writers can interleave multi‑report messages.
 
 ## Install
 
@@ -89,10 +92,11 @@ Other MCP clients — point them at the venv binary:
 **Direct (default).** The MCP seizes the QC's HID interface. Only one client at a
 time — **quit Cortex Control first**, and disconnect the MCP before reopening it.
 
-**Bridge (simultaneous, macOS only).** Run the MCP *alongside* a running Cortex
-Control by sharing its session, so the app's UI stays in sync. Requires building
-an instrumented copy of Cortex Control once (it injects a small logging/bridge
-dylib — hence macOS only):
+**Bridge (simultaneous).** Run the MCP *alongside* a running Cortex Control, so
+the app's UI stays in sync. On **Windows** this needs no setup at all — the MCP
+opens its own shared handle (`docs/WINDOWS.md`). On **macOS** IOKit gives the
+device to one owner, so it requires building an instrumented copy of Cortex
+Control once (it injects a small logging/bridge dylib):
 
 ```bash
 interceptor/build.sh          # one-time: build the instrumented app (re-signs a local copy)
@@ -100,9 +104,9 @@ interceptor/run-bridge.sh &   # launch it
 # the MCP auto-detects the bridge and runs alongside the app
 ```
 
-See [interceptor/](interceptor/) and PROTOCOL.md §11. On Windows `connect()`
-skips the question and goes direct; `docs/WINDOWS.md` covers what a Windows
-bridge would take.
+See [interceptor/](interceptor/) and PROTOCOL.md §11. The Windows twin,
+[interceptor-win/](interceptor-win/), exists for traffic **capture** only (it
+IAT-hooks the app's kernel32 calls); bridge mode there doesn't use it.
 
 ## Tools (a selection)
 
@@ -171,7 +175,8 @@ src/qc_mcp/   protocol.py transport.py catalog.py preset.py server.py
               descriptors/  one protobuf schema per CorOS generation
 proto/        recovered Preset.proto, ProductionAutomation.proto, ModelRepo.xml
 tools/        reverse-engineering utilities; win_hid_check.py diagnoses Windows
-interceptor/  DYLD interposer: capture traffic + bridge mode (interpose.c, build.sh)
+interceptor/     DYLD interposer: capture + bridge mode  (macOS)
+interceptor-win/ IAT-hooking DLL + injector: capture     (Windows)
 PROTOCOL.md   full protocol writeup   PLAN.md   preset-building plan
 docs/         COROS-4.1.md  DIRECTORY.md  CPU.md  WINDOWS.md
 ```

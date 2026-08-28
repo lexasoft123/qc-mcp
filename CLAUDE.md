@@ -160,10 +160,25 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   MCP: `assign_stomp` / `unassign_stomp`.
 
 ## Platform split (macOS vs Windows)
-- **Direct mode works on both**; **bridge mode and `tools/gui/` are macOS-only**
-  (dyld injection, screencapture, the accessibility API). Don't add a
+- **Direct mode and running-alongside-the-app work on both**, by different means:
+  macOS injects a dylib and shares the app's session; **Windows just opens a
+  second NON-exclusive handle** (`QuadCortex(share=True)`) because the HID stack
+  copies every input report to every open handle, and Cortex Control opens with
+  `FILE_SHARE_READ|WRITE`. Only `tools/gui/` is still macOS-only. Don't add a
   `sys.platform` test in the tools — ask `backend.bridge_supported()` /
   `direct_supported()` so there's one place to change.
+- **Shared mode has two independent writers on one endpoint.** Single-report
+  messages are atomic (~97% of the app's traffic), multi-report ones can
+  interleave — `connect()` returns a `caution` saying so. Build/save presets in
+  direct mode with the app quit.
+- **Windows `WriteFile` returns ERROR_GEN_FAILURE(31) constantly on writes that
+  DO land** (60 of them in a session that provably wrote) — it is the Windows
+  `0xe0005000`, listed in `WinHIDTransport.BENIGN_WRITE_CODES`. Never judge a
+  write by it; read the value back. And test writes with a *continuous* param —
+  amp param 0 `INPUT` is a discrete selector that clamps and mimics a lost write.
+- **`interceptor-win/` is capture-only**: the IAT hooks mirror both directions
+  fine; injection is unverified (the earlier ERROR_GEN_FAILURE diagnosis was
+  wrong, so it is simply open). `winbridge.py` is its tested-but-unused client.
 - Windows quirks that look like protocol bugs: input reports are **padded** to 129
   bytes (the frame's own `chunkLen` is the truth); writes must be **exactly**
   `OutputReportByteLength` including the report id; the handle is overlapped so

@@ -22,13 +22,16 @@ from __future__ import annotations
 import os
 import threading
 
-from mcp.server.fastmcp import FastMCP
+try:                                    # mcp >= 2 renamed FastMCP -> MCPServer
+    from mcp.server.mcpserver import MCPServer as _Server
+except ImportError:                     # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _Server
 
 from . import protocol as P
 from . import catalog
 from .transport import QuadCortex, QCError
 
-mcp = FastMCP("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
+mcp = _Server("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
 (guitar amp modeler) over its internal USB protocol. Core workflow for building:
 
 1. connect() — asks bridge vs direct when ambiguous; bridge self-launches the app.

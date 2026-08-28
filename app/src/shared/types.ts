@@ -113,6 +113,8 @@ export interface LogLine {
 export interface Progress {
   /** the step currently running */
   label: string
+  /** which check it belongs to, so the list can mark just that row */
+  step?: CheckId
   done: number
   total: number
   /** set when the run finished */
@@ -136,6 +138,8 @@ export interface Api {
 
   cortexLaunch(): Promise<Snapshot>
   cortexQuit(): Promise<Snapshot>
+  /** Bring a running Cortex Control forward WITHOUT relaunching it. */
+  cortexFocus(): Promise<Snapshot>
   cortexRebuild(): Promise<Snapshot>
 
   readLog(limit: number): Promise<LogLine[]>

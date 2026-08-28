@@ -39,7 +39,7 @@ export function Setup({ snap }: { snap: Snapshot }): React.JSX.Element {
 
       <div className="steps">
         {snap.checks.map((c, i) => {
-          const busy = running === c.id || (running === 'all' && c.status !== 'ok')
+          const busy = running === c.id || progress?.step === c.id
           const cls = busy ? 'busy' : c.status === 'ok' ? 'ok' : 'missing'
           return (
             <div className={`step ${cls}`} key={c.id}>

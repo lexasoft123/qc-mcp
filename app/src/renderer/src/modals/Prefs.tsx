@@ -12,13 +12,14 @@ const MODES: { value: Mode; label: string }[] = [
   { value: 'direct', label: 'Direct' }
 ]
 
-export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }): React.JSX.Element {
-  const mac = isMac(snap)
-  const p = snap.prefs
-  const set = (patch: Partial<P>): void => { void act(() => window.patchbay.setPrefs(patch)) }
-
-  const Toggle = ({ id, name, desc }: { id: Flag; name: string; desc: string }): React.JSX.Element => (
-    <button type="button" className="tog" aria-pressed={p[id]} onClick={() => set({ [id]: !p[id] } as Partial<P>)}>
+function Toggle({ on, name, desc, onToggle }: {
+  readonly on: boolean
+  readonly name: string
+  readonly desc: string
+  readonly onToggle: () => void
+}): React.JSX.Element {
+  return (
+    <button type="button" className="tog" aria-pressed={on} onClick={onToggle}>
       <span className="box"><Check /></span>
       <span className="meta">
         <span className="n">{name}</span>
@@ -26,6 +27,18 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
       </span>
     </button>
   )
+}
+
+export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }): React.JSX.Element {
+  const mac = isMac(snap)
+  const p = snap.prefs
+  const set = (patch: Partial<P>): void => { void act(() => window.patchbay.setPrefs(patch)) }
+
+  /** value + setter for one boolean pref, spread into <Toggle /> */
+  const flag = (id: Flag): { on: boolean; onToggle: () => void } => ({
+    on: p[id],
+    onToggle: () => set({ [id]: !p[id] } as Partial<P>)
+  })
 
   return (
     <Modal onClose={onClose} cardClassName="prefs-card" aria-label="Preferences">
@@ -35,12 +48,12 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
         <span className="eyebrow">Startup</span>
         <div className="tog-list">
           <Toggle
-            id="login"
+            {...flag('login')}
             name={`Start Patchbay ${mac ? 'when I log in' : 'when I sign in'}`}
             desc="It waits out of the way and connects nothing until you ask."
           />
           <Toggle
-            id="autoconnect"
+            {...flag('autoconnect')}
             name="Connect as soon as the Quad Cortex is plugged in"
             desc={mac ? 'Starts the daemon and opens Cortex Control for you.' : 'Starts the daemon, so Claude can reach the device right away.'}
           />
@@ -61,7 +74,7 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
           <SegmentedControl options={MODES} value={p.mode} onChange={(mode) => set({ mode })} aria-label="Connection mode" />
         </div>
         <div className="tog-list">
-          <Toggle id="quitApp" name="Quit Cortex Control when Patchbay quits" desc="Leave this off if you also use the app on its own." />
+          <Toggle {...flag('quitApp')} name="Quit Cortex Control when Patchbay quits" desc="Leave this off if you also use the app on its own." />
         </div>
       </div>
 
@@ -69,14 +82,14 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
         <span className="eyebrow">Diagnostics</span>
         <div className="tog-list">
           <Toggle
-            id="verbose"
+            {...flag('verbose')}
             name="Write the frame log"
             desc="Records every report to and from the device. The Logs screen reads it, and bug reports need it."
           />
           {/* nothing to rebuild on Windows — there is no instrumented copy */}
           {mac && (
             <Toggle
-              id="autoRebuild"
+              {...flag('autoRebuild')}
               name="Rebuild after a Cortex Control update"
               desc="Runs the rebuild on its own, and quits the app first."
             />

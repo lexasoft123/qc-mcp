@@ -5,13 +5,29 @@ import * as logs from './logs.js'
 import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
 import { IS_MAC, PLATFORM, findRepo, pathsFor } from './paths.js'
-import { findPython, hasClang, readCortex, readDevice } from './system.js'
+import { cortexPid, findPython, hasClang, readCortex, readDevice } from './system.js'
 import { exists } from './util.js'
 
 let prefs: Prefs = prefsStore.DEFAULTS
 let paths = pathsFor(process.cwd())
 let daemon: Daemon
 let snapshot: Snapshot | null = null
+
+/**
+ * The probes that cost real subprocesses and almost never change: the Python
+ * version, clang, and Cortex Control's version + codesign state. None of them
+ * can move without an install, a rebuild or a path change, so they are read on
+ * demand (startup, Re-check, after an install/rebuild/launch) and reused by the
+ * poll, which only re-reads what is genuinely live.
+ */
+interface Slow {
+  python: Awaited<ReturnType<typeof findPython>>
+  clang: boolean
+  cortex: Snapshot['cortex']
+  device: Snapshot['device']
+}
+let slow: Slow | null = null
+let inflight: Promise<Snapshot> | null = null
 
 export function init(): void {
   prefs = prefsStore.load()
@@ -98,17 +114,27 @@ function checksFrom(
   return list
 }
 
-/** Re-read the world. Every probe is a real syscall or subprocess. */
-export async function refresh(): Promise<Snapshot> {
+/** Re-read the world. `deep` also re-runs the expensive, slow-changing probes. */
+export async function refresh(deep = false): Promise<Snapshot> {
   paths = pathsFor(findRepo(prefs.repo), prefs.cortex)
   daemon.setPaths(paths)
 
-  const [python, clang, cortex, device] = await Promise.all([
-    findPython(),
-    hasClang(),
-    readCortex(paths),
-    readDevice()
-  ])
+  if (deep || !slow) {
+    const [python, clang, cortex, device] = await Promise.all([
+      findPython(),
+      hasClang(),
+      readCortex(paths),
+      readDevice(true)
+    ])
+    slow = { python, clang, cortex, device }
+  }
+
+  // the only things that can change between two polls
+  const [present, proc] = await Promise.all([readDevice(false), cortexPid(paths.repo)])
+  const python = slow.python
+  const clang = slow.clang
+  const cortex = { ...slow.cortex, running: proc.pid !== null, pid: proc.pid }
+  const device = { ...slow.device, present: present.present }
   const targets = clients.list()
   daemon.setClients(targets.filter((c) => c.installed).map((c) => c.name))
 
@@ -132,14 +158,22 @@ export function broadcast(s: Snapshot): void {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('snapshot', s)
 }
 
-export async function push(): Promise<Snapshot> {
-  const s = await refresh()
-  broadcast(s)
-  return s
+/** Refresh and broadcast. Overlapping shallow polls share one in-flight run,
+ *  so a slow machine cannot pile them up. */
+export function push(deep = false): Promise<Snapshot> {
+  if (!deep && inflight) return inflight
+  const run = refresh(deep).then((s) => { broadcast(s); return s })
+  if (!deep) {
+    inflight = run
+    void run.catch(() => null).finally(() => { if (inflight === run) inflight = null })
+  }
+  return run
 }
 
 export function updatePrefs(patch: Partial<Prefs>): void {
   prefs = { ...prefs, ...patch }
   prefsStore.save(prefs)
   if (patch.mode) daemon.setMode(patch.mode)
+  // a new repo or app location invalidates everything cached about them
+  if (patch.repo !== undefined || patch.cortex !== undefined) slow = null
 }

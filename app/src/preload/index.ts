@@ -24,6 +24,7 @@ const api: Api = {
 
   cortexLaunch: () => ipcRenderer.invoke('cortex:launch') as Promise<Snapshot>,
   cortexQuit: () => ipcRenderer.invoke('cortex:quit') as Promise<Snapshot>,
+  cortexFocus: () => ipcRenderer.invoke('cortex:focus') as Promise<Snapshot>,
   cortexRebuild: () => ipcRenderer.invoke('cortex:rebuild') as Promise<Snapshot>,
 
   readLog: (limit: number) => ipcRenderer.invoke('logs:read', limit) as Promise<LogLine[]>,

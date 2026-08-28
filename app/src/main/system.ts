@@ -61,8 +61,8 @@ async function readInstrumented(repo: string): Promise<InstrumentedInfo> {
   }
 }
 
-/** pid of a running Cortex Control, instrumented or stock. */
-async function cortexPid(repo: string): Promise<{ pid: number | null; instrumented: boolean }> {
+/** pid of a running Cortex Control, instrumented or stock. Cheap: polled. */
+export async function cortexPid(repo: string): Promise<{ pid: number | null; instrumented: boolean }> {
   if (IS_MAC) {
     const r = await run('pgrep', ['-f', 'Contents/MacOS/Cortex Control'], { timeout: 5000 })
     const pids = r.out.trim().split('\n').filter(Boolean).map(Number)
@@ -101,8 +101,14 @@ export async function readCortex(paths: Paths): Promise<CortexInfo> {
  * Is the Quad Cortex on USB? Deliberately does NOT open the device: the daemon
  * or Cortex Control may hold it, and probing would fight them for the handle.
  */
-export async function readDevice(): Promise<DeviceInfo> {
+export async function readDevice(deep = true): Promise<DeviceInfo> {
   if (IS_MAC) {
+    if (!deep) {
+      // The device tree WITHOUT -l is a few hundred bytes; -l dumps every
+      // property of every USB node and is far too heavy to poll.
+      const t = await run('ioreg', ['-p', 'IOUSB', '-w0'], { timeout: 5000 })
+      return { present: /\bQuad Cortex\b/.test(t.out), serial: null, firmware: null }
+    }
     const r = await run('ioreg', ['-p', 'IOUSB', '-l', '-w0'], { timeout: 8000 })
     const present = r.out.includes(`"idVendor" = ${QC_VID}`) && r.out.includes(`"idProduct" = ${QC_PID}`)
     if (!present) return { present: false, serial: null, firmware: null }

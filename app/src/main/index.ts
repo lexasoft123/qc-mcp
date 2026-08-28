@@ -1,6 +1,6 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
-import type { CheckId, Mode, Prefs } from '../shared/types.js'
+import type { CheckId, Mode, Prefs, Progress } from '../shared/types.js'
 import * as clients from './clients.js'
 import * as cortex from './cortex.js'
 import * as install from './install.js'
@@ -50,7 +50,7 @@ function create(): void {
 
 function handlers(): void {
   ipcMain.handle('snapshot', () => state.current() ?? state.refresh())
-  ipcMain.handle('checks:run', () => state.push())
+  ipcMain.handle('checks:run', () => state.push(true))
 
   ipcMain.handle('setup:run', async (_e, only?: CheckId[]) => {
     const snap = state.current() ?? (await state.refresh())
@@ -59,37 +59,43 @@ function handlers(): void {
       .map((c) => c.id)
 
     let done = 0
+    let notice: string | null = null
     const total = queue.length
-    const step = (label: string): void => emit('progress', { label, done, total })
+    const step = (label: string, id?: CheckId): void => emit('progress', { label, done, total, step: id })
+    // keep the step tag on the sub-line progress an installer streams, or the
+    // list loses track of which row is in flight
+    const sub = (id: CheckId) => (p: Progress): void => emit('progress', { ...p, step: id })
 
     for (const id of queue) {
-      step(snap.checks.find((c) => c.id === id)?.title ?? id)
+      step(snap.checks.find((c) => c.id === id)?.title ?? id, id)
       let error: string | null = null
       if (id === 'venv') {
         const python = await findPython()
-        error = await createVenvWith(python.path)
+        error = await install.createVenv(state.getPaths(), python.path, sub('venv'))
       } else if (id === 'clang') {
-        error = await install.installClang()
+        // Apple's installer cannot run silently, so this is a status, not a
+        // failure — the remaining steps must still run.
+        notice = await install.installClang()
       } else if (id === 'instrumented') {
-        error = await install.buildInstrumented(state.getPaths(), (p) => emit('progress', p))
+        error = await install.buildInstrumented(state.getPaths(), sub('instrumented'))
       } else if (id === 'register') {
         await registerDefaults()
       }
       done += 1
       if (error) {
         emit('progress', { label: error, done, total, finished: true, error })
-        return state.push()
+        return state.push(true)
       }
     }
-    emit('progress', { label: 'Done', done, total, finished: true })
-    return state.push()
+    emit('progress', { label: notice ?? 'Done', done, total, finished: true })
+    return state.push(true)
   })
 
   ipcMain.handle('clients:set', async (_e, ids: string[]) => {
     const paths = state.getPaths()
-    const viaCli = ids.includes('code') ? await clients.writeClaudeCode(paths, true) : await clients.writeClaudeCode(paths, false)
+    const viaCli = await clients.writeClaudeCode(paths, ids.includes('code'))
     clients.write(paths, viaCli ? ids.filter((i) => i !== 'code') : ids)
-    return state.push()
+    return state.push(true)
   })
 
   ipcMain.handle('daemon:start', async () => {
@@ -109,7 +115,7 @@ function handlers(): void {
     const err = await cortex.launch(state.getPaths())
     if (err) emit('progress', { label: err, done: 0, total: 0, finished: true, error: err })
     // the app takes a moment to appear in the process table
-    setTimeout(() => void state.push(), 2500)
+    setTimeout(() => void state.push(true), 2500)
     return state.push()
   })
   ipcMain.handle('cortex:quit', async () => {
@@ -124,7 +130,7 @@ function handlers(): void {
     await cortex.quit()
     const err = await install.buildInstrumented(state.getPaths(), (p) => emit('progress', p))
     emit('progress', { label: err ?? 'Rebuilt', done: 1, total: 1, finished: true, error: err ?? undefined })
-    return state.push()
+    return state.push(true)
   })
 
   ipcMain.handle('logs:read', (_e, limit: number) => logs.read(state.getPaths().logPath, limit))
@@ -144,7 +150,7 @@ function handlers(): void {
       filters: what === 'cortex' && !IS_MAC ? [{ name: 'Application', extensions: ['exe'] }] : undefined
     })
     if (!r.canceled && r.filePaths[0]) state.updatePrefs({ [what]: r.filePaths[0] } as Partial<Prefs>)
-    return state.push()
+    return state.push(true)
   })
   ipcMain.handle('shell:reveal', (_e, p: string) => { shell.showItemInFolder(p) })
 
@@ -169,10 +175,6 @@ async function tick(): Promise<void> {
   if (snap.checks.some((c) => c.fixable && c.status !== 'ok')) return
   await state.getDaemon().start(() => void state.push())
   await state.push()
-}
-
-async function createVenvWith(python: string): Promise<string | null> {
-  return install.createVenv(state.getPaths(), python, (p) => emit('progress', p))
 }
 
 /** First install writes the clients that are actually present on the machine. */

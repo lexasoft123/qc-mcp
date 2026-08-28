@@ -19,14 +19,17 @@ Wire protocol — newline-delimited JSON, both directions.
     <- {"id": 1, "ok": true, "client": 0, "firmware": "4.1.0", "mode": "direct"}
     -> {"id": 2, "op": "write", "report_id": 0, "data": "<hex>", "include_id": false}
     <- {"id": 2, "ok": true}
-    <- {"ev": "report", "report_id": 0, "data": "<hex>"}      (unsolicited, broadcast)
-    -> {"id": 3, "op": "status"}
-    <- {"id": 3, "ok": true, "clients": 2, "reports": 91043, ...}
+    -> {"id": 3, "op": "read"}
+    <- {"id": 3, "ok": true, "reports": [[0, "<hex>"], ...]}
+    -> {"id": 4, "op": "status"}
+    <- {"id": 4, "ok": true, "clients": 2, "reports": 91043, ...}
 
-Device->host reports are broadcast to every attached client, exactly as the
-interposer's FIFO does, and each client rejects the traffic that is not its own
-by matching `request_id`. Clients are handed disjoint request_id ranges at hello
-so two of them can never collide.
+There are no unsolicited frames: every message from the daemon answers a request
+id. Device->host reports are fanned out into a per-client queue, exactly as the
+interposer's FIFO does, and a client collects its own with `read` — so a client
+that stops polling cannot stall the others. Each client rejects the traffic that
+is not its own by matching `request_id`, and the ranges handed out at hello are
+disjoint so two of them can never collide.
 """
 from __future__ import annotations
 
@@ -115,14 +118,17 @@ class _Lines:
     def send(self, obj) -> None:
         self.sock.sendall((json.dumps(obj) + "\n").encode(_ENC))
 
+    #: sentinel distinguishing "nothing arrived in time" from "peer went away"
+    TIMEOUT = object()
+
     def recv(self, timeout=None):
-        """Next message, or None on clean close / timeout."""
+        """Next message, `TIMEOUT` if none arrived in time, or None on close."""
         self.sock.settimeout(timeout)
         while b"\n" not in self._buf:
             try:
                 chunk = self.sock.recv(65536)
             except socket.timeout:
-                return None
+                return self.TIMEOUT
             if not chunk:
                 return None
             self._buf += chunk
@@ -144,7 +150,11 @@ class Daemon:
         self._srv = None
         self._clients = {}            # id -> (_Lines, list queue, threading.Lock)
         self._next_client = 0
-        self._lock = threading.Lock()
+        # Two locks on purpose: a slow HID write must not stop the pump from
+        # draining device->host reports, or the underlying buffer backs up and
+        # multi-chunk replies are lost.
+        self._lock = threading.Lock()       # the client registry
+        self._write_lock = threading.Lock() # one writer at a time on the device
         self._stop = threading.Event()
         self._reports = 0
         self._started = time.time()
@@ -190,6 +200,8 @@ class Daemon:
             while not self._stop.is_set():
                 msg = link.recv(timeout=0.5)
                 if msg is None:
+                    break                       # peer closed
+                if msg is _Lines.TIMEOUT:
                     if self._drained(sock):
                         break
                     continue
@@ -233,7 +245,7 @@ class Daemon:
                 data = bytes.fromhex(msg["data"])
                 # one writer at a time: the device is a single endpoint and the
                 # server may be answering several clients at once
-                with self._lock:
+                with self._write_lock:
                     self.qc.io.set_report(msg.get("report_id", 0), data,
                                           include_id=msg.get("include_id", False))
                 link.send({"id": rid, "ok": True})
@@ -338,6 +350,10 @@ class SocketTransport:
             self.link.send(obj)
             while True:
                 reply = self.link.recv(timeout=timeout)
+                if reply is _Lines.TIMEOUT:
+                    raise BridgeError(
+                        f"the qc-mcp daemon did not answer {obj['op']!r} within "
+                        f"{timeout:g}s (it is running but busy)")
                 if reply is None:
                     raise BridgeError("the qc-mcp daemon closed the connection")
                 if reply.get("id") == obj["id"]:
@@ -346,6 +362,11 @@ class SocketTransport:
                     return reply
 
     def open(self):
+        # Idempotent: QuadCortex.open() calls io.open() too, and a second
+        # connect would leave the first socket registered as a client whose
+        # queue nobody ever drains.
+        if self.link is not None:
+            return self
         try:
             sock = _connect(self.path)
         except Exception as exc:

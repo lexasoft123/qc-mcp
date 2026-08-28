@@ -68,7 +68,7 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
     lede = 'Ask Claude for a tone and it will build it on the Quad Cortex.'
     label = 'Disconnect'
     action = 'disconnect'
-    second = ['Show Cortex Control', () => { void window.patchbay.cortexLaunch() }]
+    second = ['Show Cortex Control', () => { void window.patchbay.cortexFocus() }]
   }
 
   const press = async (): Promise<void> => {

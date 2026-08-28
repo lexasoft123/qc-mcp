@@ -1,8 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { connect } from 'node:net'
-import { readFileSync } from 'node:fs'
-import { unlinkSync } from 'node:fs'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { DaemonInfo, Mode, Paths } from '../shared/types.js'
 import { IS_MAC } from './paths.js'
@@ -36,6 +34,10 @@ function portFor(socketPath: string): number {
 
 export class Daemon {
   private child: ChildProcess | null = null
+  /** The endpoint the RUNNING process was spawned with. `paths` can change
+   *  under us (the poll re-reads Preferences), and cleaning up the new path
+   *  would leave the real socket behind for endpointUp() to believe in. */
+  private liveSocket: string | null = null
   private startedAt: number | null = null
   private supported = true
   private error: string | null = null
@@ -97,8 +99,10 @@ export class Daemon {
       try { unlinkSync(this.paths.socket) } catch { /* no stale socket */ }
     }
 
+    const socketPath = this.paths.socket
+    this.liveSocket = socketPath
     let stderr = ''
-    const child = spawn(this.paths.bin, ['--daemon', '--socket', this.paths.socket, '--mode', this.mode], {
+    const child = spawn(this.paths.bin, ['--daemon', '--socket', socketPath, '--mode', this.mode], {
       cwd: this.paths.repo,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false
@@ -119,8 +123,10 @@ export class Daemon {
       }
     })
 
-    // wait for it to listen
-    for (let i = 0; i < 40; i++) {
+    // Wait generously: serve() opens the device, handshakes and detects the
+    // firmware BEFORE it listens, so a busy device or a cold USB bus can push
+    // first light well past a few seconds.
+    for (let i = 0; i < 150; i++) {
       if (this.child === null) return
       if (await this.endpointUp()) {
         this.state = 'running'
@@ -130,14 +136,12 @@ export class Daemon {
       }
       await sleep(200)
     }
-    // Measured against the current build: it ignores the flags and sits on
-    // stdin as an MCP stdio server — alive, but no socket, ever. That is the
-    // signature of a build without the daemon entry point, just as much as an
-    // argument error is.
-    this.supported = false
+    // A timeout is not proof the entry point is missing — only an argument
+    // error is (handled on 'exit'). Leave `supported` alone so one slow start
+    // does not disable autoconnect for the rest of the session.
     this.error =
-      `${this.paths.bin} accepted --daemon but never opened ${this.paths.socket}. ` +
-      'This qc-mcp build has no daemon entry point yet.'
+      `${socketPath} never opened, 30s after starting ${this.paths.bin} --daemon. ` +
+      'Check Logs, then try again.'
     this.stop()
     onChange()
   }
@@ -151,6 +155,8 @@ export class Daemon {
       try { child.kill('SIGTERM') } catch { /* already gone */ }
       setTimeout(() => { try { child.kill('SIGKILL') } catch { /* already gone */ } }, 2000)
     }
-    if (IS_MAC) { try { unlinkSync(this.paths.socket) } catch { /* nothing to clean */ } }
+    const socketPath = this.liveSocket ?? this.paths.socket
+    this.liveSocket = null
+    if (IS_MAC) { try { unlinkSync(socketPath) } catch { /* nothing to clean */ } }
   }
 }

@@ -28,3 +28,9 @@ interceptor/archive/
 # scratch
 proto/_recovered.txt
 proto/last.tmp
+
+# launcher app
+app/node_modules/
+app/out/
+app/dist/
+app/*.tsbuildinfo

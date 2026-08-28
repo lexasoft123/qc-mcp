@@ -1,0 +1,37 @@
+{
+  "name": "patchbay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Launcher for qc-mcp — installs the MCP, runs the daemon, opens Cortex Control",
+  "author": "lexasoft <lexasoft@gmail.com>",
+  "license": "MIT",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "dependencies": {
+    "@fontsource-variable/bricolage-grotesque": "^5.2.5",
+    "@fontsource-variable/martian-mono": "^5.1.1",
+    "@singz/ui": "https://github.com/lexasoft123/singz-ui/archive/refs/tags/v1.1.0.tar.gz"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "electron-vite": "^2.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.21.5": true,
+    "fsevents@2.3.3": true
+  }
+}

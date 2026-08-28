@@ -20,6 +20,7 @@ FIFOs, we seize the HID device ourselves, which requires Cortex Control to be qu
 """
 from __future__ import annotations
 import os
+import sys
 import threading
 
 try:                                    # mcp >= 2 renamed FastMCP -> MCPServer
@@ -29,7 +30,14 @@ except ImportError:                     # mcp 1.x
 
 from . import protocol as P
 from . import catalog
+from . import backend
 from .transport import QuadCortex, QCError
+
+#: Why bridge mode isn't on offer here. The interposer is a DYLD library, so
+#: sharing Cortex Control's session is macOS-only; everywhere else it's direct.
+_NO_BRIDGE = (f"bridge mode is macOS-only (this is {backend.platform_name()}) — "
+              "it shares Cortex Control's session through a DYLD interposer. "
+              "Use mode='direct' with Cortex Control closed.")
 
 mcp = _Server("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
 (guitar amp modeler) over its internal USB protocol. Core workflow for building:
@@ -79,8 +87,7 @@ def _conn():
             # Auto-detect: if the instrumented Cortex Control is running (bridge
             # FIFOs present), share its session so both run at once; otherwise
             # seize the device directly. QC_BRIDGE=0 forces direct mode.
-            fifos = os.path.exists("/tmp/qc_inject") and os.path.exists("/tmp/qc_in")
-            bridge = fifos and os.environ.get("QC_BRIDGE") != "0"
+            bridge = _bridge_fifos() and os.environ.get("QC_BRIDGE") != "0"
             try:
                 _qc = QuadCortex(bridge=bridge).open(handshake=True)
             except Exception:
@@ -104,21 +111,58 @@ def _repo_root():
 
 
 def _app_running(pattern):
+    """Is a process whose name/command line contains `pattern` alive?"""
     import subprocess
+    if sys.platform == "win32":
+        # No pgrep: match the pattern against tasklist's image names, loosely,
+        # so "Cortex Control.exe" and "CortexControl.exe" both hit.
+        try:
+            out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
+                                 capture_output=True, text=True).stdout
+        except OSError:
+            return False
+        needle = pattern.lower().replace(" ", "").removesuffix(".app")
+        return any(needle in line.lower().replace(" ", "") for line in out.splitlines())
     return subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0
+
+
+def _cortex_running():
+    """Is the stock Cortex Control (which holds the HID device) running?"""
+    return _app_running("Cortex Control.app" if sys.platform != "win32"
+                        else "Cortex Control.exe")
+
+
+def _bridge_fifos():
+    """Do the interposer FIFOs exist? (False wherever bridge mode can't run.)"""
+    return (backend.bridge_supported()
+            and os.path.exists("/tmp/qc_inject") and os.path.exists("/tmp/qc_in"))
 
 
 def _bridge_running():
     """Bridge is usable = FIFOs exist AND the instrumented app is alive (the FIFOs
     are plain filesystem objects and outlive the app — existence alone lies)."""
-    return (os.path.exists("/tmp/qc_inject") and os.path.exists("/tmp/qc_in")
-            and _app_running("CortexControl-instrumented"))
+    return _bridge_fifos() and _app_running("CortexControl-instrumented")
+
+
+def _quit_cortex():
+    """Ask Cortex Control to quit so direct mode can seize the device."""
+    import subprocess, time
+    if sys.platform == "win32":
+        # /IM matches the image name; try both spellings the installer has used.
+        for image in ("Cortex Control.exe", "CortexControl.exe"):
+            subprocess.run(["taskkill", "/IM", image], capture_output=True)
+    else:
+        subprocess.run(["osascript", "-e", 'quit app "Cortex Control"'],
+                       capture_output=True)
+    time.sleep(3)
 
 
 def _launch_bridge(timeout_s=45):
     """Start interceptor/run-bridge.sh (instrumented Cortex Control with the FIFO
     bridge) detached, and wait until the bridge is up."""
     import subprocess, time
+    if not backend.bridge_supported():
+        return _NO_BRIDGE
     script = os.path.join(_repo_root(), "interceptor", "run-bridge.sh")
     if not os.path.exists(script):
         return f"run-bridge.sh not found at {script}"
@@ -200,11 +244,14 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
       * 'auto' (default) — if the bridge (instrumented Cortex Control) is running,
         join it. Otherwise DON'T guess: returns the available modes as a question —
         relay the choice to the user, then call connect(mode=...) with their answer.
+        Where bridge mode doesn't exist (Windows) there is nothing to ask, so
+        'auto' goes straight to direct.
       * 'bridge' — launches interceptor/run-bridge.sh ITSELF if needed (starts the
         instrumented Cortex Control; app + MCP share the device) and connects.
-        Takes ~20s on a cold start.
-      * 'direct' — exclusive USB-HID. If any Cortex Control is running it holds the
-        device: refuses unless quit_app=True (then quits the app first).
+        Takes ~20s on a cold start. macOS only (it rides a DYLD interposer).
+      * 'direct' — exclusive USB-HID, on macOS and Windows alike. If any Cortex
+        Control is running it holds the device: refuses unless quit_app=True
+        (then quits the app first).
     """
     global _qc
     if _qc is not None:
@@ -212,6 +259,8 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
     if mode == "auto":
         if _bridge_running():
             mode = "bridge"
+        elif not backend.bridge_supported():
+            mode = "direct"               # only one mode here — nothing to ask
         else:
             return {"question": "How should I connect to the Quad Cortex?",
                     "options": {
@@ -223,21 +272,22 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
                     "next": "Ask the user, then call connect(mode='bridge') or "
                             "connect(mode='direct')."}
     if mode == "bridge":
+        if not backend.bridge_supported():
+            return {"error": _NO_BRIDGE}
         os.environ.pop("QC_BRIDGE", None)   # undo a prior direct-mode override
         if not _bridge_running():
             err = _launch_bridge()
             if err:
                 return {"error": err}
     elif mode == "direct":
-        if _bridge_running() or _app_running("Cortex Control.app"):
+        if _bridge_running() or _cortex_running():
             if not quit_app:
+                alt = (" or use mode='bridge' to share its session."
+                       if backend.bridge_supported() else ".")
                 return {"error": "Cortex Control is running and holds the device. "
-                                 "Pass quit_app=True to quit it and connect direct, "
-                                 "or use mode='bridge' to share its session."}
-            import subprocess, time
-            subprocess.run(["osascript", "-e", 'quit app "Cortex Control"'],
-                           capture_output=True)
-            time.sleep(3)
+                                 "Pass quit_app=True to quit it and connect direct"
+                                 + alt}
+            _quit_cortex()
         os.environ["QC_BRIDGE"] = "0"     # _conn() honors this: force direct
     else:
         return {"error": f"unknown mode {mode!r} — use 'auto', 'bridge' or 'direct'."}

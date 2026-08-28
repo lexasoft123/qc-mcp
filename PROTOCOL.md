@@ -18,7 +18,9 @@ with Neural DSP.
   (class 0xEF/IAD): USB-audio interfaces + a **HID interface** (interface 5).
 - Control is **not** MIDI, not raw bulk. Cortex Control links `IOKit` and uses the
   **IOHIDManager** API (`IOHIDDeviceSetReport` for host→device, an input-report
-  callback for device→host). We replicate this via ctypes in `iohid.py`.
+  callback for device→host). We replicate this via ctypes in `iohid.py`, and the
+  same wire protocol via setupapi/`hid.dll` in `winhid.py` on Windows
+  (`backend.open_hid` picks) — the framing below is identical either way.
 - HID report descriptor (interface 5):
   - **Report ID 1** — Input, **128 bytes** (device → host)
   - **Report ID 2** — Output, **128 bytes** (host → device)
@@ -29,6 +31,12 @@ with Neural DSP.
   device — the official app ignores it too, and the data is still sent. Not an error.
 - The input-report callback buffer **must** be 129 bytes (report id + 128); a
   128-byte buffer silently truncates the last payload byte of every full chunk.
+- Windows differences (same wire, different plumbing — see `docs/WINDOWS.md`):
+  exclusivity is `CreateFile` with `dwShareMode = 0`; reads come back **padded**
+  to the full 129 bytes regardless of the frame's `chunkLen`; writes must be
+  **exactly** `OutputReportByteLength` bytes including the report id; and the
+  driver's per-handle input queue (32 reports) must be raised with
+  `HidD_SetNumInputBuffers` or a directory dump overruns it.
 
 ---
 
@@ -565,7 +573,10 @@ presumably needs an enable/subscribe step; unreversed, and no MCP tool yet.
 
 ```
 src/qc_mcp/
-  iohid.py        ctypes IOKit HID transport (seize, reader thread, run loop)
+  backend.py      picks the HID transport for the OS; platform capability flags
+  iohid.py        macOS: ctypes IOKit HID transport (seize, reader thread, run loop)
+  winhid.py       Windows: ctypes setupapi + hid.dll (seize, overlapped reader)
+  bridge.py       macOS: share Cortex Control's session over the interposer FIFOs
   protocol.py     framing: descriptor pool, encode/decode, chunk/reassemble, gzip
   transport.py    session: handshake, heartbeat, reads/writes, grid edits
   catalog.py      ModelRepo.xml → hash↔name/gear/params
@@ -573,7 +584,7 @@ src/qc_mcp/
   descriptors/    qc_descriptors-<gen>.pb — one wire schema per CorOS generation
   ModelRepo.xml   bundled device catalog snapshot
 proto/            recovered Preset.proto + ProductionAutomation.proto + ModelRepo.xml
-tools/            RE utilities
-interceptor/      DYLD interposer for live HID capture
+tools/            RE utilities (win_hid_check.py diagnoses a Windows setup)
+interceptor/      DYLD interposer for live HID capture (macOS)
 PROTOCOL.md       this file
 ```

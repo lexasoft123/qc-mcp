@@ -25,8 +25,8 @@ https://github.com/lexasoft123/qc-mcp
   dialled-in amp or drive can be reused in any rig instead of rebuilt.
 - **Footswitch assignments** — bind blocks to stomp switches A–H (latching or
   momentary), including 4.1's secondary/dual assignments.
-- **Two connection modes** — seize the device directly, or run **alongside a live
-  Cortex Control** via a shared session (bridge mode).
+- **Two connection modes** — seize the device directly, or (on macOS) run
+  **alongside a live Cortex Control** via a shared session (bridge mode).
 - **Works across firmware** — CorOS 4.0 and 4.1 both supported; the wire schema is
   chosen per connection from the device's version, and newer‑only tools say so
   rather than failing silently.
@@ -36,15 +36,29 @@ Settings presets, and 100 new devices: see **[docs/COROS-4.1.md](docs/COROS-4.1.
 
 ## Requirements
 
-- macOS (uses IOKit HID via ctypes; the interposer/bridge is macOS‑specific)
+- **macOS** (IOKit HID via ctypes) or **Windows** (setupapi + hid.dll via ctypes)
 - A Quad Cortex on USB, and **Cortex Control** installed (CorOS 4.0 or 4.1)
 - Python 3.10+
+
+Windows runs direct mode only — every device tool works, but bridge mode and the
+GUI harness are macOS‑specific (they need dyld injection and macOS screen/
+accessibility APIs). Verified on Windows 10 22H2 x64 against a QC on CorOS 4.1.0,
+including the full 8336‑capture directory stream. See
+**[docs/WINDOWS.md](docs/WINDOWS.md)**.
 
 ## Install
 
 ```bash
 git clone <your-repo-url> qc-mcp && cd qc-mcp
 ./install.sh
+```
+
+On Windows, use the PowerShell twin instead — same behaviour, no `[gui]` extra:
+
+```powershell
+git clone <your-repo-url> qc-mcp
+cd qc-mcp
+.\install.ps1
 ```
 
 `install.sh` is idempotent and does everything: creates the venv, installs the
@@ -68,14 +82,17 @@ Other MCP clients — point them at the venv binary:
 { "mcpServers": { "quad-cortex": { "command": "/absolute/path/qc-mcp/.venv/bin/qc-mcp" } } }
 ```
 
+(on Windows: `C:\path\to\qc-mcp\.venv\Scripts\qc-mcp.exe`)
+
 ## Two ways to connect
 
 **Direct (default).** The MCP seizes the QC's HID interface. Only one client at a
 time — **quit Cortex Control first**, and disconnect the MCP before reopening it.
 
-**Bridge (simultaneous).** Run the MCP *alongside* a running Cortex Control by
-sharing its session, so the app's UI stays in sync. Requires building an
-instrumented copy of Cortex Control once (it injects a small logging/bridge dylib):
+**Bridge (simultaneous, macOS only).** Run the MCP *alongside* a running Cortex
+Control by sharing its session, so the app's UI stays in sync. Requires building
+an instrumented copy of Cortex Control once (it injects a small logging/bridge
+dylib — hence macOS only):
 
 ```bash
 interceptor/build.sh          # one-time: build the instrumented app (re-signs a local copy)
@@ -83,7 +100,9 @@ interceptor/run-bridge.sh &   # launch it
 # the MCP auto-detects the bridge and runs alongside the app
 ```
 
-See [interceptor/](interceptor/) and PROTOCOL.md §11.
+See [interceptor/](interceptor/) and PROTOCOL.md §11. On Windows `connect()`
+skips the question and goes direct; `docs/WINDOWS.md` covers what a Windows
+bridge would take.
 
 ## Tools (a selection)
 
@@ -122,7 +141,9 @@ to lay out `Comp → AC15 → cab → Tape Echo (220 ms) → Spring` with the ri
 Cortex Control talks to the QC over USB‑HID using protobuf messages wrapped in
 chunked 128‑byte reports. This project:
 
-- speaks the HID framing directly via IOKit (`src/qc_mcp/iohid.py`),
+- speaks the HID framing directly — IOKit on macOS (`src/qc_mcp/iohid.py`),
+  setupapi/hid.dll on Windows (`src/qc_mcp/winhid.py`), picked by
+  `src/qc_mcp/backend.py`,
 - encodes/decodes the message layer incl. gzip, and negotiates the wire schema
   against the device's CorOS version (`src/qc_mcp/protocol.py`),
 - maintains the session + heartbeat the QC needs to stream state
@@ -143,12 +164,16 @@ driving the QC's own screen.
 ## Layout
 
 ```
-src/qc_mcp/   iohid.py protocol.py transport.py catalog.py preset.py server.py
+src/qc_mcp/   protocol.py transport.py catalog.py preset.py server.py
+              backend.py    picks the HID backend for the OS
+              iohid.py      macOS  (IOKit)      winhid.py  Windows (hid.dll)
+              bridge.py     share Cortex Control's session (macOS)
               descriptors/  one protobuf schema per CorOS generation
 proto/        recovered Preset.proto, ProductionAutomation.proto, ModelRepo.xml
-tools/        reverse-engineering utilities
+tools/        reverse-engineering utilities; win_hid_check.py diagnoses Windows
 interceptor/  DYLD interposer: capture traffic + bridge mode (interpose.c, build.sh)
 PROTOCOL.md   full protocol writeup   PLAN.md   preset-building plan
+docs/         COROS-4.1.md  DIRECTORY.md  CPU.md  WINDOWS.md
 ```
 
 ## DISCLAIMER

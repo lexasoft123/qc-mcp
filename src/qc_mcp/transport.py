@@ -1,8 +1,10 @@
-"""High-level Quad Cortex transport over IOKit HID (see iohid.py).
+"""High-level Quad Cortex transport over the platform HID backend (see
+`backend.open_hid`: IOKit on macOS, hid.dll on Windows).
 
 Requires exclusive HID access (opens with seize), so Cortex Control must be
 quit while connected. Note: IOHIDDeviceSetReport returns a benign 0xe0005000 on
-this device (the official app ignores it too) — it is NOT an error.
+this device (the official app ignores it too) — it is NOT an error; the Windows
+backend returns 0 there. Nothing upstream inspects the value either way.
 """
 from __future__ import annotations
 import functools
@@ -10,7 +12,7 @@ import threading
 import time
 
 from . import protocol as P
-from .iohid import IOHIDTransport
+from .backend import open_hid
 
 
 class QCError(Exception):
@@ -42,7 +44,7 @@ class QuadCortex:
             from .bridge import FifoBridge
             self.io = FifoBridge()
         else:
-            self.io = IOHIDTransport(seize=True)
+            self.io = open_hid(seize=True)
         self._rx = P.Reassembler()
         # High, distinctive base so our request_ids never collide with Cortex
         # Control's (small, incrementing) ids when sharing its session in bridge mode.

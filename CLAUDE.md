@@ -6,13 +6,21 @@ protocol, `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes,
 and `docs/COROS-4.1.md` for the 4.1 feature set (device presets, stomps,
 Global EQ / I/O presets) with usage examples.
 Supports **CorOS 4.0 and 4.1** — the schema is picked per connection from the
-device's firmware (PROTOCOL.md §12).
+device's firmware (PROTOCOL.md §12) — on **macOS and Windows** (`docs/WINDOWS.md`).
 
 ## Layout
 - `src/qc_mcp/`
-  - `iohid.py` — ctypes IOKit HID transport (input buffer must be report_size+1).
+  - `backend.py` — picks the HID transport for the OS (`open_hid`) and answers
+    `direct_supported`/`bridge_supported`. All three backends below implement the
+    same four methods: `open`/`set_report`/`read_reports`/`close`.
+  - `iohid.py` — **macOS**: ctypes IOKit HID transport (input buffer must be
+    report_size+1).
+  - `winhid.py` — **Windows**: ctypes setupapi + hid.dll. Overlapped I/O; picks
+    the collection with 129-byte reports; raises the driver's 32-report input
+    queue to 512 (a directory dump overruns the default).
   - `bridge.py` — FIFO bridge: share Cortex Control's live session via the DYLD
     interposer (run MCP + the app at once). No handshake/heartbeat (the app owns them).
+    **macOS only** — importing it elsewhere raises with that message.
   - `protocol.py` — framing (128-byte reports, flag bits, 8-byte command trailer,
     gzip), `COMMANDS`, encode/decode, `Reassembler`; **version negotiation**
     (`generation`/`set_version`/`supports`/`require`) + a descriptor pool per CorOS
@@ -28,10 +36,13 @@ device's firmware (PROTOCOL.md §12).
     when nothing is running it RETURNS the mode options (relay the question to the
     user); `mode='bridge'` self-launches `interceptor/run-bridge.sh` (~20s cold) and
     joins; `mode='direct'` needs `quit_app=True` if Cortex Control holds the device.
-    Other tools' `_conn()` still auto-detects a running bridge.
+    Other tools' `_conn()` still auto-detects a running bridge. Where bridge mode
+    can't run, `auto` goes straight to direct instead of asking.
 - `interceptor/` — DYLD interposer C + build/run scripts (capture + bridge). Logs and
   `catalog.json` are **gitignored** (contain library names / session ids).
-- `tools/` — RE utilities; `tools/gui/` — GUI-automation harness + tests (below).
+- `tools/` — RE utilities (mostly macOS: they shell out to otool/codesign);
+  `tools/win_hid_check.py` diagnoses a Windows setup (enumerate → open → round-trip,
+  distinct exit codes per failure). `tools/gui/` — GUI-automation harness (below).
   After a CorOS update run all three: `interceptor/build.sh` (re-instrument the
   updated app), `tools/build_descriptors.py build <gen>` (new wire schema),
   `tools/dump_model_repo.py --diff` then without `--diff` (new device catalog).
@@ -40,8 +51,10 @@ device's firmware (PROTOCOL.md §12).
 ## Running
 - `python3` alone lacks pyobjc; use `.venv/bin/python`. GUI tools auto-reexec into `.venv`.
 - Tests (all offline, no device): `.venv/bin/python tests/test_directory.py`,
-  `tests/test_protocol_versions.py`, `tests/test_tool_docs.py` (the last one keeps
-  the MCP self-describing — every gated feature must have a tool behind it).
+  `tests/test_protocol_versions.py`, `tests/test_tool_docs.py` (keeps the MCP
+  self-describing — every gated feature must have a tool behind it),
+  `tests/test_platform.py` (keeps the macOS and Windows backends interchangeable;
+  it's the only check on `winhid.py` from a Mac).
 - Device/GUI tools need the instrumented Cortex Control running (bridge) — see
   `interceptor/run-bridge.sh`.
 
@@ -145,6 +158,27 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   PRIMARY + F SECONDARY at once). The device does NOT guard SECONDARY — it
   accepts it on blocks with no second function, silently wasting a switch.
   MCP: `assign_stomp` / `unassign_stomp`.
+
+## Platform split (macOS vs Windows)
+- **Direct mode works on both**; **bridge mode and `tools/gui/` are macOS-only**
+  (dyld injection, screencapture, the accessibility API). Don't add a
+  `sys.platform` test in the tools — ask `backend.bridge_supported()` /
+  `direct_supported()` so there's one place to change.
+- Windows quirks that look like protocol bugs: input reports are **padded** to 129
+  bytes (the frame's own `chunkLen` is the truth); writes must be **exactly**
+  `OutputReportByteLength` including the report id; the handle is overlapped so
+  every read/write needs an `OVERLAPPED`.
+- **`winhid.py` imports on any OS** (plain ctypes types, DLLs bound lazily in
+  `_load()`) so `tests/test_platform.py` can check it from a Mac. Keep it that way.
+- **A HID device held exclusively vanishes from enumeration** — Windows refuses
+  even a zero-access probe open, so `enumerate_devices` recovers the ids from the
+  interface path and marks it `busy`; without that, "quit Cortex Control" gets
+  misreported as "no device found". Verified on hardware.
+- **Windows-facing runtime strings are ASCII** (no em-dashes): a legacy console
+  codepage renders them as `?`. Docstrings/comments are exempt.
+- Verified on Win10 22H2 x64 + CorOS 4.1.0: reads, the 8336-capture directory
+  stream, open/close cycles, and the device-busy error. **Writes not yet run from
+  Windows** (same `set_report` path, so no untested Windows code — but untried).
 
 ## Conventions
 - This is for interop/debugging on hardware you own + licensed software. Keep capture logs

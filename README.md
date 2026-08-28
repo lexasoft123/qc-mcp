@@ -108,6 +108,32 @@ See [interceptor/](interceptor/) and PROTOCOL.md §11. The Windows twin,
 [interceptor-win/](interceptor-win/), exists for traffic **capture** only (it
 IAT-hooks the app's kernel32 calls); bridge mode there doesn't use it.
 
+## One daemon, many clients
+
+A stdio server is spawned per client, and the Quad Cortex only has one session
+to give. The daemon holds it once and lends it out:
+
+```bash
+qc-mcp --daemon --socket ~/Library/Application\ Support/qc-mcp/daemon.sock
+```
+
+Clients then point at the same binary with `--attach`, and several can read and
+edit the same live device at once:
+
+```json
+{ "mcpServers": { "quad-cortex": {
+    "command": "/absolute/path/qc-mcp/.venv/bin/qc-mcp",
+    "args": ["--attach"] } } }
+```
+
+`--mode auto|bridge|direct` chooses how the daemon opens the device (bridge when
+the instrumented Cortex Control is up, direct otherwise). Plain `qc-mcp` with no
+arguments is unchanged, so existing registrations keep working.
+
+**Patchbay**, the launcher in [app/](app/), does all of this from a window:
+the preflight checks, the venv, the instrumented build, the client configs, and
+starting and stopping the daemon.
+
 ## Tools (a selection)
 
 | tool | type | description |

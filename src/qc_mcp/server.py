@@ -78,12 +78,19 @@ opened in that repo load it automatically as skills/CLAUDE.md.""")
 
 _qc = None
 _lock = threading.Lock()
+#: Set by `--attach`: every tool then rides the daemon's session instead of
+#: opening the device itself, so many clients can share one connection.
+_attach_socket = None
 
 
 def _conn():
     global _qc
     with _lock:
         if _qc is None:
+            if _attach_socket:
+                from .daemon import attach
+                _qc = attach(_attach_socket)
+                return _qc
             # Auto-detect: if the instrumented Cortex Control is running (bridge
             # FIFOs present), share its session so both run at once; otherwise
             # seize the device directly. QC_BRIDGE=0 forces direct mode.
@@ -1548,9 +1555,55 @@ def current_preset_position() -> dict:
     return _conn().get_setlist_position() or {"note": "no position reported"}
 
 
-def main():
+def main(argv=None):
+    """Three ways to run, one binary.
+
+        qc-mcp                                 stdio MCP server (the default;
+                                               opens the device itself)
+        qc-mcp --daemon --socket PATH          hold the device, serve clients
+        qc-mcp --attach --socket PATH          stdio MCP server that rides the
+                                               daemon's session
+
+    The default is unchanged and takes no arguments, so every existing client
+    registration keeps working exactly as before.
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="qc-mcp", description=__doc__)
+    ap.add_argument("--daemon", action="store_true",
+                    help="run as the long-lived daemon that owns the device")
+    ap.add_argument("--attach", action="store_true",
+                    help="serve MCP over stdio, using a running daemon's session")
+    ap.add_argument("--socket", default=default_socket(),
+                    help="daemon endpoint (default: %(default)s)")
+    ap.add_argument("--mode", default="auto", choices=("auto", "bridge", "direct"),
+                    help="how the daemon opens the device (--daemon only)")
+    args = ap.parse_args(argv)
+
+    if args.daemon and args.attach:
+        ap.error("--daemon and --attach are opposites; pick one")
+
+    if args.daemon:
+        from .daemon import serve
+        return serve(args.socket, mode=args.mode)
+
+    if args.attach:
+        global _attach_socket
+        _attach_socket = args.socket
+
     mcp.run()
+    return 0
+
+
+def default_socket():
+    """Where the daemon listens unless told otherwise."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "qc-mcp", "daemon.sock")
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Application Support/qc-mcp/daemon.sock")
+    return os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "qc-mcp.sock")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

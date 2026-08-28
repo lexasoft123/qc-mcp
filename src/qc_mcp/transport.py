@@ -37,7 +37,7 @@ def _serialized(method):
 
 class QuadCortex:
     def __init__(self, session_id="claudemcp0000000000000000000000", bridge=False,
-                 share=False):
+                 share=False, io=None):
         # Three ways in, all behind the same backend API:
         #   bridge=True  share Cortex Control's session through the interposer
         #                (macOS: the app seizes the device, so this is the only way)
@@ -45,9 +45,14 @@ class QuadCortex:
         #                (Windows: the HID stack copies every input report to every
         #                open handle, so no interposer is needed - see docs/WINDOWS.md)
         #   neither      seize the device for ourselves
+        #   io=...       ride a session someone else already owns (the qc-mcp
+        #                daemon), so the handshake and heartbeat are theirs
         self.bridge = bridge
         self.shared = share
-        if bridge:
+        self.attached = io is not None
+        if io is not None:
+            self.io = io
+        elif bridge:
             self.io = open_bridge()
         else:
             self.io = open_hid(seize=not share)
@@ -80,7 +85,7 @@ class QuadCortex:
         self.io.open()
         # In bridge mode Cortex Control already owns the handshake + heartbeat.
         # A shared handle does NOT - it is our own session alongside the app's.
-        if handshake and not self.bridge:
+        if handshake and not self.bridge and not self.attached:
             self._start_heartbeat()   # keep session "online" (required for reads)
             self._handshake()
         # Bridge mode skips the handshake (the app owns it) but still needs the

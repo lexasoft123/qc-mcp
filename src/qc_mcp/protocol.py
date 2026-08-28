@@ -7,6 +7,7 @@ Layer stack (host <-> QC):
 """
 from __future__ import annotations
 import os
+import re
 import struct
 import sys
 import zlib
@@ -40,8 +41,96 @@ COMMANDS = {
  59:"PresetSpeedTest",60:"Updater",61:"UpdaterForward",62:"GainCalibration",63:"NeuralCapture2",
  64:"Serialization",65:"TestFarm",66:"ProductionTest",67:"LoadAutomatedTestPreset",
  68:"SetTestPresetInputOutputPorts",69:"SetTestPresetSplitMixPoints",70:"GenerateTestPreset",
+ 71:"ModelPreset",72:"RemoteControl",
 }
 NAME_TO_CMD = {v: k for k, v in COMMANDS.items()}
+
+# --- protocol versions -----------------------------------------------------
+# The QC's wire schema changes between CorOS releases, so we ship one descriptor
+# set per *generation* (major.minor) and pick from the connected firmware. Add a
+# generation with `tools/build_descriptors.py build <gen>`; see PROTOCOL.md 12.
+PROTOCOL_VERSIONS = ("4.0", "4.1")   # oldest -> newest
+LATEST_VERSION = PROTOCOL_VERSIONS[-1]
+
+# Commands that only exist from a given generation on.
+COMMAND_SINCE = {71: "4.1", 72: "4.1"}
+
+# Named capabilities -> the generation that introduced them. Tools gate on these
+# so a 4.0 device gets a clear "needs CorOS x.y" error instead of a silent no-op.
+FEATURES = {
+    "model_presets":      "4.1",  # ModelPreset(71): per-device saved settings
+    "dual_footswitch":    "4.1",  # StompModeAssignment.type PRIMARY/SECONDARY
+    "favorites_by_type":  "4.1",  # RecentsFavorites split preset/IR/capture
+    "midi_clock_readout": "4.1",  # GeneralSettings.external_midi_clock_tempo
+}
+
+_active_version = LATEST_VERSION
+
+
+def parse_version(text):
+    """'4.1.0' / 'v4.1' / (4, 1) -> comparable tuple. Unparseable -> ()."""
+    if isinstance(text, (tuple, list)):
+        return tuple(int(x) for x in text)
+    return tuple(int(n) for n in re.findall(r"\d+", str(text or ""))[:3])
+
+
+def generation(firmware):
+    """Map a firmware version onto the newest schema generation we ship.
+
+    Older than the oldest falls back to the oldest set (best effort); newer than
+    we know about uses the newest, since the schema is additive far more often
+    than not.
+    """
+    v = parse_version(firmware)
+    if not v:
+        return LATEST_VERSION
+    best = PROTOCOL_VERSIONS[0]
+    for gen in PROTOCOL_VERSIONS:
+        if parse_version(gen) <= v:
+            best = gen
+    return best
+
+
+def set_version(firmware):
+    """Select the schema generation for the connected device. Returns it."""
+    global _active_version
+    _active_version = generation(firmware)
+    return _active_version
+
+
+def active_version():
+    return _active_version
+
+
+def supports(feature, version=None):
+    """True if `feature` (a FEATURES key, or a bare version like '4.1') exists
+    on the active — or given — generation.
+
+    A name that is neither raises: `parse_version` returns () for it, and every
+    version compares >= (), so a typo'd or renamed gate would silently pass and
+    only fail later where the message is actually built.
+    """
+    need = FEATURES.get(feature, feature)
+    if not parse_version(need):
+        raise KeyError(f"unknown feature {feature!r}; "
+                       f"expected one of {sorted(FEATURES)} or a version string")
+    return parse_version(version or _active_version) >= parse_version(need)
+
+
+def require(feature, what=None):
+    """None if supported, else a human-readable error string for a tool to
+    return instead of sending a message the device would ignore."""
+    if supports(feature):
+        return None
+    return (f"{what or feature} needs CorOS {FEATURES.get(feature, feature)} or "
+            f"newer; this device is on protocol generation {_active_version}.")
+
+
+def commands(version=None):
+    """The command id -> name map valid for a generation."""
+    ver = version or _active_version
+    return {cmd: name for cmd, name in COMMANDS.items()
+            if parse_version(COMMAND_SINCE.get(cmd, "0")) <= parse_version(ver)}
 
 # MessageAction.Enum
 ACTION = {"CREATE": 0, "UPDATE": 1, "DELETE": 2, "READ": 3, "MOVE": 4,
@@ -53,31 +142,42 @@ FLAG_FIRST, FLAG_LAST, FLAG_SINGLE, FLAG_MIDDLE = 0x40, 0x80, 0xC0, 0x00
 REPORT_SIZE = 128           # data bytes per report (excl. report id)
 CHUNK_MAX = REPORT_SIZE - 2  # minus [chunkLen][flags] = 126
 
-_pool = None
+_pools = {}
+_DESCRIPTOR_DIR = os.path.join(os.path.dirname(__file__), "descriptors")
+# pre-versioning layout kept working: a single unversioned set in the package
+_LEGACY_SET = os.path.join(os.path.dirname(__file__), "qc_descriptors.pb")
 
 
-_DESCRIPTOR_SET = os.path.join(os.path.dirname(__file__), "qc_descriptors.pb")
+def descriptor_path(version):
+    return os.path.join(_DESCRIPTOR_DIR, f"qc_descriptors-{version}.pb")
 
 
-def _recovered_fdps():
-    """Prefer the bundled descriptor set; fall back to scanning the app binary."""
+def _recovered_fdps(version):
+    """Prefer the bundled descriptor set for `version`; fall back to the legacy
+    unversioned file, then to scanning the installed app binary."""
     from google.protobuf import descriptor_pb2
-    if os.path.exists(_DESCRIPTOR_SET):
-        fds = descriptor_pb2.FileDescriptorSet()
-        fds.ParseFromString(open(_DESCRIPTOR_SET, "rb").read())
-        return {f.name: f for f in fds.file}
-    # fallback: scan the Cortex Control binary directly
+    for path in (descriptor_path(version), _LEGACY_SET):
+        if os.path.exists(path):
+            fds = descriptor_pb2.FileDescriptorSet()
+            with open(path, "rb") as fh:
+                fds.ParseFromString(fh.read())
+            return {f.name: f for f in fds.file}
     tools = os.path.join(os.path.dirname(__file__), "..", "..", "tools")
     sys.path.insert(0, os.path.abspath(tools))
     import extract_protos
     return extract_protos.recover()
 
 
-def pool():
-    global _pool
-    if _pool is None:
-        _pool = descriptor_pool.DescriptorPool()
-        fdps = _recovered_fdps()
+def pool(version=None):
+    """Descriptor pool for a schema generation (default: the active one).
+
+    Cached per generation, so reconnecting to a device on different firmware
+    picks up the right schema without reparsing.
+    """
+    ver = version or _active_version
+    if ver not in _pools:
+        p = descriptor_pool.DescriptorPool()
+        fdps = _recovered_fdps(ver)
         from google.protobuf import descriptor_pb2
         default = descriptor_pool.Default()
         for dep in ("google/protobuf/wrappers.proto",
@@ -86,19 +186,20 @@ def pool():
             try:
                 fdp = descriptor_pb2.FileDescriptorProto()
                 default.FindFileByName(dep).CopyToProto(fdp)
-                _pool.Add(fdp)
+                p.Add(fdp)
             except Exception:
                 pass
         for name in ("Preset.proto", "ProductionAutomation.proto"):
             if name in fdps:
-                _pool.Add(fdps[name])
-    return _pool
+                p.Add(fdps[name])
+        _pools[ver] = p
+    return _pools[ver]
 
 
-def message_class(command):
+def message_class(command, version=None):
     """Return the generated message class for a command id or name."""
     name = command if isinstance(command, str) else COMMANDS[command]
-    desc = pool().FindMessageTypeByName(f"{PACKAGE}.{name}Message")
+    desc = pool(version).FindMessageTypeByName(f"{PACKAGE}.{name}Message")
     return _msg_class(desc)
 
 

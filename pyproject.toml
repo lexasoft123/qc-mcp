@@ -7,7 +7,7 @@ license = { file = "LICENSE" }
 requires-python = ">=3.10"
 keywords = ["quad-cortex", "neural-dsp", "mcp", "guitar", "usb-hid", "reverse-engineering"]
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.2",
     "protobuf>=5.0",
 ]
 
@@ -35,4 +35,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-qc_mcp = ["qc_descriptors.pb", "ModelRepo.xml"]
+qc_mcp = ["descriptors/*.pb", "qc_descriptors.pb", "ModelRepo.xml"]

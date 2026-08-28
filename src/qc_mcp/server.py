@@ -22,13 +22,16 @@ from __future__ import annotations
 import os
 import threading
 
-from mcp.server.fastmcp import FastMCP
+try:                                    # mcp >= 2 renamed FastMCP -> MCPServer
+    from mcp.server.mcpserver import MCPServer as _Server
+except ImportError:                     # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _Server
 
 from . import protocol as P
 from . import catalog
 from .transport import QuadCortex, QCError
 
-mcp = FastMCP("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
+mcp = _Server("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
 (guitar amp modeler) over its internal USB protocol. Core workflow for building:
 
 1. connect() — asks bridge vs direct when ambiguous; bridge self-launches the app.
@@ -45,6 +48,21 @@ mcp = FastMCP("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
    volumes ~0.5 so the parallel sum doesn't clip.
 6. Save: save_preset / save_preset_as (File CREATE; guarded against clobbering).
    A success string is not proof — verify via current_preset_position + read.
+7. CorOS 4.1+ only: load_device_preset(row, col, name) drops a whole dialled-in
+   knob set onto a block (list_device_presets to see them) — a fast first pass
+   before fine-tuning; save_device_preset stores one back. device_info reports
+   firmware + which features this unit has; 4.1 tools say "needs CorOS 4.1" on
+   older firmware instead of no-op'ing.
+8. Footswitches: assign_stomp(row, col, 'A'-'H') binds a block to a stomp switch
+   (unassign_stomp removes it). Pair stomps with scenes for players in Hybrid
+   mode — scenes carry the tone, stomps toggle drives/boosts/delays.
+9. GLOBAL settings (affect every preset, not just the open one):
+   list_settings_presets / load_settings_preset cover Global EQ and I/O Settings;
+   set_io_port sets input level/impedance/type and output level/mute. Treat as
+   destructive — an I/O preset rewrites the user's hardware input setup and
+   needs confirm=True; keep the `previous` snapshot it returns, since that is
+   the only way back. get_tempo reads preset tempo + external MIDI-clock BPM.
+   Ask before changing anything global; it is not undone by reloading a preset.
 
 Deeper knowledge (routing recipes for shared-front multi-amp rigs, CPU model,
 protocol docs, GUI verification harness) lives in the qc-mcp repo — sessions
@@ -116,7 +134,13 @@ def _launch_bridge(timeout_s=45):
 
 
 def _fields(msg):
-    return {f.name: getattr(msg, f.name) for f, _ in msg.ListFields()}
+    """Set fields of a protobuf message as a JSON-safe dict (bytes -> hex)."""
+    out = {}
+    for f, value in msg.ListFields():
+        if isinstance(value, bytes):
+            value = value.hex()
+        out[f.name] = value
+    return out
 
 
 def _preset_summary(bp):
@@ -159,8 +183,14 @@ def _preset_summary(bp):
                        "split_points": split_points, "blocks": blocks,
                        "input_block": lane_ctrl(ch.input_control),
                        "output_block": lane_ctrl(ch.output_control)})
+    stomps = [{"footswitch": "ABCDEFGH"[a.stomp_index] if a.stomp_index < 8
+                              else a.stomp_index,
+               "row": a.row, "column": a.column,
+               "momentary": bool(dict(bp.stomp_is_momentary).get(a.stomp_index))}
+              for a in bp.stomp_mode_assignments]
     return {"name": bp.name, "tempo": bp.tempo, "default_scene": bp.default_scene,
             "scene_labels": [s for s in bp.scene_labels],
+            "stomp_assignments": stomps,
             "num_chains": len(bp.chains), "chains": chains}
 
 
@@ -213,9 +243,10 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
         return {"error": f"unknown mode {mode!r} — use 'auto', 'bridge' or 'direct'."}
     try:
         qc = _conn()
-        v = qc.read_state("Version")
-        return {"status": f"Connected ({mode}). Firmware "
-                          f"{getattr(v, 'zenos_git_hash', '?')}."}
+        qc.read_state("Version")
+        name = f" [{qc.custom_name}]" if qc.custom_name else ""
+        return {"status": f"Connected ({mode}). CorOS {qc.firmware or '?'}"
+                          f"{name}, protocol generation {qc.protocol_version}."}
     except QCError as e:
         return {"error": f"Connect failed: {e}"}
 
@@ -230,9 +261,23 @@ def disconnect() -> str:
 
 @mcp.tool()
 def device_info() -> dict:
-    """Read the Quad Cortex firmware / device info. Read-only."""
-    v = _conn().read_state("Version")
-    return _fields(v)
+    """Firmware, device identity, and which protocol features this unit supports.
+
+    `firmware` is the CorOS version (the device reports it in the oddly-named
+    `zenos_git_hash`); `protocol_generation` is the wire schema the MCP picked
+    for it, and `features` lists the version-gated capabilities. Read-only."""
+    qc = _conn()
+    v = qc.read_state("Version")
+    info = _fields(v)
+    info.update({
+        "firmware": qc.firmware or info.get("zenos_git_hash", "?"),
+        "device_name": qc.custom_name or "",
+        "device_type": qc.device_type or "",
+        "protocol_generation": qc.protocol_version,
+        "protocol_generation_verified": getattr(qc, "protocol_version_verified", True),
+        "features": {name: P.supports(name) for name in sorted(P.FEATURES)},
+    })
+    return info
 
 
 @mcp.tool()
@@ -285,7 +330,11 @@ def recall_preset(position: int, setlist_key: str = "", is_factory: bool = False
 
 @mcp.tool()
 def set_master_volume(volume: float, engaged: bool = True) -> str:
-    """WRITE: set master volume (0.0-1.0)."""
+    """WRITE: set the device's master output volume, 0.0-1.0.
+
+    This is the physical big knob, not a preset value — it is global, survives
+    preset changes, and is not saved into a preset. `engaged=False` releases the
+    knob without changing the level."""
     qc = _conn()
     m = P.message_class("MasterVolume")(action=P.ACTION["UPDATE"],
                                         request_id=qc.next_request_id(),
@@ -478,11 +527,24 @@ def set_mode_cycle(modes: list) -> dict:
             "cycle": [MODE_NAMES.get(i, f"#{i}") for i in ids]}
 
 
+INPUT_TYPES = {0.0: "instrument", 0.5: "mic", 1.0: "line"}
+
+
+def _input_type_name(value):
+    """`input_type` is a 3-position normalized control, not a boolean."""
+    return INPUT_TYPES.get(round(float(value) * 2) / 2, f"unknown({value:.3f})")
+
+
 @mcp.tool()
 def get_io_settings() -> dict:
-    """Read the hardware I/O port settings: inputs (level, type instrument/line,
-    impedance/Z-mode, ground lift, plugged), outputs (level, mute, ground lift),
-    headphones, USB, and input/output pairing. Read-only."""
+    """Read the hardware I/O port settings: inputs (level, type, impedance/Z-mode,
+    ground lift, plugged), outputs (level, mute, ground lift), headphones, USB,
+    and input/output pairing.
+
+    Input `type` is one of instrument / mic / line — a 3-position control
+    (0.0 / 0.5 / 1.0). Cortex Control's own panel only offers instrument and mic,
+    so a port set to line on the unit itself can be read and restored here but
+    not through the app. Read-only; write with set_io_port."""
     io = _conn().read_message("IOSettings")
     if io is None or not io.HasField("settings"):
         return {"note": "no IO settings returned"}
@@ -490,7 +552,7 @@ def get_io_settings() -> dict:
     def ins(p):
         return {"port": p.input_port_id, "plugged": p.plugged,
                 "level": round(p.level, 3),
-                "type": "instrument" if round(p.input_type) == 0 else "line/mic",
+                "type": _input_type_name(p.input_type),
                 "impedance": round(p.input_zmode, 3),
                 "ground_lift": bool(p.ground_lift)}
     def outs(p):
@@ -655,6 +717,40 @@ def set_lane_output(row: int, pan: float = None, volume: float = None,
             done[{0: "volume", 1: "pan", 2: "mute", 3: "solo"}[idx]] = float(val)
             time.sleep(0.05)
     return f"Set lane {row} output {done}."
+
+
+@mcp.tool()
+def set_mixer(row: int, level_a: float = None, pan_a: float = None,
+              level_b: float = None, pan_b: float = None, phase: bool = None,
+              mixer_level: float = None, column: int = 0) -> str:
+    """WRITE: set the MIXER at a lane's merge point (the magenta 'M' node created by
+    a split whose mix_col >= 0). pan_a/pan_b: 0.0=hard L, 0.5=center, 1.0=hard R —
+    this is how you get STEREO WIDTH from a merged multi-amp rig (pan A left, B right).
+    A = the main lane, B = the branch that merges in. Levels are 0.0-1.0.
+    PAN SCALE (verified on-device): the QC displays pan as 0-50 per side, so the
+    reading is (0.5 - value) * 100 — pan_a=0.25 shows "25 L", 0.375 shows "13 L",
+    and 0.0/1.0 are hard L/R shown as "50". Halve the number you want, then offset
+    from 0.5.
+    NOTE the mixer is a lane SUB-BLOCK, not a grid block: it has no row/column cell and
+    does NOT appear in get_current_preset's `blocks`, so set_parameter(row, col, ...)
+    silently does nothing to it — use this tool."""
+    qc = _conn()
+    import time
+    # Mixer param order: LEVEL A=0, PAN A=1, LEVEL B=2, PAN B=3, PHASE=4, MIXER LEVEL=5
+    names = {0: "level_a", 1: "pan_a", 2: "level_b", 3: "pan_b",
+             4: "phase", 5: "mixer_level"}
+    updates = [(0, level_a), (1, pan_a), (2, level_b), (3, pan_b),
+               (4, None if phase is None else (1.0 if phase else 0.0)),
+               (5, mixer_level)]
+    done = {}
+    for idx, val in updates:
+        if val is not None:
+            qc.set_lane_param(row, "mixer", idx, float(val), column=column)
+            done[names[idx]] = float(val)
+            time.sleep(0.05)
+    if not done:
+        return "No mixer values given (nothing sent)."
+    return f"Set lane {row} mixer {done}."
 
 
 @mcp.tool()
@@ -948,19 +1044,403 @@ def search_directory(query: str = "", category: str = "", limit: int = 30,
 
 
 @mcp.tool()
-def list_favorites(favorites: bool = True) -> list:
-    """The device's Favorites (favorites=True) or Recents (favorites=False) preset
-    list: [{name, folder_name, setlist_key, is_factory, is_plugin}]. Load one via
-    switch_preset. Read-only."""
-    items = _conn().list_recents_favorites(favorites=favorites)
-    if not items:
+def list_favorites(favorites: bool = True, kind: str = "preset") -> list:
+    """The device's Favorites (favorites=True) or Recents (favorites=False):
+    [{name, folder_name, setlist_key, is_factory, is_plugin}]. Load a preset one
+    via switch_preset. CorOS 4.1 keeps three separate lists — `kind` is
+    'preset', 'ir' or 'capture' (64 entries each); on 4.0 the device ignores it
+    and answers with its single combined list. Read-only."""
+    items = _conn().list_recents_favorites(favorites=favorites, kind=kind)
+    if not items and kind == "preset":
         # bridge read empty -> fall back to the snapshot's captured favorites/recents
         snap = _load_snapshot() or {}
         items = (snap.get("_favorites") or {}).get(
             "favorites" if favorites else "recents", [])
     return [{"name": it["name"], "folder_name": it["folder_name"],
              "setlist_key": it["folder_key"], "is_factory": it["is_factory"],
-             "is_plugin": it["is_plugin"]} for it in items]
+             "is_plugin": it["is_plugin"],
+             "product_key": it.get("product_key", "")} for it in items]
+
+
+@mcp.tool()
+def list_device_presets(model: str = "", limit: int = 40) -> dict:
+    """Device presets (CorOS 4.1+): saved settings for a single device — amp,
+    drive, reverb, utility — that can be recalled into any rig. `model` is a
+    block name or numeric hash (empty = summarise every model that has presets).
+    Read-only; load one with load_device_preset."""
+    gate = P.require("model_presets", "Device presets")
+    if gate:
+        return {"error": gate}
+    model_hash = _resolve_model(model) if model else None
+    if model and model_hash is None:
+        return {"error": f"no device matches {model!r} — try find_devices."}
+    presets = _conn().list_model_presets(model_hash)
+    if model_hash is not None:
+        info = catalog.lookup(model_hash) or {}
+        return {"model": info.get("name", model), "model_hash": model_hash,
+                "count": len(presets),
+                "presets": [{"id": p["id"], "name": p["name"],
+                             "is_factory": p["is_factory"],
+                             "is_default": p["is_default"]}
+                            for p in presets[:limit]]}
+    by_model = {}
+    for p in presets:
+        by_model.setdefault(p["model_hash"], []).append(p["name"])
+    rows = sorted(by_model.items(), key=lambda kv: -len(kv[1]))[:limit]
+    return {"total_presets": len(presets), "models_with_presets": len(by_model),
+            "top": [{"model_hash": h,
+                     "model": (catalog.lookup(h) or {}).get("name", f"#{h}"),
+                     "count": len(names), "examples": names[:5]}
+                    for h, names in rows]}
+
+
+@mcp.tool()
+def load_device_preset(row: int, column: int, preset: str,
+                       model: str = "", is_factory: bool = True) -> dict:
+    """WRITE (CorOS 4.1+): load a device preset onto the block at (row, column),
+    replacing that block's parameter settings. `preset` is an id or name from
+    list_device_presets; `model` defaults to whatever block currently sits there.
+    Sent as a Grid UPDATE with update_type=MODEL_PRESET. Verifies by reading the
+    block back."""
+    gate = P.require("model_presets", "Device presets")
+    if gate:
+        return {"error": gate}
+    qc = _conn()
+    block = _block_at(qc, row, column)
+    if block is None:
+        return {"error": f"no block at row {row}, column {column}."}
+    model_hash = _resolve_model(model) if model else block["hash"]
+    if model_hash is None:
+        return {"error": f"no device matches {model!r}."}
+    choices = qc.list_model_presets(model_hash)
+    match = next((p for p in choices
+                  if p["id"] == str(preset)
+                  or p["name"].lower() == str(preset).lower()), None)
+    if match is None:
+        return {"error": f"{(catalog.lookup(model_hash) or {}).get('name', model_hash)} "
+                         f"has no device preset {preset!r}.",
+                "available": [p["name"] for p in choices[:20]]}
+    before = block["params"]
+    qc.load_model_preset(row, column, model_hash, match["id"],
+                         is_factory=match["is_factory"])
+    after = (_block_at(qc, row, column) or {}).get("params", {})
+    return {"loaded": match["name"], "id": match["id"],
+            "block": (catalog.lookup(model_hash) or {}).get("name"),
+            "row": row, "column": column,
+            "params_changed": before != after, "params": after}
+
+
+@mcp.tool()
+def list_settings_presets(target: str = "global_eq") -> dict:
+    """Global EQ / I/O Settings presets (CorOS 4.1+). `target` is 'global_eq' or
+    'io_settings'. These ride pseudo-models in the same device-preset index —
+    Global EQ is catalog hash 4004, I/O Settings 31000. Read-only."""
+    gate = P.require("model_presets", "Settings presets")
+    if gate:
+        return {"error": gate}
+    qc = _conn()
+    model_hash = qc.SETTINGS_MODELS.get(target)
+    if model_hash is None:
+        return {"error": f"target must be 'global_eq' or 'io_settings', not {target!r}."}
+    presets = qc.list_model_presets(model_hash)
+    return {"target": target, "model_hash": model_hash, "count": len(presets),
+            "presets": [{"id": p["id"], "name": p["name"],
+                         "is_factory": p["is_factory"], "is_default": p["is_default"]}
+                        for p in presets]}
+
+
+@mcp.tool()
+def load_settings_preset(target: str, preset: str, confirm: bool = False) -> dict:
+    """WRITE (CorOS 4.1+): apply a Global EQ or I/O Settings preset.
+
+    **This overwrites global device settings, not preset content** — it affects
+    every preset on the unit. `target='io_settings'` in particular rewrites the
+    hardware input levels, impedance and types, so it needs `confirm=True` and
+    the previous values are returned so they can be put back with `set_io_port`.
+    Global EQ is captured and returned the same way."""
+    gate = P.require("model_presets", "Settings presets")
+    if gate:
+        return {"error": gate}
+    qc = _conn()
+    if target not in qc.SETTINGS_MODELS:
+        return {"error": f"target must be 'global_eq' or 'io_settings', not {target!r}."}
+    choices = qc.list_model_presets(qc.SETTINGS_MODELS[target])
+    match = next((c for c in choices
+                  if c["id"] == str(preset)
+                  or c["name"].lower() == str(preset).lower()), None)
+    if match is None:
+        return {"error": f"no {target} preset {preset!r}.",
+                "available": [c["name"] for c in choices[:20]]}
+    if target == "io_settings" and "error" in _io_snapshot(qc):
+        return {"error": "refusing to load an I/O preset: the current settings "
+                         "could not be read, so there would be no way back."}
+    if target == "io_settings" and not confirm:
+        return {"error": "loading an I/O Settings preset rewrites the hardware "
+                         "input levels/impedance/type for every preset. Pass "
+                         "confirm=True if that is what you want.",
+                "would_load": match["name"]}
+    def snapshot():
+        if target == "io_settings":
+            return _io_snapshot(qc)
+        params, bypassed = qc.read_global_eq()
+        return {"global_eq": [[i, round(v, 6)] for i, v in params],
+                "bypassed": bypassed}
+
+    before = snapshot()
+    qc.load_settings_preset(target, match["id"], is_factory=match["is_factory"])
+    after = snapshot()
+    undo = ("set_global_eq(previous['global_eq'], previous['bypassed'])"
+            if target == "global_eq" else
+            "set_io_port for each entry in previous['in_ports']")
+    return {"loaded": match["name"], "target": target,
+            "changed": before != after, "previous": before,
+            "note": f"keep `previous` — undo with {undo}."}
+
+
+@mcp.tool()
+def set_global_eq(parameters: list, bypassed: bool = None) -> dict:
+    """WRITE: set the Global EQ parameters — the undo for load_settings_preset.
+
+    Global EQ is a **global** 5-band output EQ applied to every preset, not preset
+    content. `parameters` is a list of [index, value] pairs in the 0-27 layout
+    load_settings_preset returns as `previous['global_eq']` (five bands of
+    GAIN/FREQ/Q/TYPE/BYPASS, then OUTPUT and two EQ assignments), values
+    normalized 0-1."""
+    qc = _conn()
+    try:
+        pairs = [(int(i), float(v)) for i, v in parameters]
+    except (TypeError, ValueError):
+        return {"error": "parameters must be a list of [index, value] pairs."}
+    if not pairs:
+        return {"error": "nothing to set — pass at least one [index, value] pair."}
+    qc.write_global_eq(pairs, bypassed)
+    now, now_bypassed = qc.read_global_eq()
+    applied = dict(now)
+    return {"set": len(pairs), "bypassed": now_bypassed,
+            "matches_request": all(abs(applied.get(i, 0) - v) < 1e-4 for i, v in pairs),
+            "global_eq": [[i, round(v, 6)] for i, v in now]}
+
+
+def _io_snapshot(qc):
+    """The input-port fields an I/O preset overwrites, or an explicit failure.
+
+    This is the only record of what to restore after an irreversible I/O load, so
+    an empty read has to be visible rather than silently becoming `{}`.
+    """
+    io = qc.read_message("IOSettings")
+    if io is None or not io.HasField("settings"):
+        return {"error": "could not read I/O settings — nothing captured to undo with"}
+    return {"in_ports": [{"port": p.input_port_id, "level": round(p.level, 6),
+                          "impedance": round(p.input_zmode, 6),
+                          "type": round(p.input_type, 6),
+                          "ground_lift": round(p.ground_lift, 6)}
+                         for p in io.settings.in_port],
+            "xlr1_2_linked": io.xlr1_2_linked, "out3_4_linked": io.out3_4_linked}
+
+
+@mcp.tool()
+def set_io_port(kind: str, port: int, level: float = None, impedance: float = None,
+                input_type: float = None, ground_lift: float = None,
+                mute: bool = None) -> dict:
+    """WRITE: set hardware I/O port fields (`kind` 'in' or 'out'), normalized 0-1.
+
+    Only the arguments you pass are sent — and that matters: the device
+    **silently rejects a write carrying a full port record**, so this is also the
+    way to undo a `load_settings_preset('io_settings', …)` from its `previous`
+    snapshot. `input_type` is a 3-position control (0=Instrument, 0.5=Mic,
+    1.0=Line); Cortex Control only exposes the first two."""
+    qc = _conn()
+    fields = {k: v for k, v in (("level", level), ("input_zmode", impedance),
+                                ("input_type", input_type),
+                                ("ground_lift", ground_lift), ("mute", mute))
+              if v is not None}
+    if not fields:
+        return {"error": "nothing to set — pass at least one field."}
+    try:
+        qc.set_io_port(kind, port, **fields)
+    except (QCError, AttributeError) as e:
+        return {"error": str(e)}
+    return {"set": fields, "kind": kind, "port": port, "now": _io_snapshot(qc)}
+
+
+@mcp.tool()
+def get_tempo() -> dict:
+    """Preset tempo and MIDI-clock status. CorOS 4.1 reports an incoming external
+    MIDI clock's tempo and whether it is out of the device's usable range —
+    useful when the QC is slaved to a DAW or drum machine. Read-only."""
+    qc = _conn()
+    out = {}
+    try:
+        tempo = qc.read_state("GlobalTempo")
+        values = [p.param_values[0].float_value for p in tempo.params
+                  if p.param_values]
+        out["tempo_params"] = [round(v, 4) for v in values]
+    except QCError:
+        out["tempo_params"] = None
+    settings = qc.read_state("GeneralSettings")
+    if P.supports("midi_clock_readout"):
+        out["external_midi_clock_bpm"] = round(
+            getattr(settings, "external_midi_clock_tempo", 0.0), 3)
+        out["external_midi_clock_out_of_range"] = bool(
+            getattr(settings, "external_midi_clock_out_of_range", False))
+        out["external_clock_present"] = out["external_midi_clock_bpm"] > 0
+    else:
+        out["note"] = P.require("midi_clock_readout", "External MIDI clock readout")
+    return out
+
+
+@mcp.tool()
+def save_device_preset(row: int, column: int, name: str,
+                       is_default: bool = False) -> dict:
+    """WRITE (CorOS 4.1+): save the block at (row, column)'s current settings as
+    a reusable **user device preset** (max 32 per device), so the same dialled-in
+    amp/drive/reverb can be recalled into any rig.
+
+    The device REFUSES a save whose parameters already match an existing preset
+    for that model ("Preset Conflict" in the app) — change something first, or
+    just load the existing preset instead."""
+    gate = P.require("model_presets", "Device presets")
+    if gate:
+        return {"error": gate}
+    qc = _conn()
+    block = _block_at(qc, row, column)
+    if block is None:
+        return {"error": f"no block at row {row}, column {column}."}
+    before = {p["id"] for p in qc.list_model_presets(block["hash"])}
+    created = qc.save_model_preset(row, column, name, block["hash"],
+                                   is_default=is_default)
+    if created is None:
+        after = [p for p in qc.list_model_presets(block["hash"])
+                 if p["id"] not in before]
+        if not after:
+            return {"error": "device refused the save — its parameters are "
+                             "already stored in an existing preset for this "
+                             "device. Tweak a parameter, or load that preset.",
+                    "block": (catalog.lookup(block["hash"]) or {}).get("name")}
+        created = after[0]
+    return {"saved": created["name"], "id": created["id"],
+            "block": (catalog.lookup(block["hash"]) or {}).get("name"),
+            "row": row, "column": column, "is_default": is_default}
+
+
+@mcp.tool()
+def delete_device_preset(preset: str, model: str) -> dict:
+    """WRITE (CorOS 4.1+): delete one of YOUR device presets. Factory presets
+    cannot be removed. `preset` is an id or name from list_device_presets."""
+    gate = P.require("model_presets", "Device presets")
+    if gate:
+        return {"error": gate}
+    model_hash = _resolve_model(model)
+    if model_hash is None:
+        return {"error": f"no device matches {model!r}."}
+    qc = _conn()
+    choices = qc.list_model_presets(model_hash)
+    match = next((p for p in choices if not p["is_factory"]
+                  and (p["id"] == str(preset)
+                       or p["name"].lower() == str(preset).lower())), None)
+    if match is None:
+        return {"error": f"no user preset {preset!r} on that device.",
+                "your_presets": [p["name"] for p in choices if not p["is_factory"]]}
+    qc.delete_model_preset(match["id"], model_hash)
+    left = [p["name"] for p in qc.list_model_presets(model_hash)
+            if not p["is_factory"]]
+    return {"deleted": match["name"], "gone": match["name"] not in left,
+            "your_presets_left": left}
+
+
+@mcp.tool()
+def assign_stomp(row: int, column: int, footswitch: str,
+                 kind: str = "primary", momentary: bool = False) -> dict:
+    """WRITE: bind a footswitch to a block, so it can be stomped live in Stomp
+    (or Hybrid) mode. `footswitch` is 'A'-'H' or 0-7.
+
+    A block holds ONE assignment per kind — assigning again moves it. `kind`
+    'secondary' is the CorOS 4.1 Dual Footswitch feature: a second function on
+    its own switch, for devices that have one (Vintage Digital, Aeons Reverb) —
+    such a block can hold PRIMARY and SECONDARY at once, on two switches. The
+    device does NOT check: it accepts 'secondary' on any block, and on one with
+    no second function the switch is simply consumed and does nothing, so only
+    use it where you know the device has one. `momentary=True` = active only
+    while held, otherwise latching. Verifies by reading the preset back."""
+    index = _stomp_index(footswitch)
+    if index is None:
+        return {"error": f"footswitch must be A-H or 0-7, not {footswitch!r}."}
+    if kind == "secondary" and not P.supports("dual_footswitch"):
+        return {"error": P.require("dual_footswitch", "Secondary footswitch assignments")}
+    qc = _conn()
+    if _block_at(qc, row, column) is None:
+        return {"error": f"no block at row {row}, column {column}."}
+    qc.assign_stomp(row, column, index, kind=kind, momentary=momentary)
+    return {"assigned": _switch_name(index), **_stomp_state(qc, row, column, index)}
+
+
+@mcp.tool()
+def unassign_stomp(row: int, column: int, footswitch: str) -> dict:
+    """WRITE: unbind a footswitch from a block. 'A'-'H' or 0-7."""
+    index = _stomp_index(footswitch)
+    if index is None:
+        return {"error": f"footswitch must be A-H or 0-7, not {footswitch!r}."}
+    qc = _conn()
+    qc.unassign_stomp(row, column, index)
+    return {"unassigned": _switch_name(index), **_stomp_state(qc, row, column, index)}
+
+
+def _switch_name(index):
+    return "ABCDEFGH"[index] if 0 <= index < 8 else index
+
+
+def _stomp_index(footswitch):
+    text = str(footswitch).strip().upper()
+    if text.isdigit() and 0 <= int(text) <= 7:
+        return int(text)
+    return "ABCDEFGH".index(text) if text in "ABCDEFGH" and len(text) == 1 else None
+
+
+def _stomp_state(qc, row, column, index):
+    """Assignments + momentary flags as the device now reports them."""
+    bp = qc.get_current_preset()
+    if bp is None:
+        return {"note": "could not read the preset back to verify"}
+    from . import preset as _preset
+    assignments = _preset.describe(bp)["stomp_assignments"]
+    momentary = dict(bp.stomp_is_momentary)
+    return {"assignments": [{**a, "footswitch": _switch_name(a["stomp_index"]),
+                             "momentary": bool(momentary.get(a["stomp_index"]))}
+                            for a in assignments],
+            "still_bound": any(a["row"] == row and a["column"] == column
+                               and a["stomp_index"] == index
+                               for a in assignments)}
+
+
+def _resolve_model(model):
+    """A block name or numeric hash -> model hash, or None if ambiguous."""
+    text = str(model).strip()
+    if text.isdigit():
+        return int(text)
+    hits = catalog.find(text)
+    exact = [m for m in hits if m["name"].lower() == text.lower()]
+    if exact:
+        return exact[0]["id"]
+    return hits[0]["id"] if len(hits) == 1 else None
+
+
+def _block_at(qc, row, column):
+    """{hash, params} for the block at a grid position, or None."""
+    bp = qc.get_current_preset()
+    if bp is None or row >= len(bp.chains):
+        return None
+    models = bp.chains[row].models
+    if column >= len(models) or not models[column].hash:
+        return None
+    m = models[column]
+    info = catalog.lookup(m.hash) or {}
+    cparams = info.get("params", [])
+    params = {}
+    for pos, prm in enumerate(m.params):
+        if prm.param_values and pos < len(cparams):
+            params[cparams[pos]["name"]] = round(
+                catalog.to_display(m.hash, pos, prm.param_values[0].float_value), 3)
+    return {"hash": m.hash, "params": params}
 
 
 @mcp.tool()

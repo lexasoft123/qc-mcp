@@ -2,7 +2,11 @@
 
 MCP server that controls a **Neural DSP Quad Cortex** over its reverse-engineered
 internal **USB-HID / protobuf** protocol (not MIDI). See `PROTOCOL.md` for the wire
-protocol and `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes.
+protocol, `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes,
+and `docs/COROS-4.1.md` for the 4.1 feature set (device presets, stomps,
+Global EQ / I/O presets) with usage examples.
+Supports **CorOS 4.0 and 4.1** — the schema is picked per connection from the
+device's firmware (PROTOCOL.md §12).
 
 ## Layout
 - `src/qc_mcp/`
@@ -10,7 +14,9 @@ protocol and `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes.
   - `bridge.py` — FIFO bridge: share Cortex Control's live session via the DYLD
     interposer (run MCP + the app at once). No handshake/heartbeat (the app owns them).
   - `protocol.py` — framing (128-byte reports, flag bits, 8-byte command trailer,
-    gzip), `COMMANDS`, encode/decode, `Reassembler`; loads the protobuf descriptor pool.
+    gzip), `COMMANDS`, encode/decode, `Reassembler`; **version negotiation**
+    (`generation`/`set_version`/`supports`/`require`) + a descriptor pool per CorOS
+    generation from `descriptors/qc_descriptors-<gen>.pb`.
   - `transport.py` — `QuadCortex`: open/handshake/heartbeat, read state, edit grid
     (add/delete block, params, per-scene params, splits/mixers, routing, bypass,
     captures, IRs), recall/save, list_directory.
@@ -26,17 +32,28 @@ protocol and `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes.
 - `interceptor/` — DYLD interposer C + build/run scripts (capture + bridge). Logs and
   `catalog.json` are **gitignored** (contain library names / session ids).
 - `tools/` — RE utilities; `tools/gui/` — GUI-automation harness + tests (below).
+  After a CorOS update run all three: `interceptor/build.sh` (re-instrument the
+  updated app), `tools/build_descriptors.py build <gen>` (new wire schema),
+  `tools/dump_model_repo.py --diff` then without `--diff` (new device catalog).
 - `.claude/skills/` — reusable reverse-engineering skills.
 
 ## Running
 - `python3` alone lacks pyobjc; use `.venv/bin/python`. GUI tools auto-reexec into `.venv`.
-- Tests: `.venv/bin/python tests/test_directory.py` (offline, no device).
+- Tests (all offline, no device): `.venv/bin/python tests/test_directory.py`,
+  `tests/test_protocol_versions.py`, `tests/test_tool_docs.py` (the last one keeps
+  the MCP self-describing — every gated feature must have a tool behind it).
 - Device/GUI tools need the instrumented Cortex Control running (bridge) — see
   `interceptor/run-bridge.sh`.
 
 ## GUI harness + tests (`tools/gui/`)
 Drives Cortex Control (screenshot + click) and correlates the interposer protocol log.
 Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
+**Capture and reads no longer touch the screen:** `shot` uses `screencapture -l
+<winid>` (renders that window alone, occluded or parked off-screen), and `ax`
+reads JUCE's accessibility tree — labelled controls, live values, exact frames,
+no focus. Only clicking needs the screen (JUCE ignores AXPress and
+CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
+`park`/`home` move the window off every display and back.
 - `gui.py` — `bounds`/`home`/`shot`/`click`/`type`/`key`/`act`/`decode`. **`home`
   first** — clicks only map on the main Retina display (see `drive-gui-correlate-protocol`).
 - `mine_log.py` / `dump_catalog.py` — decode captured traffic, build a catalog snapshot.
@@ -94,6 +111,40 @@ Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
   UPDATE is silently refused (device echoes the unchanged position back). `recall_preset`
   now defaults to the current folder and verifies the position actually moved.
 - Value taper: `min>0 and max/min>=5` ⇒ power taper (k≈1.667), else linear.
+- **One bridge reader at a time.** The out FIFO is a single stream: if the MCP
+  server holds a bridge connection and a script opens another, they steal each
+  other's frames and reads silently return `None` (telemetry still flows, so it
+  looks like a dead session). `disconnect` the MCP before driving the device from
+  a script.
+- **CorOS version matters.** `connect`/`device_info` report `firmware` +
+  `protocol_generation`; 4.1-only tools gate on `P.require(...)`. The device's
+  human version is in `Version.zenos_git_hash` — `app_fw_version` is a build hash.
+- **Device presets (4.1)**: `list_device_presets` / `load_device_preset` /
+  `save_device_preset` / `delete_device_preset`. Loading is a **Grid UPDATE with
+  `update_type=MODEL_PRESET`**, not a ModelPreset write. Saving needs the device
+  to know which block you mean: `select_model_slot(row, col)` first (a
+  `ModelPreset` with **no action field** + `loaded_row`/`loaded_column`) — without
+  it every write is silently ignored. The device also **refuses a save whose
+  params match an existing preset** ("Preset Conflict"); tweak something first.
+- **Settings presets (4.1)**: Global EQ and I/O Settings are device presets on
+  pseudo-models (`4004` Output Equalizer / `31000` IOSettings) applied through
+  their OWN message (`GlobalEQ.model_preset_to_load` / `IOSettings.preset_to_load`).
+  Both overwrite **global** state; a Global EQ load is reversible (read all 28
+  params first, write them back), an I/O load is not — `load_settings_preset`
+  snapshots and demands `confirm=True`.
+- **Writing I/O settings**: send ONLY the fields you're changing. A full port
+  record (every field, e.g. a protobuf `CopyFrom`) is silently rejected — that's
+  why I/O writes look impossible. `input_type` is 3-position: 0=Instrument,
+  0.5=Mic, 1.0=Line (the app only offers the first two).
+- **Stomp assignments live on `Grid`**, not their own message: Grid UPDATE with
+  `preset.stomp_mode_assignments[]{row, column, stomp_index, type}` (A-H = 0-7;
+  `type` PRIMARY/SECONDARY = the 4.1 dual-footswitch). DELETE unassigns.
+  **Latching/momentary must be its own Grid UPDATE** (`stomp_is_momentary` map) —
+  sent alongside an assignment it's overwritten by the device's echo.
+  A block holds one assignment **per kind** (verified: Vintage Digital on E
+  PRIMARY + F SECONDARY at once). The device does NOT guard SECONDARY — it
+  accepts it on blocks with no second function, silently wasting a switch.
+  MCP: `assign_stomp` / `unassign_stomp`.
 
 ## Conventions
 - This is for interop/debugging on hardware you own + licensed software. Keep capture logs

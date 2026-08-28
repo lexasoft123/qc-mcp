@@ -17,17 +17,27 @@ https://github.com/lexasoft123/qc-mcp
 
 - **Read** the full live preset the way Cortex Control does on boot — every block,
   grid position, routing, splitters/mixers, and parameter (in real display units).
-- **Build presets from natural language** — pick devices from the 533‑device
+- **Build presets from natural language** — pick devices from the 633‑device
   catalog, lay out parallel/multiamp topologies with splitters + routing, set
   parameters, and save. (Reproduces complex multi-amp presets faithfully.)
 - **Live control** — switch presets, scenes (A–H), performance modes, master volume.
+- **Device presets** (CorOS 4.1) — list, recall and save a device's settings, so a
+  dialled-in amp or drive can be reused in any rig instead of rebuilt.
+- **Footswitch assignments** — bind blocks to stomp switches A–H (latching or
+  momentary), including 4.1's secondary/dual assignments.
 - **Two connection modes** — seize the device directly, or run **alongside a live
   Cortex Control** via a shared session (bridge mode).
+- **Works across firmware** — CorOS 4.0 and 4.1 both supported; the wire schema is
+  chosen per connection from the device's version, and newer‑only tools say so
+  rather than failing silently.
+
+New in CorOS 4.1 — device presets, dual footswitch assignments, Global EQ / I/O
+Settings presets, and 100 new devices: see **[docs/COROS-4.1.md](docs/COROS-4.1.md)**.
 
 ## Requirements
 
 - macOS (uses IOKit HID via ctypes; the interposer/bridge is macOS‑specific)
-- A Quad Cortex on USB, and **Cortex Control** installed
+- A Quad Cortex on USB, and **Cortex Control** installed (CorOS 4.0 or 4.1)
 - Python 3.10+
 
 ## Install
@@ -87,6 +97,13 @@ See [interceptor/](interceptor/) and PROTOCOL.md §11.
 | `set_parameter` | **write** | set a parameter in display units (taper‑aware) |
 | `clear_grid` | **write** | reset the grid to a clean single chain |
 | `switch_preset` / `switch_scene` / `switch_mode` | **write** | navigate presets, scenes A–H, modes |
+| `list_device_presets` / `load_device_preset` | read / **write** | a device's saved settings (CorOS 4.1+), recalled onto a block |
+| `save_device_preset` / `delete_device_preset` | **write** | store a block's current knobs as a reusable user device preset |
+| `assign_stomp` / `unassign_stomp` | **write** | bind a block to a footswitch (A–H), latching or momentary |
+| `list_settings_presets` / `load_settings_preset` | read / **write** | Global EQ and I/O Settings presets (CorOS 4.1+) |
+| `set_global_eq` | **write** | write Global EQ parameters back — the exact undo for a preset load |
+| `set_io_port` | **write** | hardware input/output level, impedance, type, ground lift, mute |
+| `get_tempo` | read | preset tempo + external MIDI-clock BPM and out-of-range flag |
 | `set_master_volume`, `save_preset`, `connect`/`disconnect`, `device_info`, `cpu_load` | | |
 
 The Python API (`qc_mcp.transport.QuadCortex`, `qc_mcp.preset.PresetBuilder`) exposes
@@ -106,7 +123,8 @@ Cortex Control talks to the QC over USB‑HID using protobuf messages wrapped in
 chunked 128‑byte reports. This project:
 
 - speaks the HID framing directly via IOKit (`src/qc_mcp/iohid.py`),
-- encodes/decodes the message layer incl. gzip (`src/qc_mcp/protocol.py`),
+- encodes/decodes the message layer incl. gzip, and negotiates the wire schema
+  against the device's CorOS version (`src/qc_mcp/protocol.py`),
 - maintains the session + heartbeat the QC needs to stream state
   (`src/qc_mcp/transport.py`),
 - resolves every block to its real gear + parameters, with a calibrated value taper
@@ -118,13 +136,15 @@ chunked 128‑byte reports. This project:
 
 Working: reading, live control, and **accurate preset building** (topology, routing,
 splitters/mixers, and parameters in real units). See [PLAN.md](PLAN.md).
-In progress: **scenes/stomps** — per‑scene parameter/bypass values and footswitch
-(stomp) assignments.
+Also working: per‑scene parameter/bypass values, footswitch (stomp) assignments,
+and device presets. Not yet reversed: `RemoteControl`(72), the 4.1 command for
+driving the QC's own screen.
 
 ## Layout
 
 ```
-src/qc_mcp/   iohid.py protocol.py transport.py catalog.py preset.py server.py + data
+src/qc_mcp/   iohid.py protocol.py transport.py catalog.py preset.py server.py
+              descriptors/  one protobuf schema per CorOS generation
 proto/        recovered Preset.proto, ProductionAutomation.proto, ModelRepo.xml
 tools/        reverse-engineering utilities
 interceptor/  DYLD interposer: capture traffic + bridge mode (interpose.c, build.sh)

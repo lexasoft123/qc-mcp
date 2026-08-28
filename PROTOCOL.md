@@ -4,9 +4,11 @@ Status: **fully reverse-engineered and working** — transport, framing, session
 and the message layer for presets, scenes, modes, the signal-chain grid, hardware
 I/O, and the device catalog. Read and write both work against a live device.
 
-Everything here was derived by inspecting a connected Quad Cortex (firmware 4.0.1)
-and the `Cortex Control.app` binary (v4.0.1) on macOS — no Neural DSP source or
-docs. Unofficial; not affiliated with Neural DSP.
+Everything here was derived by inspecting a connected Quad Cortex and the
+`Cortex Control.app` binary on macOS — no Neural DSP source or docs. Covers
+**CorOS 4.0.1 and 4.1.0**; where the two differ the release is called out, and
+§12 explains how the MCP negotiates between them. Unofficial; not affiliated
+with Neural DSP.
 
 ---
 
@@ -85,8 +87,8 @@ heartbeat + main thread will corrupt frames otherwise).
 
 ## 4. Command map — `CortexMessageType.Enum`
 
-The trailer's `command` selects the payload message type. 71 values; the ones the
-MCP uses:
+The trailer's `command` selects the payload message type. 71 values in CorOS 4.0,
+**73 in 4.1** (`71 ModelPreset`, `72 RemoteControl`). The ones the MCP uses:
 
 | id | message | id | message |
 |----|---------|----|---------|
@@ -99,6 +101,7 @@ MCP uses:
 | 13 | Scene | 52 | ResetCommsBuffers |
 | 14 | Mode | 15 | RecallPreset |
 | 17 | MasterVolume | 22/23 | SceneCopy / SceneLabel |
+| 20 | RecentsFavorites | 71 | ModelPreset *(4.1)* |
 
 Full list in `proto/ProductionAutomation.proto` → `CortexMessageType`. Every message
 has field 1 = `action` (`MessageAction.Enum`: CREATE=0, UPDATE=1, DELETE=2, READ=3,
@@ -313,12 +316,22 @@ MCP `get_io_settings`.
 ## 10. Device catalog — `ModelRepo`
 
 - `ModelRepo`(51) READ returns a gzip+tar containing **`ModelRepo.xml`** — the full
-  catalog: 32 categories, 533 devices. Each `<Model>` has `id`, `name`, a
-  `tm="Based on …®"` real-gear reference, and full `<Parameter>` schema.
+  catalog: **633 devices on CorOS 4.1** (was 533 on 4.0). Each `<Model>` has `id`,
+  `name`, a `tm="Based on …®"` real-gear reference, and full `<Parameter>` schema.
 - **A block's `Model.hash` equals the catalog `id`.** So any block resolves to name +
   emulated gear + parameter names/ranges.
 - Bundled snapshot: `src/qc_mcp/ModelRepo.xml`. `catalog.py`: `lookup`, `name_of`,
   `find`, `categories`. MCP `find_devices`.
+- **The catalog is firmware data, so refresh it after a CorOS update:**
+  `tools/dump_model_repo.py [--diff]` reads it from the connected device and
+  rewrites the snapshot. 4.1 added 100 models — the eight new native devices
+  (Multivoicer, Glitch, Ring Modulator, Arpeggio Delay, Crystal Delay, Vintage
+  Digital, Douglas Shining Comp, Plugin Parametric-4) plus the X-updated plugin
+  device sets (Petrucci, John Mayer, Rabea, Misha Mansoor, Tim Henson) — and
+  renamed several: `30001` Mono Synth → **Overlord Synth**, and the Darkglass®
+  models to Douglas (`3000` B3K → Douglas MT 3K, `21001`/`33001` 210C → 210
+  Douglas Ceramic, and so on). Plugin models appear in the catalog on every unit;
+  using one still needs that plugin's licence.
 
 ---
 
@@ -341,13 +354,19 @@ MCP `get_io_settings`.
   provides them). Launch with `interceptor/run-bridge.sh`; enable in the server with
   `QC_BRIDGE=1`.
 - `tools/` — `extract_protos.py` (recover protobuf descriptors from the binary),
+  `build_descriptors.py` (`build`/`list`/`diff` the per-generation descriptor sets
+  the MCP ships), `dump_model_repo.py` (refresh the device catalog from a
+  connected unit, `--diff` to see what a firmware update added),
   `analyze_log.py` / `verify_frames.py` (reassemble + decode captured logs),
   `xref_dis.py` (Mach-O + capstone string-xref disassembler), `probe_usb.py`,
   `hid_capture.py`, `midi_monitor.py`.
+- **After a CorOS update**, re-run `interceptor/build.sh` as well: the
+  instrumented app is a *copy*, so updating Cortex Control leaves the bridge
+  running the old binary against new firmware.
 
 ---
 
-## 11a. Official-manual cross-check (CorOS 4.0, neuraldsp.com/manual/quad-cortex)
+## 11a. Official-manual cross-check (neuraldsp.com/manual/quad-cortex)
 
 Checked 2026-07-24 against this document; the manual **confirms** the grid model
 (4×8, split→parallel→mix, outputs routable to rows), bypass≠CPU, Global EQ/Input
@@ -364,12 +383,185 @@ and scene names/colors. Additions/corrections from the manual:
   setlist deletion.
 - **Device variants:** Quad Cortex mini (own manual) differs materially — 4 scenes
   (A–D), 4-preset banks, and **bypass is NOT scene-assignable** on the mini. Facts
-  in this document were verified on a full-size unit ("QC MAX", fw 4.0.1); don't
-  assume they transfer to the mini.
+  in this document were verified on a full-size unit ("QC MAX"); don't assume they
+  transfer to the mini. `VersionMessage.device_type` distinguishes them:
+  `QC = 0`, `ATMA = 1` (the mini).
+
+Re-checked against the **4.1.0** manual 2026-08-27, which confirms the reversed
+4.1 behaviour: Virtual Device Presets cover "most virtual devices, I/O Settings,
+and Global EQ" with **32 user presets each** and factory presets for most devices;
+Favorites/Recent holds **64 items per category** (Presets, Neural Captures,
+Impulse Responses), oldest evicted first. The manual does **not** document Dual
+Footswitch Assignments or the eight new devices — those are release-notes only.
 
 ---
 
-## 12. Repo layout
+## 12. Protocol versioning — CorOS 4.0 vs 4.1
+
+The wire schema is **not frozen across CorOS releases**, so the MCP ships one
+descriptor set per generation in `src/qc_mcp/descriptors/qc_descriptors-<gen>.pb`
+and picks one per connection:
+
+1. `QuadCortex.open()` calls `detect_version()`, which READs `Version`(10).
+2. The human CorOS version is in **`zenos_git_hash`** ("4.1.0") — *not* in
+   `app_fw_version`, which holds a build hash ("d14e"). `protocol.generation()`
+   maps it to the newest generation ≤ that version (unknown-newer firmware falls
+   through to the newest schema we ship, since changes are usually additive).
+3. `protocol.pool(version)` caches a descriptor pool per generation, and
+   `message_class(cmd, version)` encodes against the right one.
+4. Version-gated capabilities live in `protocol.FEATURES`; a tool calls
+   `P.require("model_presets")` and returns "needs CorOS 4.1" instead of sending
+   a message an older device would ignore.
+
+The handshake also **mirrors the device's own version back** as
+`cortex_control_version` rather than announcing a hardcoded release.
+
+Rebuild a generation with `tools/build_descriptors.py build <gen>` (extracts from
+the installed Cortex Control), and see exactly what moved with
+`tools/build_descriptors.py diff 4.0 4.1`.
+
+### What 4.1 changed on the wire
+
+Mostly additive, with **one genuinely incompatible field**:
+
+| change | detail |
+|---|---|
+| **`GlobalEQMessage` field 5** | `has_user_defaults` (bool) → `model_preset_to_load` (ModelPresetID); field 6 `default_parameter_action` removed. **The only field-number reuse** — a 4.0 pool talking to 4.1 would mis-encode it. |
+| new commands | `71 ModelPreset`, `72 RemoteControl` |
+| `StompModeAssignment.type` | `PRIMARY`/`SECONDARY` — the Dual Footswitch Assignments feature |
+| `RecentsFavoritesMessage.type` | `PRESET`/`IMPULSE_RESPONSE`/`NEURAL_CAPTURE`, plus `RecentsFavoritesItem.product_key` |
+| `GridMessage` | `+model_preset_to_load`, `+control_is_auditioning`, `UpdateType.MODEL_PRESET` |
+| device-preset hooks | `IOSettingsMessage.preset_to_load`, `NeuralCaptureMessage.model_ab_preset`, `NeuralCapture2Message.cabsim_model_preset` |
+| `FileMessage` | `+omit_factory_content`, `+user_content_estimate` (backup scoping) |
+| `GeneralSettingsMessage` | `+external_midi_clock_tempo`, `+external_midi_clock_out_of_range`; `cloud_endpoint` moved to `VersionMessage` field 19 |
+| `SOC2ARMCommsDiagnosticsMessage` | four USB-audio gap/reset counters |
+
+## 12a. Device presets — `ModelPreset`(71), CorOS 4.1
+
+*(For how to actually use these from the MCP, see [docs/COROS-4.1.md](docs/COROS-4.1.md).)*
+
+Per-device saved settings ("save your favourite amp/drive/reverb settings and
+recall them in any rig"). 4.1.0 ships **2751 factory presets across 602 models**;
+the manual caps **user** presets at 32 per device. I/O Settings and Global EQ get
+presets too — I/O Settings rides a pseudo-model, catalog hash **31000
+"IOSettings"** (category `IOSettings Internal`, new in 4.1), and the message has
+matching hooks (`IOSettingsMessage.preset_to_load`,
+`GlobalEQMessage.model_preset_to_load`).
+
+- **List:** `ModelPreset`(71) READ returns the *entire* index in one (gzipped)
+  reply — `presets[] {id{value, is_factory, hash}, name, is_default}`, where
+  `id.hash` is the **model hash the preset belongs to**, so filter by it for one
+  block's presets. The device also broadcasts this index unprompted on connect.
+- **Load — verified 2026-08-27:** this is *not* a `ModelPreset` write. The device
+  takes a **`Grid`(1) UPDATE** with `update_type = MODEL_PRESET(1)`,
+  `model_preset_to_load{value, is_factory, hash}`, and a one-block grid naming
+  the target (`preset.chains[]{row}` + `models[]{hash, column}`). The block's
+  parameters are replaced in place; read it back to confirm. Loading ids 1–4 onto
+  a Myth Drive gave four distinct GAIN/TREBLE/LEVEL sets.
+- **Select the slot first — this is the trick.** The device tracks exactly *one*
+  active grid slot for device-preset writes; the app's own resource file says the
+  loaded-preset field "is correct only for the open panel / selected grid slot".
+  Cortex Control sends this the instant a block editor opens:
+
+      ModelPreset { request_id, loaded_row, loaded_column }      # no action field
+
+  Note **no `action`** — i.e. CREATE(0), which here means *subscribe*. The device
+  answers with `loaded_preset_id`, the preset that block currently holds:
+  `""` = its settings match no preset, `"SpecialFactoryModelPresetID"` = factory
+  defaults. Skip this and every write below is silently ignored.
+- **Save** a user device preset (32 max per device) — again with no action field,
+  and note there is **no parameter payload and no `create_from_*`**: the device
+  snapshots the selected block itself.
+
+      ModelPreset { request_id,
+                    presets[0] { id{ is_factory:false, hash:<model> },
+                                 name, is_default } }
+
+  The reply echoes the created preset with its assigned `id.value` ("1", "2", …),
+  followed by a second message updating `loaded_preset_id` for the slot.
+  **The device refuses a save whose parameters already match an existing preset
+  for that model** — the app shows "Preset Conflict: … already stored in an
+  existing Preset", and the menu item greys out. Change a parameter first.
+- **Delete:** `ModelPreset{action=DELETE, presets[0].id{value, is_factory:false,
+  hash}}`. Factory presets can't be removed.
+- MCP: `list_device_presets`, `load_device_preset`, `save_device_preset`,
+  `delete_device_preset`.
+
+### Global EQ and I/O Settings presets
+
+The manual's "most virtual devices, **I/O Settings, and Global EQ**" is literal:
+both are ordinary entries in the same `ModelPreset` index, on pseudo-models —
+**Global EQ = catalog hash `4004` "Output Equalizer"** (its 28 params line up 1:1
+with `GlobalEQMessage.parameters` indices 0-27: five bands of
+GAIN/FREQ/Q/TYPE/BYPASS, then OUTPUT and two ASSIGN_EQ slots; 23 factory presets)
+and **I/O Settings = `31000`** (one factory preset, "Neural DSP® Default").
+
+They are *applied* through their own message, not the Grid:
+
+    GlobalEQ   { action=UPDATE, model_preset_to_load{value, is_factory, hash=4004} }
+    IOSettings { action=UPDATE, preset_to_load     {value, is_factory, hash=31000} }
+
+**Both overwrite global state that every preset sees.** Capture the current
+values first — `GlobalEQ` READ returns all 28 parameters and they can be written
+straight back, which makes a Global EQ load fully reversible. An I/O Settings
+load is *not* reversible from the message alone: it resets input levels,
+impedance and type, so snapshot them first (`load_settings_preset` returns the
+previous values and requires `confirm=True`).
+
+MCP: `list_settings_presets`, `load_settings_preset`, `set_io_port`.
+
+### Writing hardware I/O settings
+
+`IOSettings` UPDATE accepts `settings{in_port{…}}` / `out_port{…}` — but **only
+with the fields you are changing set**. A full port record (every field, e.g. a
+protobuf `CopyFrom` of one the device just sent) is *silently rejected*, which is
+what makes I/O writes look impossible. Confirmed by writing the same port three
+ways: `{port_id, level}` and `{port_id, level, plugged}` both landed; the full
+record did nothing.
+
+`input_type` is a **3-position normalized control**, not a boolean:
+`0.0` Instrument · `0.5` Mic · `1.0` Line. Cortex Control's panel only exposes
+Instrument/Mic, so a port set to Line from the unit's own screen can be read and
+restored over the protocol but not through the app.
+
+## 12b. Footswitch (stomp) assignments — `Grid`(1)
+
+Binding a block to a footswitch turned out to live on the **Grid** message, not a
+message of its own — a Grid UPDATE whose preset carries *only* the assignment:
+
+    Grid { action=UPDATE, request_id,
+           preset { stomp_mode_assignments[0] { row, column, stomp_index, type } } }
+
+`stomp_index` 0-7 = footswitches A-H; `type` is the CorOS 4.1 Dual Footswitch
+field (`PRIMARY`=0 bypass, `SECONDARY`=1 the device's second function, on the
+devices that have one). A block holds **one assignment per kind** — verified on a
+Vintage Digital reverb holding E as PRIMARY and F as SECONDARY simultaneously;
+assigning the same kind again moves it. **Unassign is the same message with
+`action=DELETE`**, which also clears the switch's momentary flag.
+
+The device does **not** guard SECONDARY: it accepts the assignment on any block,
+including ones with no second function (tested on a Myth Drive), where the
+footswitch is simply consumed and does nothing. Only assign it to devices that
+have a second function.
+
+**Latching vs momentary must be a separate message.** The preset's
+`stomp_is_momentary` map (`{stomp_index: bool}`) is writable by Grid UPDATE, but
+only on its own: the device answers an assignment with its own
+`stomp_is_momentary` echo, which overwrites a flag sent in the same message.
+
+MCP: `assign_stomp`, `unassign_stomp`; `get_current_preset` reports
+`stomp_assignments`.
+
+## 12c. Still unreversed
+
+**`RemoteControl`(72)** — `RemoteControlMouse` (PRESS/RELEASE/MOVE/TAP/DRAG),
+`RemoteControlScreenshot {payload, x, y, w, h}`, `RemoteControlGraphicsTree` —
+i.e. driving the QC's own screen remotely. A bare READ draws no reply, so it
+presumably needs an enable/subscribe step; unreversed, and no MCP tool yet.
+
+---
+
+## 13. Repo layout
 
 ```
 src/qc_mcp/
@@ -378,7 +570,8 @@ src/qc_mcp/
   transport.py    session: handshake, heartbeat, reads/writes, grid edits
   catalog.py      ModelRepo.xml → hash↔name/gear/params
   server.py       MCP server (FastMCP tools)
-  qc_descriptors.pb, ModelRepo.xml   bundled data
+  descriptors/    qc_descriptors-<gen>.pb — one wire schema per CorOS generation
+  ModelRepo.xml   bundled device catalog snapshot
 proto/            recovered Preset.proto + ProductionAutomation.proto + ModelRepo.xml
 tools/            RE utilities
 interceptor/      DYLD interposer for live HID capture

@@ -32,7 +32,7 @@ Everything the main process reports is measured, not mocked:
 
 | check | how |
 |---|---|
-| Python | `python3 --version` / `py -3 --version`, parsed and version-gated |
+| Python | the bundled `uv --version`, or a system `python3` / `py -3`, parsed and version-gated |
 | venv | the `qc-mcp` entry point exists in `.venv` |
 | clang | `clang --version` (macOS only) |
 | Cortex Control | `Info.plist` via `defaults read`, or the exe's `ProductVersion` |
@@ -41,10 +41,17 @@ Everything the main process reports is measured, not mocked:
 | device | `ioreg -p IOUSB` for vid `0x152a` / pid `0x880a`, or `Get-PnpDevice` |
 | reports/s | counted from the interposer's own millisecond stamps in the last 2 s |
 
-Installs are real too: `python -m venv` + an editable `pip install`,
-`interceptor/build.sh` streamed line by line, `claude mcp add` when the CLI is
-present (and a careful JSON merge into the other clients when it is not — the
-server entry is the only key Patchbay ever touches).
+Installs are real too: `uv venv` + `uv pip install -e .` (or `python -m venv` +
+`pip` when there is no bundled uv), `interceptor/build.sh` streamed line by
+line, `claude mcp add` when the CLI is present (and a careful JSON merge into
+the other clients when it is not — the server entry is the only key Patchbay
+ever touches).
+
+**Patchbay does not need a Python on the machine.** It ships `uv`, which fetches
+its own CPython 3.12 and builds the environment in about eight seconds — the
+gap that matters, because macOS's `/usr/bin/python3` is 3.9.6 and Windows has
+none at all. What ships and what gets built locally, and why:
+**[docs/PACKAGING.md](../docs/PACKAGING.md)**.
 
 ## The daemon
 

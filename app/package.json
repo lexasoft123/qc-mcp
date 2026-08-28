@@ -2,7 +2,7 @@
   "name": "patchbay",
   "version": "0.1.0",
   "private": true,
-  "description": "Launcher for qc-mcp — installs the MCP, runs the daemon, opens Cortex Control",
+  "description": "Launcher for qc-mcp \u2014 installs the MCP, runs the daemon, opens Cortex Control",
   "author": "lexasoft <lexasoft@gmail.com>",
   "license": "MIT",
   "main": "./out/main/index.js",
@@ -11,9 +11,10 @@
     "build": "npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win"
+    "dist": "npm run fetch:uv && npm run build && electron-builder",
+    "dist:mac": "npm run fetch:uv && npm run build && electron-builder --mac",
+    "dist:win": "npm run fetch:uv && npm run build && electron-builder --win",
+    "fetch:uv": "node scripts/fetch-uv.mjs"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.5",

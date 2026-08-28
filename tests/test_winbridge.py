@@ -160,12 +160,18 @@ def test_reader_survives_the_app_going_away():
         time.sleep(0.3)
         srv2 = FakeInterposer()           # ...and comes back
         try:
-            br.reopen()
-            time.sleep(0.3)
-            srv2.push(_frame(rpt))
+            # Retry the reconnect, don't just wait on it. Both servers use the
+            # same pipe NAME, and a named pipe allows many instances of one
+            # name: while srv's handles are still winding down, reopen() can
+            # land on the dead instance instead of srv2's and then sit there
+            # forever. Reconnecting each round converges once the old instance
+            # is gone. That collision is an artifact of two fake servers in one
+            # process — Cortex Control is a single writer.
             got = []
             for _ in range(20):
-                got += br.read_reports(0.1)
+                br.reopen()
+                srv2.push(_frame(rpt))
+                got += br.read_reports(0.2)
                 if got:
                     break
             assert got, "reader did not recover after the app restarted"

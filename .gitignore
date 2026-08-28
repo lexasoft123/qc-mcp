@@ -36,3 +36,6 @@ app/dist/
 app/*.tsbuildinfo
 
 app/dist/
+
+# fetched by app/scripts/fetch-uv.mjs, not committed (~40 MB each)
+app/resources/uv/

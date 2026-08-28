@@ -1,13 +1,18 @@
 import { spawn } from 'node:child_process'
+import { join } from 'node:path'
 import type { CheckId, Paths, Progress } from '../shared/types.js'
-import { IS_MAC, buildScript } from './paths.js'
+import { IS_MAC, UV_PYTHON, buildScript } from './paths.js'
+import type { PythonInfo } from './system.js'
 import { exists, run } from './util.js'
 
 export type Emit = (p: Progress) => void
 
-function stream(cmd: string, args: string[], cwd: string, label: string, emit: Emit): Promise<number> {
+function stream(
+  cmd: string, args: string[], cwd: string, label: string, emit: Emit,
+  env?: NodeJS.ProcessEnv
+): Promise<number> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
     const tail = (d: unknown): void => {
       const line = String(d).trim().split('\n').filter(Boolean).pop()
       if (line) emit({ label: `${label} — ${line.slice(0, 90)}`, done: 0, total: 0 })
@@ -19,14 +24,42 @@ function stream(cmd: string, args: string[], cwd: string, label: string, emit: E
   })
 }
 
-/** `python -m venv .venv` then an editable install of the package itself. */
-export async function createVenv(paths: Paths, python: string, emit: Emit): Promise<string | null> {
-  const [cmd, ...pre] = python.split(' ')
-  const mk = await stream(cmd, [...pre, '-m', 'venv', '.venv'], paths.repo, 'Creating the virtual environment', emit)
-  if (mk !== 0) return 'Could not create .venv — check that Python 3.10 or newer is installed.'
-  const pip = IS_MAC ? `${paths.repo}/.venv/bin/pip` : `${paths.repo}\\.venv\\Scripts\\pip.exe`
-  const code = await stream(pip, ['install', '-e', IS_MAC ? '.[gui]' : '.'], paths.repo, 'Installing qc-mcp', emit)
-  if (code !== 0) return 'pip could not install qc-mcp. Open Logs for the output.'
+/**
+ * Build `<repo>/.venv` and install qc-mcp into it editable.
+ *
+ * Two routes to the same layout, so nothing downstream has to care which ran:
+ * bundled uv (fetches its own CPython, ~8s from nothing on a machine with no
+ * usable Python), or a system interpreter that already satisfies >=3.10.
+ *
+ * No extras either way. `[gui]` is pyobjc for the tools/gui harness — ~35 MB,
+ * and tools/ is not part of what a packaged Patchbay carries. Nothing under
+ * src/qc_mcp imports it; the macOS HID transport is ctypes against IOKit.
+ */
+export async function createVenv(paths: Paths, python: PythonInfo, emit: Emit): Promise<string | null> {
+  const venv = join(paths.repo, '.venv')
+  if (python.uv) {
+    // VIRTUAL_ENV so `uv pip` cannot pick some other environment, and
+    // UV_PYTHON_DOWNLOADS so an interpreter is fetched when none matches —
+    // that fetch is the entire reason uv is bundled.
+    const env = { ...process.env, VIRTUAL_ENV: venv, UV_PYTHON_DOWNLOADS: 'automatic' }
+    const mk = await stream(
+      python.path, ['venv', '--python', UV_PYTHON, venv],
+      paths.repo, `Installing Python ${UV_PYTHON}`, emit, env
+    )
+    if (mk !== 0) return `uv could not build the environment. It downloads Python ${UV_PYTHON} on first run, so this needs a network connection.`
+    const code = await stream(
+      python.path, ['pip', 'install', '--python', paths.python, '-e', '.'],
+      paths.repo, 'Installing qc-mcp', emit, env
+    )
+    if (code !== 0) return 'uv could not install qc-mcp. Open Logs for the output.'
+  } else {
+    const [cmd, ...pre] = python.path.split(' ')
+    const mk = await stream(cmd, [...pre, '-m', 'venv', venv], paths.repo, 'Creating the virtual environment', emit)
+    if (mk !== 0) return 'Could not create .venv — check that Python 3.10 or newer is installed.'
+    const pip = IS_MAC ? join(venv, 'bin', 'pip') : join(venv, 'Scripts', 'pip.exe')
+    const code = await stream(pip, ['install', '-e', '.'], paths.repo, 'Installing qc-mcp', emit)
+    if (code !== 0) return 'pip could not install qc-mcp. Open Logs for the output.'
+  }
   return exists(paths.bin) ? null : `The install finished but ${paths.bin} is missing.`
 }
 

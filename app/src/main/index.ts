@@ -71,7 +71,7 @@ function handlers(): void {
       let error: string | null = null
       if (id === 'venv') {
         const python = await findPython()
-        error = await install.createVenv(state.getPaths(), python.path, sub('venv'))
+        error = await install.createVenv(state.getPaths(), python, sub('venv'))
       } else if (id === 'clang') {
         // Apple's installer cannot run silently, so this is a status, not a
         // failure — the remaining steps must still run.

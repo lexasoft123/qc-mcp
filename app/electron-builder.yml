@@ -5,6 +5,9 @@ directories:
 files:
   - '!src/*'
   - '!scripts/*'
+  # afterPack copies the arch-matching binary out of here; without this the
+  # asar would swallow every target's uv (~85 MB) into every build.
+  - '!resources/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!electron-builder.yml'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'

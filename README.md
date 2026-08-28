@@ -38,7 +38,8 @@ Settings presets, and 100 new devices: see **[docs/COROS-4.1.md](docs/COROS-4.1.
 
 - **macOS** (IOKit HID via ctypes) or **Windows** (setupapi + hid.dll via ctypes)
 - A Quad Cortex on USB, and **Cortex Control** installed (CorOS 4.0 or 4.1)
-- Python 3.10+
+- Python 3.10+ — *unless* you use the Patchbay launcher, which brings its own
+  (see [docs/PACKAGING.md](docs/PACKAGING.md))
 
 Both platforms run direct mode and can run *alongside* Cortex Control — macOS
 through the DYLD interposer, Windows by simply opening a second, non‑exclusive

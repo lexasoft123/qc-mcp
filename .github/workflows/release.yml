@@ -1,0 +1,132 @@
+name: Build & Release
+
+# Tags publish; the weekly run is a smoke test. Packaging breaks in ways the
+# Checks workflow cannot see — electron-builder never runs there, and neither
+# does the uv download — so a release must not be the first time this path is
+# exercised. Nothing is published outside a tag ref: the attach step is gated
+# on one.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  schedule:
+    - cron: '31 5 * * 2'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dist:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both mac arches from the one runner: electron-builder pulls the
+          # x64 Electron itself, and afterPack picks the matching uv per arch.
+          - os: macos-latest
+            name: macOS (dmg, arm64 + x64)
+            args: --mac --arm64 --x64
+          - os: windows-latest
+            name: Windows (nsis, x64)
+            args: --win
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      # ── the Python package has to be green before anything is packaged ──
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -e .
+      - name: Offline suite
+        shell: bash
+        run: |
+          fail=0
+          for t in tests/test_*.py; do
+            printf '%-34s ' "$t"
+            if python "$t" > /tmp/out 2>&1; then tail -1 /tmp/out; else fail=1; echo FAIL; cat /tmp/out; fi
+          done
+          exit $fail
+
+      # ── the app ──
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        working-directory: app
+        run: npm ci
+
+      # The tag is the single source of truth for the version, so a release
+      # cannot ship artifacts named after a stale package.json.
+      - name: Version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        working-directory: app
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          npm version --no-git-tag-version --allow-same-version "${TAG#v}"
+
+      # Pinned version, pinned sha256 — see scripts/fetch-uv.mjs. Cached
+      # because it is ~40 MB per target off GitHub releases on every run.
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: app/resources/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('app/scripts/fetch-uv.mjs') }}
+
+      - name: Fetch uv
+        working-directory: app
+        run: npm run fetch:uv
+
+      - name: Build
+        working-directory: app
+        run: npm run build
+
+      - name: Package
+        working-directory: app
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      # Every run keeps its artifacts, tag or not — that is what makes the
+      # weekly run a usable smoke test rather than just a green tick.
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: patchbay-${{ runner.os }}
+          path: |
+            app/dist/*.dmg
+            app/dist/*.exe
+          if-no-files-found: error
+
+      # gh, not a release action: the two matrix jobs race to create the
+      # release and gh handles that collision without dropping a platform's
+      # assets. --clobber makes a re-run of one job idempotent.
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # A hyphenated tag (v0.2.0-rc1) is a prerelease: never "latest", so
+          # only someone handed the link installs one.
+          PRE=(); case "$TAG" in *-*) PRE=(--prerelease);; esac
+          NOTES="docs/release-notes/$TAG.md"
+          if [ -f "$NOTES" ]; then
+            tail -n +2 "$NOTES" > /tmp/relnotes-body.md
+            gh release create "$TAG" "${PRE[@]}" --title "$(head -n 1 "$NOTES")" --notes-file /tmp/relnotes-body.md 2>/dev/null || true
+          else
+            gh release create "$TAG" "${PRE[@]}" --title "$TAG" --notes "" 2>/dev/null || true
+          fi
+          # nullglob: each job only has its own platform's files
+          shopt -s nullglob
+          FILES=(app/dist/*.dmg app/dist/*.exe app/dist/*.blockmap)
+          gh release upload "$TAG" "${FILES[@]}" --clobber

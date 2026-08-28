@@ -105,3 +105,28 @@ export const bridgeScript = (repo: string): string => join(repo, 'interceptor', 
 /** The device, as the transport already knows it (iohid.py: vid 0x152A, pid 0x880A). */
 export const QC_VID = 0x152a
 export const QC_PID = 0x880a
+
+/**
+ * The bundled `uv`, or null when this build has none.
+ *
+ * Patchbay ships uv instead of a Python environment: the environment itself is
+ * built on the machine (docs/PACKAGING.md). Packaged, afterPack has already put
+ * the arch-matching binary at Resources/uv/; in development it comes from
+ * app/resources/uv/<target>/, which `npm run fetch:uv` fills.
+ */
+export function uvBin(): string | null {
+  if (uv !== undefined) return uv
+  const exe = IS_MAC ? 'uv' : 'uv.exe'
+  const target = IS_MAC
+    ? process.arch === 'x64' ? 'x86_64-apple-darwin' : 'aarch64-apple-darwin'
+    : 'x86_64-pc-windows-msvc'
+  const candidates = app.isPackaged
+    ? [join(process.resourcesPath, 'uv', exe)]
+    : [join(app.getAppPath(), 'resources', 'uv', target, exe)]
+  uv = candidates.find((p) => existsSync(p)) ?? null
+  return uv
+}
+let uv: string | null | undefined
+
+/** The Python uv installs when it builds the environment. */
+export const UV_PYTHON = '3.12'

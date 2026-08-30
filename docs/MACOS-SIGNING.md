@@ -474,8 +474,8 @@ Direct mode alone is not sufficient evidence: it never touches the interposer.
 
 ## Verification status
 
-**Signed, notarized and stapled — verified locally, end to end.** Not yet run
-on CI, and the runtime gate below is still outstanding.
+**Signed, notarized and stapled — verified end to end, locally and on CI.**
+The runtime gate below is the only thing still outstanding.
 
 A local `--mac dmg:arm64` build (2026-08-30) produced a Developer ID-signed,
 notarized, stapled app. Checked the way a downloader experiences it rather
@@ -497,6 +497,23 @@ Safari does, mounted, and put to Gatekeeper:
 - The dmg **container** reports `rejected / no usable signature`, which is
   correct and expected — see
   [The dmg itself is not signed, and that is correct](#the-dmg-itself-is-not-signed-and-that-is-correct).
+
+**On CI** (run 33319564520, both matrix legs green): `1 identity imported`,
+then `notarization successful` **twice — once per architecture**, and no
+`skipped macOS application code signing` anywhere in the log. Both artifacts
+were downloaded, quarantined, mounted and assessed on a Mac:
+`Authority=Developer ID Application`, `flags=0x10000(runtime)`,
+`TeamIdentifier=USJ7H3X44X`, `The validate action worked!` and
+`source=Notarized Developer ID` — for `mac-arm64.dmg` **and** `mac-x64.dmg`.
+The x64 half had never been notarized before that run.
+
+The **no-secrets path is also proven on a real runner** (run 33318481461, both
+legs green), which matters more than it sounds: the step emitted
+`##[warning]No APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 — this dmg ships ad-hoc
+signed only` and electron-builder logged `skipped macOS application code
+signing … 0 identities found` for both arches, without failing. That is
+exactly the case the `set_if_present` `if/then` form exists for — the `&&`
+form it replaced would have killed the macOS leg at that line.
 
 The supporting pieces, each verified separately:
 
@@ -536,15 +553,13 @@ The supporting pieces, each verified separately:
 
 Still outstanding:
 
-- **A CI run.** The five repository secrets are not set yet, and no tagged
-  release has exercised the workflow. The step's logic is fixture-tested but
-  has not run against a real runner.
-- **The x64 half.** Only `dmg:arm64` was built and notarized locally;
-  `npm run dist:mac` also produces x64, which notarizes separately.
+- **A tagged release.** Both CI runs above were `workflow_dispatch`, which
+  builds and uploads artifacts but does not attach them to a Release — the
+  attach step is gated on a tag ref. Nothing about signing should differ.
 - **The runtime gate above**, on a signed build, against real hardware. A
   valid signature says the bundle is acceptable, not that Patchbay still
   works — and Hardened Runtime is designed to interfere with exactly what
   Patchbay does.
 
-Until a tagged release has done all of it, the release notes should keep
-telling macOS users to right-click -> Open.
+The release notes can stop telling macOS users to right-click -> Open once
+the runtime gate passes on a signed build; Gatekeeper no longer requires it.

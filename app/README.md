@@ -64,10 +64,10 @@ Download the installer for your platform from
 [Releases](https://github.com/lexasoft123/qc-mcp/releases) — `.dmg` on macOS
 (Apple silicon and Intel), `.exe` on Windows.
 
-Neither is signed with a paid certificate yet, so the first launch needs one
-extra step: on macOS right-click → **Open** (the bundle *is* ad-hoc signed, so
-you get "unidentified developer", not "damaged"); on Windows, **More info** →
-**Run anyway** past SmartScreen.
+The macOS `.dmg` is signed with a Developer ID certificate and notarized by
+Apple, so it opens by double-clicking with no warning and no right-click
+dance. Windows is **not** signed yet, so the `.exe` still needs
+**More info** → **Run anyway** past SmartScreen.
 
 Then press **Connect**. First run takes a couple of minutes, mostly building the
 instrumented copy; after that it is a few seconds.

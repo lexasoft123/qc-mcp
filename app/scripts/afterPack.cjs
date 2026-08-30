@@ -97,14 +97,24 @@ module.exports = async function afterPack(context) {
   trimLocales(context)
 
   if (context.electronPlatformName !== 'darwin') return
-  // Real signing configured? electron-builder already signed with the actual
-  // identity — do not clobber it with an ad-hoc signature.
-  if (process.env.CSC_LINK || process.env.CSC_NAME || process.env.CSC_KEY_PASSWORD) {
+  // Real signing configured? electron-builder signs AFTER this hook (afterPack
+  // then signApp, in platformPackager), so an ad-hoc pass here would just be
+  // ~200 MB of deep-signing thrown away moments later. CSC_KEYCHAIN is in the
+  // list because that — with a bare CSC_NAME — is how release CI hands over the
+  // identity; it deliberately never sets CSC_LINK. See docs/MACOS-SIGNING.md.
+  if (
+    process.env.CSC_LINK ||
+    process.env.CSC_NAME ||
+    process.env.CSC_KEYCHAIN ||
+    process.env.CSC_KEY_PASSWORD
+  ) {
     console.log('  • real signing identity configured — skipping ad-hoc sign')
     return
   }
-  // With identity:null electron-builder skips signing entirely, leaving the
-  // prebuilt Electron binary's original signature — which our repacked
+  // Otherwise this signature is the final one, and it has to exist. When
+  // electron-builder finds no Developer ID identity it logs "skipped macOS
+  // application code signing" and leaves the bundle alone — carrying the
+  // prebuilt Electron binary's original signature, which our repacked
   // resources invalidate. A *broken* signature plus quarantine makes macOS say
   // "app is damaged" with no right-click escape; a valid ad-hoc signature
   // downgrades that to the ordinary "unidentified developer" prompt.

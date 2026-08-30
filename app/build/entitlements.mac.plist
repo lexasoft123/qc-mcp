@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Hardened Runtime, not App Sandbox. This is the `dmg` target (direct
+	distribution + notarization), not `mas`, so com.apple.security.app-sandbox
+	and its per-resource exceptions do not apply and must not be added here by
+	analogy with an App Sandbox guide — they would sandbox an app that was
+	never built for it.
+
+	These two are what V8/Node need to keep running under Hardened Runtime.
+	Everything else Patchbay does needs no entitlement:
+
+	  - Spawning uv, clang, codesign, `open` and run-bridge.sh. Hardened
+	    Runtime constrains what gets loaded INTO this process, not what it
+	    exec()s. A child gets its own signature and its own rules, which is
+	    also why the CPython uv downloads can load unsigned wheels' .so files
+	    in the venv: that happens in the python process, not in ours.
+	  - Setting DYLD_INSERT_LIBRARIES for bridge mode. run-bridge.sh sets it
+	    for the instrumented Cortex Control copy, and it is that copy's own
+	    signature (ad-hoc, hardened runtime OFF, allow-dyld-environment-
+	    variables) that decides whether dyld honours it. Patchbay does not
+	    need allow-dyld-environment-variables — that entitlement is about
+	    DYLD_* in OUR OWN launch environment, which nothing sets.
+	  - Network access. uv downloads CPython; Hardened Runtime does not gate
+	    the network (App Sandbox does).
+
+	Deliberately NOT here: disable-library-validation. Patchbay declares no
+	runtime `dependencies` and npmRebuild is false — there is no native
+	addon loaded into the main process. Add it only if one ever appears, and
+	prefer signing that addon with the same team over weakening this.
+	-->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

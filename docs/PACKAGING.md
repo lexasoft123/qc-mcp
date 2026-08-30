@@ -98,13 +98,37 @@ install is the only defensible form. See the conventions note in
 
 ## Signing
 
-`identity: null` plus [afterPack.cjs](../app/scripts/afterPack.cjs), which
-ad-hoc signs the bundle. Repacking resources into the prebuilt Electron binary
-invalidates its signature, and a *broken* signature plus quarantine gets "app is
-damaged" with no right-click escape; a valid ad-hoc one downgrades that to the
-ordinary "unidentified developer" prompt. afterPack places uv **before** signing
-so the binary is covered. Setting `CSC_LINK` / `CSC_NAME` / `CSC_KEY_PASSWORD`
-makes electron-builder sign for real and afterPack stands down.
+Two paths, and which one you get depends only on whether a **Developer ID
+Application** certificate is reachable.
+
+**With one** (release CI, or a Mac that has the certificate in its keychain):
+electron-builder signs the bundle for real, under Hardened Runtime with
+[`build/entitlements.mac.plist`](../app/build/entitlements.mac.plist), and
+notarizes and staples it. The vendored `uv` is inside that signature —
+afterPack places it **before** signing, and the signer walks all of
+`Contents/`. In CI the certificate comes from a base64 repository
+secret. Locally it comes from a keychain you prepare from the `.p12` — *not*
+from the copy in your login keychain, which prompts for a password and fails
+as `errSecInternalComponent` if you decline. Notarization credentials come
+from the SOPS store SingZ maintains (this repo keeps none of its own) and from
+repository secrets in CI. Full detail — including why
+`CSC_LINK` is not used, and why getting the keychain's key partition list
+wrong makes several hundred `codesign` calls fail on a headless runner — is in
+[MACOS-SIGNING.md](MACOS-SIGNING.md).
+
+**Without one** (a fork, or any Mac with no certificate): electron-builder logs
+`skipped macOS application code signing` and leaves the bundle alone, and
+[afterPack.cjs](../app/scripts/afterPack.cjs)'s ad-hoc signature is the final
+one. Repacking resources into the prebuilt Electron binary invalidates its
+signature, and a *broken* signature plus quarantine gets "app is damaged" with
+no right-click escape; a valid ad-hoc one downgrades that to the ordinary
+"unidentified developer" prompt. This is what v0.1.0 shipped.
+
+Note the removal: `mac.identity` used to be `null`. That made `sign()` return
+immediately — and since notarization runs at the *end* of `sign()`, a
+`notarize: true` next to it would have been dead configuration. The key is now
+absent so electron-builder can auto-discover an identity, and its absence is
+what selects the fallback above.
 
 ## Building
 
@@ -124,7 +148,11 @@ up inside a signed bundle. Bump both together.
 (dmg, arm64 + x64) and `windows-latest` (nsis, x64):
 
 1. Run the offline Python suite. A red suite never gets packaged.
-2. `npm ci`, set the version from the tag, fetch uv (cached), build, package.
+2. `npm ci`, set the version from the tag, fetch uv (cached), build, then on
+   the macOS leg import the Developer ID certificate into a throwaway keychain
+   and hand `CSC_NAME`/`CSC_KEYCHAIN` to the Package step (see
+   [MACOS-SIGNING.md](MACOS-SIGNING.md) — absent secrets degrade to the ad-hoc
+   dmg rather than failing), package.
    macOS packages **one arch per `electron-builder` invocation**. A single
    `--mac` run builds both DMGs in parallel and each mounts its volume under
    the same title, so they collide on `/Volumes/Patchbay` and `hdiutil detach`

@@ -47,3 +47,9 @@ app/resources/uv/
 app/build/icon/patchbay-*.png
 app/build/icon/Patchbay.iconset/
 app/build/icon/ico/
+
+# Belt and braces: this repo keeps no secret store of its own (Apple
+# credentials come from SingZ's — see docs/MACOS-SIGNING.md), but a stray
+# .keys/ must never be committable. Also in .git/info/exclude, which covers
+# every worktree at once.
+.keys/

@@ -47,9 +47,38 @@ extraResources:
 
 mac:
   icon: build/icon.icns
-  # No signing certificate wired up yet — ships unsigned (right-click → Open).
-  # To sign later: drop `identity`, add CSC_LINK / CSC_KEY_PASSWORD in CI.
-  identity: null
+  # No `identity` key. Setting it to null made sign() return before doing
+  # anything — and notarizeIfProvided() is called from the END of sign(), so
+  # `notarize` below would never have run either. Absent, electron-builder
+  # auto-discovers a "Developer ID Application" identity from CI's
+  # CSC_NAME/CSC_KEYCHAIN or the local keychain; when it finds none it logs
+  # "skipped macOS application code signing" and returns false, leaving
+  # afterPack.cjs's ad-hoc signature as the final one. That is what keeps a
+  # fork, or any Mac without a Developer ID certificate, building exactly as
+  # before. See docs/MACOS-SIGNING.md.
+  #
+  # hardenedRuntime/entitlements/entitlementsInherit/notarize are flat `mac:`
+  # siblings, NOT nested under a `sign:` key. In the pinned v25, `mac.sign` is
+  # the slot for a custom sign *function* (`CustomMacSign | string | null`);
+  # the nested-object shape some docs show is a v27+ schema. A nested object
+  # here would pass through resolveFunction() untouched and then be CALLED the
+  # first time a real identity is found — i.e. exactly when this is meant to
+  # start working — so it would look fine on every machine without a
+  # certificate. Checked against the installed 25.1.8, not the online docs.
+  #
+  # hardenedRuntime is already the v25 default for non-mas mac builds
+  # (`hardenedRuntime !== false`); stated explicitly because the entitlements
+  # below only make sense with it, and a silent default is a bad thing to have
+  # notarization depend on.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  # Warns and skips (not fails) when no notarization credentials are in the
+  # environment, so `npm run dist:mac` on a machine without them is unchanged.
+  # It is only reached when signing actually happened. Reads APPLE_API_KEY /
+  # APPLE_API_KEY_ID / APPLE_API_ISSUER — see docs/MACOS-SIGNING.md, and note
+  # that a PARTIAL set of those three throws rather than skipping.
+  notarize: true
   category: public.app-category.music
   darkModeSupport: true
   target:

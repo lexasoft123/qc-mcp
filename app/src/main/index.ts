@@ -6,11 +6,24 @@ import * as cortex from './cortex.js'
 import * as install from './install.js'
 import * as logs from './logs.js'
 import * as state from './state.js'
+import { Leveling } from './leveling.js'
 import { IS_MAC } from './paths.js'
 import { findPython } from './system.js'
 
 let win: BrowserWindow | null = null
 let ticker: NodeJS.Timeout | null = null
+let leveling: Leveling | null = null
+
+/** The bench, built on first use and always pointed at the current paths. */
+function bench(): Leveling {
+  if (!leveling) {
+    leveling = new Leveling(state.getPaths())
+    leveling.onEvent((e) => emit('leveling:event', e))
+  } else {
+    leveling.setPaths(state.getPaths())
+  }
+  return leveling
+}
 
 function emit(channel: string, payload: unknown): void {
   win?.webContents.send(channel, payload)
@@ -103,6 +116,8 @@ function handlers(): void {
     return state.push()
   })
   ipcMain.handle('daemon:stop', async () => {
+    // the bench is an attached client of that session — it cannot outlive it
+    leveling?.stop()
     state.getDaemon().stop()
     return state.push()
   })
@@ -163,6 +178,20 @@ function handlers(): void {
   })
   ipcMain.handle('shell:reveal', (_e, p: string) => { shell.showItemInFolder(p) })
 
+  // ── the leveling bench ────────────────────────────────────────────────
+  ipcMain.handle('leveling:start', () => { bench().start() })
+  ipcMain.handle('leveling:stop', () => { bench().stop() })
+  ipcMain.handle('leveling:state', () => bench().state())
+  ipcMain.handle('leveling:folders', (_e, refresh?: boolean) => bench().folders(refresh))
+  ipcMain.handle('leveling:open', (_e, key: string, pos: number, factory: boolean, cloud: string) =>
+    bench().open(key, pos, factory, cloud))
+  ipcMain.handle('leveling:level', (_e, row: number, db: number) => bench().level(row, db))
+  ipcMain.handle('leveling:toggle', (_e, row: number, which: 'mute' | 'solo', on: boolean) =>
+    bench().toggle(row, which, on))
+  ipcMain.handle('leveling:scene', (_e, index: number) => bench().scene(index))
+  ipcMain.handle('leveling:save', (_e, name?: string) => bench().save(name))
+  ipcMain.handle('leveling:meter', (_e, on: boolean) => bench().meter(on))
+
   ipcMain.handle('window:isMaximized', () => Boolean(win?.isMaximized()))
   ipcMain.on('window:minimize', () => win?.minimize())
   ipcMain.on('window:maximizeToggle', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
@@ -176,8 +205,37 @@ function handlers(): void {
  * nothing left to set up and the daemon has not already failed — a daemon that
  * refused to start is not retried every two seconds until the user acts.
  */
+/** Consecutive polls that have not seen the Quad Cortex. */
+let missing = 0
+
 async function tick(): Promise<void> {
   const snap = await state.push()
+
+  /*
+   * Unplugging (or re-enumerating) the device invalidates the handle the daemon
+   * is holding. It keeps running and looking healthy while every read fails for
+   * ever, so the session has to be retired — the poll is the only thing that
+   * knows. Two consecutive misses, because one `ioreg` hiccup should not tear
+   * down a working session. Reconnecting then goes through the normal path
+   * below, or the Connect button when autoconnect is off.
+   */
+  if (snap.daemon.state === 'running') {
+    // A bridge session rides Cortex Control's own handle, so quitting the app
+    // takes the session with it — every call then fails with "inject FIFO
+    // unavailable" against a daemon that still looks healthy.
+    const bridgeLost = snap.daemon.session === 'bridge' && !snap.cortex.running
+    missing = snap.device.present && !bridgeLost ? 0 : missing + 1
+    if (missing >= 2) {
+      missing = 0
+      leveling?.stop()
+      state.getDaemon().stop()
+      await state.push()
+      return
+    }
+  } else {
+    missing = 0
+  }
+
   if (!snap.prefs.autoconnect) return
   if (!snap.device.present || snap.daemon.state !== 'stopped') return
   if (snap.daemon.error || !snap.daemon.supported) return
@@ -218,6 +276,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (ticker) clearInterval(ticker)
+  leveling?.stop()
   state.getDaemon()?.stop()
   if (state.getPrefs().quitApp) void cortex.quit()
 })

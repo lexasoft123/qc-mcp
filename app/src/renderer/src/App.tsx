@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Button, SegmentedControl, StatusDot, WindowButtons } from '@singz/ui'
 import { isMac, railText, regCount, sessionMode } from './derive.js'
-import { useSnapshot, useToast } from './store.js'
+import { useSnapshot, useToast, useUpdate } from './store.js'
 import { Gear } from './components/Icons.js'
+import { UpdateChip } from './components/Bits.js'
 import { Home } from './views/Home.js'
 import { Console } from './views/Console.js'
 import { Setup } from './views/Setup.js'
@@ -23,6 +24,7 @@ const VIEWS: { value: View; label: string }[] = [
 export function App(): React.JSX.Element {
   const snap = useSnapshot()
   const toast = useToast()
+  const update = useUpdate()
   const [view, setView] = useState<View>('home')
   const [prefs, setPrefs] = useState(false)
 
@@ -76,8 +78,9 @@ export function App(): React.JSX.Element {
           <span>{railText(snap)}</span>
         </div>
         <span className="grow" />
+        <UpdateChip update={update} />
         <span className="ver">
-          Patchbay 0.1.0 · {isMac(snap) ? 'macOS' : 'Windows'}
+          Patchbay {snap.version} · {isMac(snap) ? 'macOS' : 'Windows'}
         </span>
       </div>
 

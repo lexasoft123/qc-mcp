@@ -158,9 +158,25 @@ up inside a signed bundle. Bump both together.
    the same title, so they collide on `/Volumes/Patchbay` and `hdiutil detach`
    fails every retry. Do not merge them back into one command.
 3. Upload artifacts on every run.
-4. On a `v*` tag only, create the release and attach the dmg/exe. A hyphenated
-   tag (`v0.2.0-rc1`) is marked prerelease. `docs/release-notes/<tag>.md`, if
-   present, supplies the title (first line) and body.
+4. On a `v*` tag only, create the release and attach the dmg/exe, the
+   blockmaps, and `latest.yml`. A hyphenated tag (`v0.2.0-rc1`) is marked
+   prerelease. `docs/release-notes/<tag>.md`, if present, supplies the title
+   (first line) and body.
+
+`latest.yml` is not optional decoration: it is the feed Patchbay's in-app
+updater reads on Windows, and a release published without it leaves every
+installed Windows copy believing it is current. It exists because
+`electron-builder.yml` carries a `publish:` block — that block makes the nsis
+target write the file and packages `app-update.yml` into the app, and nothing
+in it ever uploads anything (every invocation still passes `--publish never`).
+The macOS leg contributes no such file, by design: `DmgTarget` does not set
+`isWriteUpdateInfo`, so a dmg-only build has no update metadata to publish, and
+macOS is handed the release page instead. See the Updates section of
+[../app/README.md](../app/README.md).
+
+A hyphenated prerelease tag is invisible to the updater on both platforms —
+GitHub's `latest` endpoint skips prereleases, and `electron-updater` is left on
+the default stable channel.
 
 To cut a release: commit, `git tag v0.2.0`, `git push --tags`.
 

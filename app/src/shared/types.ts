@@ -114,10 +114,14 @@ export interface Prefs {
   bench: BenchSlot[]
   /** Write each level change straight into the preset file. */
   benchAutoSave: boolean
+  /** Ask GitHub every few hours whether a newer Patchbay is out. */
+  updates: boolean
 }
 
 export interface Snapshot {
   platform: Platform
+  /** The running app version, from the updater — see its `version()`. */
+  version: string
   paths: Paths
   checks: Check[]
   clients: ClientTarget[]
@@ -218,6 +222,22 @@ export interface Progress {
   error?: string
 }
 
+/**
+ * Where the updater is, pushed on its own channel rather than folded into the
+ * Snapshot: a Windows download reports progress many times a second and the
+ * snapshot poll runs every two.
+ *
+ * `available` is macOS's terminal state — there the update is a link, not an
+ * install. See src/main/updater.ts.
+ */
+export type UpdateState =
+  | { state: 'none' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string; url: string }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'ready'; version: string }
+  | { state: 'error'; message: string }
+
 export interface Api {
   snapshot(): Promise<Snapshot>
   onSnapshot(cb: (s: Snapshot) => void): () => void
@@ -247,6 +267,18 @@ export interface Api {
 
   choosePath(what: 'repo' | 'cortex'): Promise<Snapshot>
   reveal(path: string): Promise<void>
+
+  update: {
+    /** Whatever the last check concluded, without starting a new one. */
+    state(): Promise<UpdateState>
+    /** Check now, regardless of the `updates` preference. */
+    check(): Promise<UpdateState>
+    /** Windows, `ready` only: quit and run the installer. */
+    install(): void
+    /** macOS: open the release page in the browser. */
+    download(): Promise<void>
+    onState(cb: (u: UpdateState) => void): () => void
+  }
 
   /** The preset-leveling bench. Every call rides the daemon's live session. */
   leveling: {

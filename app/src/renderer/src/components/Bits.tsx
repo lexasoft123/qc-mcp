@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { StatusDot } from '@singz/ui'
+import { Button, StatusDot } from '@singz/ui'
+import type { UpdateState } from '@shared/types'
 import { Alert } from './Icons.js'
 
 export type FactTone = '' | 'muted' | 'off'
@@ -47,4 +48,48 @@ export function Detail({ html }: { html: string }): React.JSX.Element {
       )}
     </>
   )
+}
+
+/**
+ * The rail's update affordance.
+ *
+ * Silent unless there is something to press: 'checking', 'none' and a failed
+ * check all belong in Preferences, where someone went looking. The corner of
+ * the window is for "there is a newer Patchbay", nothing else.
+ */
+export function UpdateChip({ update }: { update: UpdateState }): React.JSX.Element | null {
+  switch (update.state) {
+    case 'available':
+      return (
+        <Button
+          size="sm"
+          className="update-chip"
+          title="Opens the release page — Patchbay will not install it for you"
+          onClick={() => { void window.patchbay.update.download() }}
+        >
+          Get {update.version}
+        </Button>
+      )
+    case 'downloading':
+      return (
+        <span className="chip-tag update-chip">
+          <StatusDot tone="idle" />
+          downloading {update.percent}%
+        </span>
+      )
+    case 'ready':
+      return (
+        <Button
+          size="sm"
+          variant="primary"
+          className="update-chip"
+          title={`Quits Patchbay and installs ${update.version}`}
+          onClick={() => window.patchbay.update.install()}
+        >
+          Restart to update
+        </Button>
+      )
+    default:
+      return null
+  }
 }

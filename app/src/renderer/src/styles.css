@@ -350,6 +350,11 @@ body::after {
 .rail .sess { display: flex; align-items: center; gap: 7px; color: var(--sz-dim); min-width: 0; }
 .rail .sess span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail .ver { font-family: var(--sz-font-mono); font-size: 10px; }
+/* The rail is 42px and the kit's small pill is 26px — flex: none keeps the
+   chip from being squeezed by a long session line, which is the one thing in
+   the rail that is allowed to ellipsize. */
+.rail .update-chip { flex: none; }
+.rail span.update-chip { padding: 3px 9px 3px 7px; font-size: 10px; }
 
 /* ————————————————————————————— sheets ————— */
 

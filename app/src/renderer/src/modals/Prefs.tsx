@@ -1,10 +1,10 @@
 import { Button, Modal, ModalActions, SegmentedControl } from '@singz/ui'
-import type { Mode, Prefs as P, Snapshot } from '@shared/types'
+import type { Mode, Prefs as P, Snapshot, UpdateState } from '@shared/types'
 import { isMac } from '../derive.js'
-import { act, say } from '../store.js'
+import { act, checkForUpdates, say, useUpdate } from '../store.js'
 import { Check } from '../components/Icons.js'
 
-type Flag = 'login' | 'autoconnect' | 'quitApp' | 'verbose' | 'autoRebuild'
+type Flag = 'login' | 'autoconnect' | 'quitApp' | 'verbose' | 'autoRebuild' | 'updates'
 
 const MODES: { value: Mode; label: string }[] = [
   { value: 'auto', label: 'Auto' },
@@ -29,8 +29,23 @@ function Toggle({ on, name, desc, onToggle }: {
   )
 }
 
+/** The one place a check that found nothing — or failed — is worth saying. */
+function updateLine(u: UpdateState, mac: boolean): string {
+  switch (u.state) {
+    case 'checking': return 'checking…'
+    case 'available': return mac ? `${u.version} is out — the button opens the release page` : `${u.version} is out`
+    // progress can arrive without a preceding update-available (a resumed
+    // download), and then there is no version to name
+    case 'downloading': return u.version ? `downloading ${u.version} — ${u.percent}%` : `downloading — ${u.percent}%`
+    case 'ready': return `${u.version} is ready — restart to install it`
+    case 'error': return `last check failed: ${u.message}`
+    default: return 'up to date'
+  }
+}
+
 export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }): React.JSX.Element {
   const mac = isMac(snap)
+  const update = useUpdate()
   const p = snap.prefs
   const set = (patch: Partial<P>): void => { void act(() => window.patchbay.setPrefs(patch)) }
 
@@ -103,6 +118,40 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
           <Button size="sm" disabled={!p.verbose} onClick={() => { void window.patchbay.clearLog(); say('Frame log cleared') }}>
             Clear
           </Button>
+        </div>
+      </div>
+
+      <div className="pref-group">
+        <span className="eyebrow">Updates</span>
+        <div className="tog-list">
+          <Toggle
+            {...flag('updates')}
+            name="Check for updates automatically"
+            desc={mac
+              ? 'Asks GitHub every few hours. Nothing is installed for you — Patchbay points you at the download.'
+              : 'Asks GitHub every few hours, downloads in the background, and installs when you next quit.'}
+          />
+        </div>
+        <div className="pref-row">
+          <div className="meta">
+            <div className="n">Patchbay {snap.version}</div>
+            <div className="d">{updateLine(update, mac)}</div>
+          </div>
+          {update.state === 'available' && (
+            <Button size="sm" variant="primary" onClick={() => { void window.patchbay.update.download() }}>
+              {mac ? 'Get it' : 'Release notes'}
+            </Button>
+          )}
+          {update.state === 'ready' && (
+            <Button size="sm" variant="primary" onClick={() => window.patchbay.update.install()}>
+              Restart and install
+            </Button>
+          )}
+          {update.state !== 'available' && update.state !== 'ready' && (
+            <Button size="sm" disabled={update.state === 'checking' || update.state === 'downloading'} onClick={() => { void checkForUpdates() }}>
+              Check now
+            </Button>
+          )}
         </div>
       </div>
 

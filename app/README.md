@@ -157,6 +157,7 @@ reports its own platform and the UI follows.
 | Cortex Control module | maintained (build, verify, rebuild on drift) | observed; the daemon works with the app closed |
 | endpoint | unix socket | loopback port + a `.port` file |
 | backdrop blur | yes | **no** — a Windows iGPU pays a full-window re-raster per blurred surface, which is why the kit's own `chrome.css` already drops it from the scrim |
+| updates | checked, then you are handed the release page | downloaded in the background, installed on quit |
 
 Both paths are exercised on real hardware: the daemon, its tests and two
 concurrent attached clients have been run against a Quad Cortex on macOS and on
@@ -174,6 +175,7 @@ caution in the Console describes.
 npm install     # electron's postinstall must run — approve it if npm asks
 npm run dev     # the app, with HMR
 npm run build   # typecheck + bundle into out/
+npm test        # the updater's pure logic (node --test, no build step)
 npm run icons   # redraw build/icon.icns + .ico from build/icon/forge.html
 ```
 
@@ -191,6 +193,48 @@ npm run dist:win     # -> dist/*.exe  (nsis)
 `dist:*` fetches the pinned `uv` first. Tagging `v*` and pushing runs
 [.github/workflows/release.yml](../.github/workflows/release.yml), which gates on
 the offline Python suite, packages both platforms, and attaches the artifacts.
+
+## Updates
+
+Patchbay asks GitHub for the newest `v*` release every six hours (and three
+seconds after launch), compares it with its own version, and shows a chip in the
+rail when there is a newer one. Preferences has the switch that turns the
+automatic check off, a **Check now** button that ignores it, and the last
+result in words.
+
+What happens when you press the chip differs by platform, and the reason is
+packaging rather than trust:
+
+- **Windows** gets the real thing. `electron-updater` reads `latest.yml` off the
+  release, downloads the nsis installer in the background, and installs it the
+  next time Patchbay quits — or immediately, from *Restart to update*.
+- **macOS** gets a link to the release page. Squirrel.Mac installs from a `zip`
+  feed and this app builds `dmg` only; electron-builder does not even write a
+  `latest-mac.yml` for a dmg-only build. Giving macOS an in-place update means
+  adding a zip target and putting a third artifact through Apple's notary queue
+  on every release — worth doing, but its own piece of work.
+
+Nothing is ever installed without a press, on either platform. An unpackaged
+build never checks at all, since `app.getVersion()` there is whatever
+`package.json` says.
+
+Three environment variables exist for testing it:
+
+| variable | effect |
+|---|---|
+| `PATCHBAY_TEST_UPDATER` | check even when unpackaged, and take the GitHub path on Windows too |
+| `PATCHBAY_FAKE_VERSION` | the version to compare against, and what the rail shows |
+| `PATCHBAY_UPDATE_URL` | point `electron-updater` at a generic feed directory instead of GitHub |
+
+```bash
+PATCHBAY_TEST_UPDATER=1 PATCHBAY_FAKE_VERSION=0.0.1 npm run dev   # "Get <latest>"
+PATCHBAY_TEST_UPDATER=1 PATCHBAY_FAKE_VERSION=9.9.9 npm run dev   # "up to date"
+```
+
+`electron-updater` is the app's only runtime dependency, and it is a real one:
+it must stay unbundled so it can read the `app-update.yml` electron-builder
+packages beside it, which is why it sits in `dependencies` rather than
+`devDependencies` like everything else here.
 
 ## One caveat worth knowing
 

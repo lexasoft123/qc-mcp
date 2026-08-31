@@ -169,10 +169,14 @@ installed Windows copy believing it is current. It exists because
 `electron-builder.yml` carries a `publish:` block — that block makes the nsis
 target write the file and packages `app-update.yml` into the app, and nothing
 in it ever uploads anything (every invocation still passes `--publish never`).
-The macOS leg contributes no such file, by design: `DmgTarget` does not set
-`isWriteUpdateInfo`, so a dmg-only build has no update metadata to publish, and
-macOS is handed the release page instead. See the Updates section of
-[../app/README.md](../app/README.md).
+The macOS leg writes a `latest-mac.yml` of its own — dmg-builder's `DmgTarget`
+sets `isWriteUpdateInfo` from the blockmap it builds, so a dmg-only build does
+produce one — and the attach step globs `latest.yml` rather than `latest*.yml`
+so it stays unpublished. Two arches, two `electron-builder` invocations, one
+filename: it only ever describes whichever ran last, and publishing it would
+leave correct-looking metadata that offers an Apple Silicon user the Intel dmg
+the day macOS is wired up to electron-updater. macOS is handed the release page
+instead. See the Updates section of [../app/README.md](../app/README.md).
 
 A hyphenated prerelease tag is invisible to the updater on both platforms —
 GitHub's `latest` endpoint skips prereleases, and `electron-updater` is left on

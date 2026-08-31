@@ -8,6 +8,8 @@ import struct
 import threading
 import time
 
+from .backend import QC_VID, device_ids, not_found_error
+
 CF = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
 IOKit = ctypes.CDLL(ctypes.util.find_library("IOKit"))
 
@@ -78,14 +80,33 @@ def _cfnum(n):
     return CF.CFNumberCreate(None, kCFNumberSInt32Type, ctypes.byref(v))
 
 
+def _dev_int(dev, key):
+    """Read an integer property off an IOHIDDevice (None if it has none)."""
+    k = _cfstr(key)
+    try:
+        ref = IOKit.IOHIDDeviceGetProperty(dev, k)
+        if not ref:
+            return None
+        out = ctypes.c_int32()
+        if not CF.CFNumberGetValue(ref, kCFNumberSInt32Type, ctypes.byref(out)):
+            return None
+        return out.value
+    finally:
+        CF.CFRelease(k)
+
+
 class IOHIDTransport:
     #: IOHIDDeviceSetReport returns a benign 0xe0005000 on this device (the
     #: official app ignores it too) and the data is still sent. Anything else is
     #: a real failure — see transport.send().
     BENIGN_WRITE_CODES = frozenset({0, 0xe0005000})
 
-    def __init__(self, vid=0x152A, pid=0x880A, report_size=128, seize=False):
-        self.vid, self.pid = vid, pid
+    def __init__(self, vid=QC_VID, pid=None, report_size=128, seize=False):
+        self.vid = vid
+        #: product ids to accept - the whole family unless the caller pinned one
+        self.pids = device_ids(pid)
+        #: which one we actually opened; filled in by open()
+        self.pid = None
         self.report_size = report_size
         self.seize = seize
         self.mgr = None
@@ -100,10 +121,12 @@ class IOHIDTransport:
 
     def open(self):
         self.mgr = IOKit.IOHIDManagerCreate(None, 0)
-        keys = (VoidP * 2)(_cfstr("VendorID"), _cfstr("ProductID"))
-        vals = (VoidP * 2)(_cfnum(self.vid), _cfnum(self.pid))
+        # Match on the vendor alone and pick the product afterwards: a matching
+        # dictionary can only demand one ProductID, and the family has several.
+        keys = (VoidP * 1)(_cfstr("VendorID"))
+        vals = (VoidP * 1)(_cfnum(self.vid))
         match = CF.CFDictionaryCreate(
-            None, ctypes.cast(keys, VoidP), ctypes.cast(vals, VoidP), 2,
+            None, ctypes.cast(keys, VoidP), ctypes.cast(vals, VoidP), 1,
             ctypes.byref(kCFTypeDictionaryKeyCallBacks),
             ctypes.byref(kCFTypeDictionaryValueCallBacks))
         IOKit.IOHIDManagerSetDeviceMatching(self.mgr, match)
@@ -111,11 +134,17 @@ class IOHIDTransport:
             raise RuntimeError("IOHIDManagerOpen failed")
         devset = IOKit.IOHIDManagerCopyDevices(self.mgr)
         if not devset:
-            raise RuntimeError("no matching HID device")
+            raise RuntimeError(not_found_error(self.vid, self.pids))
         n = CF.CFSetGetCount(devset)
         arr = (VoidP * n)()
         CF.CFSetGetValues(devset, ctypes.cast(arr, VoidP))
-        self.dev = arr[0]
+        # The vendor id belongs to a USB-audio middleware house, not to Neural
+        # DSP alone, so drop anything whose product id isn't one of ours.
+        self.dev = next((d for d in (arr[i] for i in range(n))
+                         if _dev_int(d, "ProductID") in self.pids), None)
+        if not self.dev:
+            raise RuntimeError(not_found_error(self.vid, self.pids))
+        self.pid = _dev_int(self.dev, "ProductID")
         opts = kIOHIDOptionsTypeSeizeDevice if self.seize else kIOHIDOptionsTypeNone
         r = IOKit.IOHIDDeviceOpen(self.dev, opts)
         if r != 0:

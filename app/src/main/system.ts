@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import type { CortexInfo, DeviceInfo, InstrumentedInfo, Paths } from '../shared/types.js'
-import { IS_MAC, QC_PID, QC_VID, UV_PYTHON, instrumentedApp, uvBin } from './paths.js'
+import { IS_MAC, QC_PIDS, QC_VID, UV_PYTHON, instrumentedApp, uvBin } from './paths.js'
 import { exists, ps, run } from './util.js'
 
 // ── python ──────────────────────────────────────────────────────────────
@@ -129,27 +129,41 @@ export async function readCortex(paths: Paths): Promise<CortexInfo> {
  * or Cortex Control may hold it, and probing would fight them for the handle.
  */
 export async function readDevice(deep = true): Promise<DeviceInfo> {
+  const absent: DeviceInfo = { present: false, model: null, serial: null, firmware: null }
+  const hex = (n: number): string => n.toString(16).toUpperCase().padStart(4, '0')
+  const pids = Object.keys(QC_PIDS).map(Number)
+
   if (IS_MAC) {
     if (!deep) {
       // The device tree WITHOUT -l is a few hundred bytes; -l dumps every
-      // property of every USB node and is far too heavy to poll.
+      // property of every USB node and is far too heavy to poll. Every model
+      // in the family is named "Quad Cortex ..." in the tree.
       const t = await run('ioreg', ['-p', 'IOUSB', '-w0'], { timeout: 5000 })
-      return { present: /\bQuad Cortex\b/.test(t.out), serial: null, firmware: null }
+      return { ...absent, present: /\bQuad Cortex\b/.test(t.out) }
     }
     const r = await run('ioreg', ['-p', 'IOUSB', '-l', '-w0'], { timeout: 8000 })
-    const present = r.out.includes(`"idVendor" = ${QC_VID}`) && r.out.includes(`"idProduct" = ${QC_PID}`)
-    if (!present) return { present: false, serial: null, firmware: null }
-    const idx = r.out.indexOf(`"idProduct" = ${QC_PID}`)
+    if (!r.out.includes(`"idVendor" = ${QC_VID}`)) return absent
+    // ioreg prints the ids in decimal; take whichever model is actually there.
+    const pid = pids.find((p) => r.out.includes(`"idProduct" = ${p}`))
+    if (pid === undefined) return absent
+    const idx = r.out.indexOf(`"idProduct" = ${pid}`)
     const serial = r.out.slice(Math.max(0, idx - 4000), idx + 4000)
       .match(/"USB Serial Number" = "([^"]+)"/)?.[1] ?? null
-    return { present: true, serial, firmware: null }
+    return { present: true, model: QC_PIDS[pid], serial, firmware: null }
   }
-  const hex = (n: number): string => n.toString(16).toUpperCase().padStart(4, '0')
+
+  const filter = pids.map((p) => `$_.InstanceId -like '*VID_${hex(QC_VID)}&PID_${hex(p)}*'`).join(' -or ')
   const id = await ps(
     `(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | ` +
-    `Where-Object { $_.InstanceId -like '*VID_${hex(QC_VID)}&PID_${hex(QC_PID)}*' } | ` +
+    `Where-Object { ${filter} } | ` +
     `Select-Object -First 1 -ExpandProperty InstanceId)`
   )
-  if (!id) return { present: false, serial: null, firmware: null }
-  return { present: true, serial: id.split('\\').pop() ?? null, firmware: null }
+  if (!id) return absent
+  const pid = pids.find((p) => id.toUpperCase().includes(`PID_${hex(p)}`))
+  return {
+    present: true,
+    model: pid === undefined ? null : QC_PIDS[pid],
+    serial: id.split('\\').pop() ?? null,
+    firmware: null
+  }
 }

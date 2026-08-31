@@ -76,7 +76,13 @@ QuadCortex(share=True)      # open_hid(seize=False)
 ```
 
 `connect(mode='bridge')` does this for you, starting the stock app first if it
-isn't running. Verified with the app running: `CorOS 4.1.0`, live
+isn't running. The daemon's `auto` takes the same non-exclusive handle **whether
+or not Cortex Control is up**: a handle already held exclusively can never be
+shared afterwards, so seizing first would lock the app out for the rest of the
+session — start the daemon, and Cortex Control opens to "no device" until you
+disconnect. Sharing costs nothing while the app is shut (our own reads and
+writes are byte-identical either way), so `direct` is the explicit way to ask
+for exclusivity, worth it for heavy multi-report work like building presets. Verified with the app running: `CorOS 4.1.0`, live
 preset/position/mode reads, and a **write** — amp VOLUME 6.0 → 4.0, read back
 4.0, then restored — with Cortex Control alive throughout. Control, not just
 eavesdropping.
@@ -226,6 +232,9 @@ CorOS 4.1.0 | schema 4.1 | type QC | name 'QC MAX'
 
 - The device presents **one** HID collection with 129-byte reports,
   `HID\VID_152A&PID_880A&MI_05` — interface 5, matching PROTOCOL.md §1.
+  A Quad Cortex Mini is `PID_892F` on the same interface with the same
+  129-byte reports; `backend.QC_PIDS` holds the family and both transports
+  match all of it.
 - All four offline suites pass (6/6, 6/6, 5/5, 10/10).
 - Reads verified identical to macOS: `get_current_preset` (4 chains, 11 blocks,
   stomp assignment), `get_mode`, `current_preset_position`, `get_tempo`,

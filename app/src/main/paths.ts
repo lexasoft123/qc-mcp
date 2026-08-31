@@ -124,9 +124,16 @@ export const bridgeScript = (repo: string): string => join(repo, 'interceptor', 
  */
 export const BRIDGE_FIFOS = ['/tmp/qc_inject', '/tmp/qc_in']
 
-/** The device, as the transport already knows it (iohid.py: vid 0x152A, pid 0x880A). */
+/**
+ * The device, as the transports already know it (`backend.py`: QC_VID/QC_PIDS).
+ * Every model speaks the same protocol; only the USB product id differs, so
+ * match the whole family - a Quad Cortex Mini is not "no device found".
+ */
 export const QC_VID = 0x152a
-export const QC_PID = 0x880a
+export const QC_PIDS: Record<number, string> = {
+  0x880a: 'Quad Cortex',
+  0x892f: 'Quad Cortex Mini'
+}
 
 /**
  * The bundled `uv`, or null when this build has none.

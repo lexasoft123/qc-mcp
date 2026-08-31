@@ -16,6 +16,10 @@ with Neural DSP.
 
 - Device: **Neural DSP Quad Cortex**, USB `VID 0x152A` / `PID 0x880A`, composite
   (class 0xEF/IAD): USB-audio interfaces + a **HID interface** (interface 5).
+- Model family: the **Quad Cortex Mini** is `PID 0x892F` (`Version.device_type
+  ATMA`, vs `QC`) and is otherwise identical — same interface 5, same 128-byte
+  reports, same schema. Match the product ids as a set (`backend.QC_PIDS`);
+  hardcoding `0x880A` makes a plugged-in Mini look like no device at all.
 - Control is **not** MIDI, not raw bulk. Cortex Control links `IOKit` and uses the
   **IOHIDManager** API (`IOHIDDeviceSetReport` for host→device, an input-report
   callback for device→host). We replicate this via ctypes in `iohid.py`, and the

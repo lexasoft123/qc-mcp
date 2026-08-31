@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-VID, PID = 0x152A, 0x880A
+from qc_mcp.backend import QC_PIDS, QC_VID, device_ids, device_name  # noqa: E402
 
 
 def main():
@@ -25,8 +25,11 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--list", action="store_true",
                     help="list every HID interface, don't open the device")
-    ap.add_argument("--vid", type=lambda x: int(x, 0), default=VID)
-    ap.add_argument("--pid", type=lambda x: int(x, 0), default=PID)
+    ap.add_argument("--vid", type=lambda x: int(x, 0), default=QC_VID)
+    ap.add_argument("--pid", type=lambda x: int(x, 0), default=None,
+                    help="pin one product id; by default every model in the "
+                         "family matches (%s)"
+                         % ", ".join(f"{p:#06x} {n}" for p, n in QC_PIDS.items()))
     args = ap.parse_args()
 
     if sys.platform != "win32":
@@ -36,9 +39,11 @@ def main():
 
     from qc_mcp import winhid
 
-    print(f"== HID interfaces matching {args.vid:#06x}:{args.pid:#06x} ==")
+    pids = device_ids(args.pid)
+    ids = "/".join(f"{p:#06x}" for p in pids)
+    print(f"== HID interfaces matching {args.vid:#06x}:{ids} ==")
     try:
-        found = winhid.enumerate_devices(args.vid, args.pid)
+        found = winhid.enumerate_devices(args.vid, pids)
     except OSError as e:
         print(f"  enumeration failed: {e}")
         return 3
@@ -73,6 +78,7 @@ def main():
 
     print("\n== opening exclusively ==")
     io = winhid.WinHIDTransport(vid=args.vid, pid=args.pid, seize=True)
+    # (pid=None keeps the whole family; the transport reports what it opened)
     try:
         io.open()
     except RuntimeError as e:
@@ -80,8 +86,8 @@ def main():
         print("\nIf Cortex Control is running, quit it (direct mode needs the device\n"
               "to itself - Windows has no bridge mode) and run this again.")
         return 4
-    print(f"  ok: {io.path}\n     exclusive={io.exclusive} "
-          f"in={io._in_len} out={io._out_len}")
+    print(f"  ok: {device_name(io.pid)} ({io.pid:#06x})\n     {io.path}\n"
+          f"     exclusive={io.exclusive} in={io._in_len} out={io._out_len}")
     io.close()
 
     print("\n== protocol round-trip ==")

@@ -36,7 +36,15 @@ function create(): void {
     minWidth: 720,
     minHeight: 520,
     show: false,
-    backgroundColor: '#12100d',
+    // macOS gets an opaque ground under its native frame. Windows is frameless
+    // and the KIT draws the window shape itself (`body.win .app`: 12px radius +
+    // a 1px rim, squared again when maximized), so the window has to be
+    // transparent for those corners to exist at all - an opaque backgroundColor
+    // paints square corners straight over them, which is what shipped. Windows
+    // 11 rounds frameless windows itself via DWM; Windows 10 does not, so
+    // without this the 12px is invisible there.
+    backgroundColor: IS_MAC ? '#12100d' : '#00000000',
+    transparent: !IS_MAC,
     // frameless with the traffic lights inset, so the kit's .titlebar can own
     // the top strip and stay draggable
     titleBarStyle: IS_MAC ? 'hiddenInset' : 'hidden',
@@ -144,10 +152,6 @@ function handlers(): void {
   })
   ipcMain.handle('cortex:quit', async () => {
     await cortex.quit()
-    return state.push()
-  })
-  ipcMain.handle('cortex:focus', async () => {
-    await cortex.focus(state.getPaths())
     return state.push()
   })
   ipcMain.handle('cortex:rebuild', async () => {

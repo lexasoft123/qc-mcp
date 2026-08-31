@@ -5,7 +5,8 @@ import usb.core
 import usb.util
 import usb.backend.libusb1
 
-VID, PID = 0x152A, 0x880A
+# 0x880A Quad Cortex, 0x892F Quad Cortex Mini - same protocol
+VID, PIDS = 0x152A, (0x880A, 0x892F)
 BACKEND = usb.backend.libusb1.get_backend(
     find_library=lambda x: "/opt/homebrew/lib/libusb-1.0.dylib"
 )
@@ -25,7 +26,8 @@ def ep_type(attr):
 
 
 def main():
-    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=BACKEND)
+    dev = next((d for d in (usb.core.find(idVendor=VID, idProduct=pid, backend=BACKEND)
+                      for pid in PIDS) if d), None)
     if dev is None:
         print("Quad Cortex NOT found on USB.")
         return

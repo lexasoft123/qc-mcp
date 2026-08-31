@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@singz/ui'
 import type { Snapshot } from '@shared/types'
 import { isLinked, isMac, setupPending } from '../derive.js'
-import { publish, say, useProgress } from '../store.js'
+import { act, publish, say, useProgress } from '../store.js'
 import { SignalPath } from '../components/SignalPath.js'
 import { Strip } from '../components/Bits.js'
 
@@ -72,7 +72,15 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
     lede = 'Ask Claude for a tone and it will build it on the Quad Cortex.'
     label = 'Disconnect'
     action = 'disconnect'
-    second = ['Show Cortex Control', () => { void window.patchbay.cortexFocus() }]
+    // Same handler as the Console page's Launch button. The old `cortexFocus`
+    // was `open -a` behind an IS_MAC guard, so on Windows this button did
+    // nothing at all — and focus has no Windows equivalent worth inventing.
+    second = [
+      snap.cortex.running ? 'Quit Cortex Control' : 'Open Cortex Control',
+      () => {
+        void act(() => (snap.cortex.running ? window.patchbay.cortexQuit() : window.patchbay.cortexLaunch()))
+      }
+    ]
   }
 
   const press = async (): Promise<void> => {

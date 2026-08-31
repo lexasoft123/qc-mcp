@@ -70,6 +70,3 @@ export async function quit(): Promise<void> {
 }
 
 /** Bring the running app forward without touching its session. */
-export async function focus(paths: Paths): Promise<void> {
-  if (IS_MAC) await run('open', ['-a', paths.cortex], { timeout: 5000 })
-}

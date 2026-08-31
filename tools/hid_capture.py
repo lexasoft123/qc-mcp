@@ -6,13 +6,22 @@ import os, sys, time
 os.environ.setdefault('DYLD_FALLBACK_LIBRARY_PATH', '/opt/homebrew/lib')
 import hid
 
-VID, PID = 0x152A, 0x880A
+# 0x880A Quad Cortex, 0x892F Quad Cortex Mini - same protocol
+VID, PIDS = 0x152A, (0x880A, 0x892F)
 DUR = float(sys.argv[1]) if len(sys.argv) > 1 else 12.0
 OUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/qc_hid_cap.bin"
 
 
 def main():
-    d = hid.Device(VID, PID)
+    for pid in PIDS:
+        try:
+            d = hid.Device(VID, pid)
+            break
+        except Exception:
+            continue
+    else:
+        raise SystemExit(f"no Quad Cortex on USB (looked for {VID:#06x}:"
+                         + "/".join(f"{p:#06x}" for p in PIDS) + ")")
     try:
         print("manufacturer:", d.manufacturer)
         print("product:", d.product)

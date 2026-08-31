@@ -83,6 +83,12 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
 - `e2e_test.py` — prompt → built chain → assert. `test_fender_scenes.py` — scenes demo.
 
 ## Gotchas (bite you if forgotten)
+- **The Quad Cortex Mini is a second USB product id** (`0x892F`; the full QC is
+  `0x880A`) on the same VID, same HID interface 5, same 129-byte reports, same
+  protobuf schema — it just reports `Version.device_type` `ATMA` instead of `QC`.
+  `backend.QC_PIDS` is the one list of the family; both transports and the app
+  match all of it. Never hardcode a single pid — that is what made a plugged-in
+  Mini show "No Quad Cortex found on USB". Verified on Win10 + CorOS 4.0.1.
 - **Read vs delta indexing**: in a full read, array *position* is the index; the id/
   column/index *fields* are 0. In edits, set the fields. `apply_spec` uses position.
 - **Grid whole-preset UPDATE merges** (doesn't replace) — build incrementally / clear first.
@@ -193,6 +199,13 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   `FILE_SHARE_READ|WRITE`. Only `tools/gui/` is still macOS-only. Don't add a
   `sys.platform` test in the tools — ask `backend.bridge_supported()` /
   `direct_supported()` so there's one place to change.
+- **On Windows `auto` ALWAYS takes a non-exclusive handle**, even with Cortex
+  Control shut — an exclusively-held HID handle can never be shared later, so
+  seizing first locks the app out for the whole session (that is exactly how
+  "Cortex Control does not see the QC while the MCP is connected" happens). The
+  old gate — share only if the app is ALREADY running — was a macOS-shaped
+  precondition: there the app owns a session we can only ride, so it must exist
+  first. `direct` stays the explicit way to seize.
 - **Shared mode has two independent writers on one endpoint.** Single-report
   messages are atomic (~97% of the app's traffic), multi-report ones can
   interleave — `connect()` returns a `caution` saying so. Build/save presets in

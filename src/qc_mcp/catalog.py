@@ -62,16 +62,39 @@ def load_from_bytes(model_repo_payload):
 # level/dB/percent params are linear. Heuristic split: min>0 and max/min>=5 => log.
 LOG_TAPER = 1.667
 
+# Some ranges in ModelRepo.xml are symbolic names the app resolves from a table
+# compiled into its binary, so the XML alone cannot convert those parameters to
+# a display value. Each entry here is CALIBRATED against Cortex Control — read a
+# stored normalized value, read the dB the app shows for it, solve the line — so
+# only add a name once it has actually been measured. An unresolved name still
+# falls through to "no conversion", exactly as before.
+#
+#   MIXER  LaneOutputControl(23000) VOLUME and the merge Mixer(11000) levels.
+#          Measured: 0.5 -> -14.0 dB and the untouched default 0.769230783 -> 0 dB
+#          on two lanes, which fits -40..+12 dB linear exactly (-40/52 = 10/13).
+SYMBOLIC = {
+    "MIN_MIXER_DB": -40.0,
+    "MAX_MIXER_DB": 12.0,
+}
+
+
+def _bound(v):
+    """A parameter bound as a float: a literal, a calibrated symbolic name, or None."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return SYMBOLIC.get(v)
+
 
 def _prange(block_hash, param_index):
     m = lookup(block_hash)
     if not m or param_index >= len(m["params"]):
         return None
     p = m["params"][param_index]
-    try:
-        return float(p["min"]), float(p["max"])
-    except (TypeError, ValueError):
+    lo, hi = _bound(p["min"]), _bound(p["max"])
+    if lo is None or hi is None:
         return None
+    return lo, hi
 
 
 def _is_log(lo, hi):

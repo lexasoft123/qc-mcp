@@ -60,6 +60,12 @@ function create(): void {
   })
 
   win.on('ready-to-show', () => win?.show())
+  // `emit` guards on null, which only helps if something nulls it. On macOS
+  // `window-all-closed` deliberately does not quit, so without this `win` keeps
+  // pointing at a DESTROYED window and `win?.webContents` throws — optional
+  // chaining does not catch that. Harmless while every emit() came from a
+  // renderer call, fatal once the updater started pushing on a timer.
+  win.on('closed', () => { win = null })
   // The renderer squares the window's corners off when this is true. Aero Snap
   // never fires 'maximize', but a snapped window is just as flush against the
   // work area — and now that the window is transparent, leaving it rounded shows

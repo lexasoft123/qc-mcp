@@ -34,7 +34,9 @@ function updateLine(u: UpdateState, mac: boolean): string {
   switch (u.state) {
     case 'checking': return 'checking…'
     case 'available': return mac ? `${u.version} is out — the button opens the release page` : `${u.version} is out`
-    case 'downloading': return `downloading ${u.version} — ${u.percent}%`
+    // progress can arrive without a preceding update-available (a resumed
+    // download), and then there is no version to name
+    case 'downloading': return u.version ? `downloading ${u.version} — ${u.percent}%` : `downloading — ${u.percent}%`
     case 'ready': return `${u.version} is ready — restart to install it`
     case 'error': return `last check failed: ${u.message}`
     default: return 'up to date'

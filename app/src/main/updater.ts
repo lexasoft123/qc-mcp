@@ -1,6 +1,7 @@
 import { app, net, shell } from 'electron'
 import electronUpdater from 'electron-updater'
 import type { UpdateState } from '../shared/types.js'
+import { newer, reason, safeUrl } from './update-rules.js'
 
 /**
  * Releases are cut from the qc-mcp repository — Patchbay is packaged out of it
@@ -19,6 +20,8 @@ const TIMEOUT_MS = 15_000
 let current: UpdateState = { state: 'none' }
 let notify: (s: UpdateState) => void = () => {}
 let timer: NodeJS.Timeout | null = null
+/** The one-shot check after launch. Tracked so `stop()` can actually cancel it. */
+let firstCheck: NodeJS.Timeout | null = null
 
 function set(s: UpdateState): void {
   current = s
@@ -27,71 +30,21 @@ function set(s: UpdateState): void {
 
 export const state = (): UpdateState => current
 
-/** The running version — what the rail shows and what a tag is compared against. */
+/** Forget the last result — what turning the `updates` preference off means. */
+export function clear(): void {
+  set({ state: 'none' })
+}
+
+/**
+ * The running version — what the rail shows and what a tag is compared against.
+ *
+ * `||`, not `??`: a wrapper script that always exports PATCHBAY_FAKE_VERSION
+ * hands us an empty string, and `??` would keep it. The rail would then read
+ * "Patchbay  · macOS" and `newer(tag, '')` would parse to 0.0.0, making every
+ * release look like an update for ever.
+ */
 export function version(): string {
-  return process.env.PATCHBAY_FAKE_VERSION ?? app.getVersion()
-}
-
-// ── version comparison ──────────────────────────────────────────────────
-
-function parse(tag: string): { nums: number[]; pre: string } {
-  const v = tag.replace(/^v/, '').split('+')[0]
-  const dash = v.indexOf('-')
-  const core = dash === -1 ? v : v.slice(0, dash)
-  const nums = core.split('.').map((n) => parseInt(n, 10) || 0)
-  return { nums: [nums[0] ?? 0, nums[1] ?? 0, nums[2] ?? 0], pre: dash === -1 ? '' : v.slice(dash + 1) }
-}
-
-/**
- * Is `tag` a newer release than `base`?
- *
- * major.minor.patch numerically, then semver's rule that a prerelease sorts
- * BELOW its own release. That last clause is the whole reason this is not a
- * three-element loop: `parseInt('0-rc1')` is 0, so 0.2.0-rc1 and 0.2.0 compare
- * equal on the numbers alone and someone running a release candidate would
- * never be told the final shipped. Two prereleases are never compared — GitHub's
- * `latest` skips them, so a prerelease only ever appears as `base`.
- */
-function newer(tag: string, base: string): boolean {
-  const a = parse(tag)
-  const b = parse(base)
-  for (let i = 0; i < 3; i++) {
-    if (a.nums[i] !== b.nums[i]) return a.nums[i] > b.nums[i]
-  }
-  return !a.pre && b.pre !== ''
-}
-
-/**
- * One readable line out of whatever threw.
- *
- * Measured, not guessed: when the newest release carries no latest.yml — every
- * release cut before the updater existed, and any release where the upload is
- * missed — electron-updater's 404 arrives as ~2 KB. The URL, then GitHub's full
- * response headers, then a stack trace through the asar. Put verbatim into a
- * Preferences row that is a wall of text, so this keeps the first line (which
- * is the part that says what went wrong) and caps it.
- */
-function reason(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err)
-  const line = raw.split('\n')[0].trim()
-  if (!line) return 'check failed'
-  return line.length > 160 ? line.slice(0, 159) + '…' : line
-}
-
-/**
- * A release URL is a value read off the network, and it ends up in
- * `shell.openExternal` — which will happily launch a `file:` or custom-scheme
- * handler. Only GitHub over https survives; anything else falls back to the
- * releases page we composed ourselves.
- */
-function safeUrl(raw: string | undefined): string {
-  try {
-    const u = new URL(raw ?? '')
-    const ok = u.protocol === 'https:' && (u.hostname === 'github.com' || u.hostname.endsWith('.github.com'))
-    return ok ? u.toString() : RELEASES_PAGE
-  } catch {
-    return RELEASES_PAGE
-  }
+  return process.env.PATCHBAY_FAKE_VERSION || app.getVersion()
 }
 
 // ── macOS: check, and offer the download ────────────────────────────────
@@ -107,12 +60,19 @@ function safeUrl(raw: string | undefined): string {
  * every release, per arch — its own piece of work, not a flag to flip here.
  * Until then `available` is macOS's terminal state and the button opens the
  * release page.
+ *
+ * The outcome is kept in a local and returned, rather than read back off
+ * `current`: two checks can overlap (the six-hourly tick and a Check now
+ * press), and the shared field hands each caller whichever finished last.
  */
 async function checkViaGithub(): Promise<UpdateState> {
-  set({ state: 'checking' })
   const ctrl = new AbortController()
   const kill = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
+  let result: UpdateState = { state: 'none' }
   try {
+    // Inside the try: `set` pushes to the renderer, and a push into a window
+    // that is going away throws — which must not escape as a rejected check.
+    set({ state: 'checking' })
     const res = await net.fetch(LATEST_API, {
       headers: { Accept: 'application/vnd.github+json' },
       signal: ctrl.signal
@@ -121,16 +81,15 @@ async function checkViaGithub(): Promise<UpdateState> {
     const rel = (await res.json()) as { tag_name?: string; html_url?: string }
     const tag = rel.tag_name ?? ''
     if (tag && newer(tag, version())) {
-      set({ state: 'available', version: tag.replace(/^v/, ''), url: safeUrl(rel.html_url) })
-    } else {
-      set({ state: 'none' })
+      result = { state: 'available', version: tag.replace(/^v/, ''), url: safeUrl(rel.html_url, RELEASES_PAGE) }
     }
   } catch (err) {
-    set({ state: 'error', message: reason(err) })
+    result = { state: 'error', message: reason(err) }
   } finally {
     clearTimeout(kill)
   }
-  return current
+  set(result)
+  return result
 }
 
 // ── Windows: the full electron-updater flow ─────────────────────────────
@@ -172,6 +131,9 @@ function checkViaElectronUpdater(): void {
 const useElectronUpdater = (): boolean =>
   process.platform === 'win32' && !process.env.PATCHBAY_TEST_UPDATER
 
+/** Overlapping GitHub checks share one request, the way state.push() does. */
+let inflight: Promise<UpdateState> | null = null
+
 /**
  * Check now, whatever the preference says.
  *
@@ -188,7 +150,10 @@ export async function check(): Promise<UpdateState> {
     checkViaElectronUpdater()
     return current
   }
-  return checkViaGithub()
+  if (inflight) return inflight
+  const run = checkViaGithub().finally(() => { if (inflight === run) inflight = null })
+  inflight = run
+  return run
 }
 
 export function install(): void {
@@ -213,12 +178,24 @@ export function start(onState: (s: UpdateState) => void, enabled: () => boolean)
   notify = onState
   const testMode = Boolean(process.env.PATCHBAY_TEST_UPDATER)
   if (!app.isPackaged && !testMode) return
-  const tick = (): void => { if (enabled()) void check() }
-  setTimeout(tick, 3000)
+  const tick = (): void => {
+    // A downloaded update is worth more than a fresh answer: re-checking resets
+    // the state to 'checking', which takes "Restart to update" out of the rail,
+    // and a check that then fails strands an installer already on disk —
+    // electron-updater will not re-emit update-downloaded for a cached one.
+    if (current.state === 'ready' || current.state === 'downloading') return
+    if (!enabled()) return
+    // Nothing here can be recovered from, but an unhandled rejection is fatal:
+    // Electron 33 runs Node 20, where the default is to throw.
+    void check().catch(() => {})
+  }
+  firstCheck = setTimeout(tick, 3000)
   timer = setInterval(tick, CHECK_EVERY_MS)
 }
 
 export function stop(): void {
+  if (firstCheck) clearTimeout(firstCheck)
   if (timer) clearInterval(timer)
+  firstCheck = null
   timer = null
 }

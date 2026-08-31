@@ -11,9 +11,10 @@
     "build": "npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist": "npm run fetch:uv && npm run build && electron-builder",
-    "dist:mac": "npm run fetch:uv && npm run build && electron-builder --mac dmg:arm64 && electron-builder --mac dmg:x64",
-    "dist:win": "npm run fetch:uv && npm run build && electron-builder --win",
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "dist": "npm run fetch:uv && npm run build && electron-builder --publish never",
+    "dist:mac": "npm run fetch:uv && npm run build && electron-builder --mac dmg:arm64 --publish never && electron-builder --mac dmg:x64 --publish never",
+    "dist:win": "npm run fetch:uv && npm run build && electron-builder --win --publish never",
     "fetch:uv": "node scripts/fetch-uv.mjs",
     "icons": "electron build/icon/build-icons.cjs"
   },

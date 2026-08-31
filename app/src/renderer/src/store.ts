@@ -97,7 +97,12 @@ export const useUpdate = (): UpdateState =>
     () => update
   )
 
-/** Check now. Windows answers through the push, so only macOS resolves usefully. */
+/**
+ * Check now. The reply is deliberately dropped: every outcome — including this
+ * one's — arrives on the push channel, and on Windows the reply is only the
+ * transient 'checking' snapshot, which would clobber a result that already
+ * landed and leave the row stuck on "checking…" with the button disabled.
+ */
 export async function checkForUpdates(): Promise<void> {
-  setUpdate(await window.patchbay.update.check())
+  await window.patchbay.update.check()
 }

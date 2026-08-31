@@ -175,6 +175,7 @@ caution in the Console describes.
 npm install     # electron's postinstall must run — approve it if npm asks
 npm run dev     # the app, with HMR
 npm run build   # typecheck + bundle into out/
+npm test        # the updater's pure logic (node --test, no build step)
 npm run icons   # redraw build/icon.icns + .ico from build/icon/forge.html
 ```
 

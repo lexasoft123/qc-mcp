@@ -92,4 +92,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
       - run: npm run typecheck
+      # The updater's version comparison and its URL guard are pure functions
+      # with real edge cases; typecheck and build say nothing about either.
+      - run: npm test
       - run: npm run build

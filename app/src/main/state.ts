@@ -6,7 +6,7 @@ import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
 import { IS_MAC, PLATFORM, QC_PIDS, QC_VID, findRepo, pathsFor } from './paths.js'
 import { cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
-import { version } from './updater.js'
+import { clear as clearUpdate, version } from './updater.js'
 import { exists } from './util.js'
 
 /** 0x880a — how the checklist prints a USB id. */
@@ -182,6 +182,9 @@ export function updatePrefs(patch: Partial<Prefs>): void {
   prefs = { ...prefs, ...patch }
   prefsStore.save(prefs)
   if (patch.mode) daemon.setMode(patch.mode)
+  // The preference promises to silence the rail chip, not merely to stop future
+  // checks — a cached 'available' would otherwise sit there for the session.
+  if (patch.updates === false) clearUpdate()
   // a new repo or app location invalidates everything cached about them
   if (patch.repo !== undefined || patch.cortex !== undefined) slow = null
 }

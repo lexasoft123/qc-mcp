@@ -59,6 +59,16 @@ export async function waitForBridge(repo: string, timeoutMs = 45000): Promise<bo
   return false
 }
 
+/**
+ * Bring a RUNNING Cortex Control to the front. macOS only, and deliberately so:
+ * quitting it there would kill the app whose session bridge mode rides, so the
+ * launcher offers this instead. Windows has no session to protect and offers
+ * quit, like the Console page does.
+ */
+export async function focus(paths: Paths): Promise<void> {
+  if (IS_MAC) await run('open', ['-a', paths.cortex], { timeout: 5000 })
+}
+
 export async function quit(): Promise<void> {
   if (IS_MAC) {
     await run('osascript', ['-e', 'quit app "Cortex Control"'], { timeout: 10000 })
@@ -70,6 +80,3 @@ export async function quit(): Promise<void> {
 }
 
 /** Bring the running app forward without touching its session. */
-export async function focus(paths: Paths): Promise<void> {
-  if (IS_MAC) await run('open', ['-a', paths.cortex], { timeout: 5000 })
-}

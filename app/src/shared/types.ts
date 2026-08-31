@@ -78,6 +78,8 @@ export interface DaemonInfo {
 
 export interface DeviceInfo {
   present: boolean
+  /** which model answered - 'Quad Cortex' / 'Quad Cortex Mini' */
+  model: string | null
   serial: string | null
   firmware: string | null
 }
@@ -231,9 +233,9 @@ export interface Api {
   setMode(mode: Mode): Promise<Snapshot>
 
   cortexLaunch(): Promise<Snapshot>
+  cortexFocus(): Promise<Snapshot>
   cortexQuit(): Promise<Snapshot>
   /** Bring a running Cortex Control forward WITHOUT relaunching it. */
-  cortexFocus(): Promise<Snapshot>
   cortexRebuild(): Promise<Snapshot>
 
   readLog(limit: number): Promise<LogLine[]>

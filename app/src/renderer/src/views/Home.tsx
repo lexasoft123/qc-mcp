@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Button } from '@singz/ui'
 import type { Snapshot } from '@shared/types'
-import { isLinked, isMac, setupPending } from '../derive.js'
-import { publish, say, useProgress } from '../store.js'
+import { isLinked, isMac, setupPending, sharedWriters } from '../derive.js'
+import { act, publish, say, useProgress } from '../store.js'
 import { SignalPath } from '../components/SignalPath.js'
 import { Strip } from '../components/Bits.js'
 
@@ -72,7 +72,17 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
     lede = 'Ask Claude for a tone and it will build it on the Quad Cortex.'
     label = 'Disconnect'
     action = 'disconnect'
-    second = ['Show Cortex Control', () => { void window.patchbay.cortexFocus() }]
+    // Launch/quit like the Console page's button, which is what makes this work
+    // on Windows at all — `cortexFocus` was `open -a` behind an IS_MAC guard, so
+    // the button did nothing there. But NOT quit on macOS: this branch is only
+    // reached with the app running, and in bridge mode the daemon rides that
+    // app's session, so quitting would silently drop the connection we just told
+    // the user they had. Raise it instead.
+    second = !snap.cortex.running
+      ? ['Open Cortex Control', () => { void act(() => window.patchbay.cortexLaunch()) }]
+      : mac
+        ? ['Show Cortex Control', () => { void act(() => window.patchbay.cortexFocus()) }]
+        : ['Quit Cortex Control', () => { void act(() => window.patchbay.cortexQuit()) }]
   }
 
   const press = async (): Promise<void> => {
@@ -120,7 +130,7 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
         </div>
 
         <div className="home-warn">
-          {!busy && !mac && linked && snap.cortex.running && (
+          {!busy && sharedWriters(snap) && (
             <Strip>
               <span className="grow">
                 Cortex Control is open too. Both are writing to the same device — fine for ordinary

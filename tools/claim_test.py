@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Test claiming interface 4 (bulk 0x04 OUT / 0x84 IN) and passively reading
 any frames the QC pushes. Read-only: sends nothing."""
+import os
 import sys
 import usb.core
 import usb.util
 import usb.backend.libusb1
 
-VID, PID = 0x152A, 0x880A
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from qc_mcp.backend import QC_PIDS, QC_VID  # noqa: E402
+
+#: the model family, from the one list that defines it
+VID, PIDS = QC_VID, tuple(QC_PIDS)
 IFACE, EP_OUT, EP_IN = 4, 0x04, 0x84
 BACKEND = usb.backend.libusb1.get_backend(
     find_library=lambda x: "/opt/homebrew/lib/libusb-1.0.dylib"
@@ -14,7 +19,8 @@ BACKEND = usb.backend.libusb1.get_backend(
 
 
 def main():
-    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=BACKEND)
+    dev = next((d for d in (usb.core.find(idVendor=VID, idProduct=pid, backend=BACKEND)
+                      for pid in PIDS) if d), None)
     if dev is None:
         print("QC not found"); sys.exit(1)
 

@@ -20,6 +20,38 @@ class BridgeError(Exception):
     Windows bridge can raise it without importing POSIX-only FIFO code."""
 
 
+#: The device on USB. Neural DSP ships more than one model and they all speak
+#: the same protocol - same HID interface (MI_05), same 128-byte reports, same
+#: protobuf schema - so the only thing that differs between them is the USB
+#: product id. Match the whole family: pinning a single id is what made a Quad
+#: Cortex Mini report as "no device found".
+QC_VID = 0x152A
+
+#: product id -> model name. Both verified on hardware:
+#:   0x880A  Quad Cortex       (Version.device_type QC)
+#:   0x892F  Quad Cortex Mini  (Version.device_type ATMA) - Win10, CorOS 4.0.1
+QC_PIDS = {0x880A: "Quad Cortex", 0x892F: "Quad Cortex Mini"}
+
+
+def device_name(pid):
+    """Model name for a product id we matched."""
+    return QC_PIDS.get(pid) or f"Neural DSP device {pid:#06x}"
+
+
+def device_ids(pid=None):
+    """The product ids a transport should match: one if the caller pinned it,
+    else the whole family."""
+    return (pid,) if pid is not None else tuple(QC_PIDS)
+
+
+def not_found_error(vid, pids):
+    """The "nothing plugged in" message, worded the same on both platforms."""
+    ids = "/".join(f"{p:#06x}" for p in pids)
+    names = " or a ".join(device_name(p) for p in pids)
+    return (f"no HID device {vid:#06x}:{ids} found - is a {names} plugged in "
+            "over USB and powered on?")
+
+
 #: Backends that can seize the device on their own, per platform.
 DIRECT_BACKENDS = {"darwin": "iohid", "win32": "winhid"}
 

@@ -430,16 +430,26 @@ def serve(socket_path: str, mode: str = "auto") -> int:
 
     bridge = share = False
     if mode in ("auto", "bridge"):
+        if sys.platform == "win32":
+            # Windows has no interposer: sharing is just a SECOND, NON-EXCLUSIVE
+            # handle, and taking one costs nothing while Cortex Control is shut -
+            # our own reads and writes are identical either way. Seizing instead
+            # locks the app out for the WHOLE session, because a handle already
+            # held exclusively cannot be shared after the fact: start the daemon
+            # first and Cortex Control never sees the device again. So share
+            # unconditionally here and leave `direct` as the explicit way to ask
+            # for exclusivity. (This used to require the app to be running
+            # ALREADY, which is a macOS-shaped precondition - there the app owns
+            # a session we can only ride, so it must exist first.)
+            share = True
         # _bridge_running(), not just "do the FIFOs exist" — they are plain
         # filesystem objects that outlive the app, so existence alone lies.
-        if bridge_supported() and _bridge_running():
-            bridge = sys.platform != "win32"
-            share = sys.platform == "win32"   # a second, non-exclusive handle
+        elif bridge_supported() and _bridge_running():
+            bridge = True
         elif mode == "bridge":
             raise BridgeError(
-                "bridge mode needs Cortex Control running: the instrumented "
-                "build on macOS (interceptor/run-bridge.sh), the stock app on "
-                "Windows")
+                "bridge mode needs the instrumented Cortex Control running "
+                "(interceptor/run-bridge.sh)")
 
     if not bridge and not share and _cortex_running() and sys.platform != "win32":
         raise BridgeError(

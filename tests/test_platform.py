@@ -92,6 +92,53 @@ def test_shared_mode_asks_for_a_non_seizing_handle():
         T.open_hid = real
 
 
+def test_windows_auto_shares_even_with_cortex_control_shut():
+    """On Windows `auto` must take a NON-exclusive handle whether or not Cortex
+    Control is up. Gating that on "the app is already running" is a macOS-shaped
+    precondition, and it cost a whole session: the daemon seized the device, and
+    a handle held exclusively cannot be shared afterwards, so Cortex Control
+    opened to "no device" for as long as the daemon lived."""
+    import qc_mcp.daemon as D
+    import qc_mcp.transport as T
+
+    opened = {}
+
+    class FakeQC:
+        def __init__(self, bridge=False, share=False):
+            opened.update(bridge=bridge, share=share)
+        def open(self, handshake=True):
+            raise RuntimeError("stop here - we only care about the mode choice")
+
+    class WinSys:
+        """Only daemon.py is told it is on Windows. Assigning to `D.sys.platform`
+        would set it on the real sys module, i.e. for every module in the
+        process - including any that reads or caches it while serve() runs."""
+        platform = "win32"
+
+        def __getattr__(self, name):
+            return getattr(sys, name)
+
+    real_qc, real_sys = T.QuadCortex, D.sys
+    try:
+        T.QuadCortex = FakeQC
+        D.sys = WinSys()
+        import qc_mcp.server as S
+        for cortex_up in (False, True):
+            opened.clear()
+            real_bridge, S._bridge_running = S._bridge_running, lambda: cortex_up
+            try:
+                try:
+                    D.serve("unused.sock", mode="auto")
+                except RuntimeError:
+                    pass
+            finally:
+                S._bridge_running = real_bridge
+            assert opened == {"bridge": False, "share": True}, \
+                f"Cortex Control running={cortex_up} should still share, got {opened}"
+    finally:
+        T.QuadCortex, D.sys = real_qc, real_sys
+
+
 def test_open_hid_picks_the_backend_for_the_platform():
     real = sys.platform
     try:
@@ -169,6 +216,50 @@ def test_device_ids_recoverable_from_the_interface_path():
     assert winhid._ids_from_path(path) == (0x152A, 0x880A)
     assert winhid._ids_from_path(r"\\?\HID#VID_152A&PID_880A#x") == (0x152A, 0x880A)
     assert winhid._ids_from_path(r"\\?\usb#something-else") == (None, None)
+
+
+def test_every_model_in_the_family_is_matched_by_default():
+    """The Mini is a different USB product (0x892F) running the same protocol.
+    Pinning 0x880A is what made a plugged-in Mini report "no device found"; both
+    transports must accept the whole family unless a caller pins one id."""
+    transports = [winhid.WinHIDTransport]
+    if sys.platform == "darwin":                  # iohid dlopens IOKit on import
+        from qc_mcp.iohid import IOHIDTransport
+        transports.append(IOHIDTransport)
+
+    assert set(B.QC_PIDS) == {0x880A, 0x892F}
+    for transport in transports:
+        assert set(transport().pids) == set(B.QC_PIDS), transport
+        assert transport(pid=0x880A).pids == (0x880A,), transport
+        # the id we actually opened is only known after open()
+        assert transport().pid is None, transport
+    # the "not plugged in" message names every model it looked for
+    msg = B.not_found_error(B.QC_VID, B.device_ids())
+    assert "0x880a" in msg and "0x892f" in msg and "Mini" in msg
+    assert msg.isascii(), "Windows-facing runtime strings must be ASCII"
+
+
+def test_enumerate_filters_on_the_whole_family():
+    """enumerate_devices takes one product id or a set of them; the vendor is
+    shared with other USB-audio gear, so an unfiltered vendor match is wrong."""
+    probed = [
+        {"path": r"\\?\hid#vid_152a&pid_880a&mi_05#a", "vid": 0x152A, "pid": 0x880A},
+        {"path": r"\\?\hid#vid_152a&pid_892f&mi_05#b", "vid": 0x152A, "pid": 0x892F},
+        {"path": r"\\?\hid#vid_152a&pid_0001&mi_00#c", "vid": 0x152A, "pid": 0x0001},
+    ]
+    real_paths, real_probe, real_load = (
+        winhid._interface_paths, winhid._probe, winhid._load)
+    winhid._interface_paths = lambda: [d["path"] for d in probed]
+    winhid._probe = lambda path: next(dict(d) for d in probed if d["path"] == path)
+    winhid._load = lambda: None
+    try:
+        pids = lambda got: sorted(d["pid"] for d in got)          # noqa: E731
+        assert pids(winhid.enumerate_devices(0x152A, B.QC_PIDS)) == [0x880A, 0x892F]
+        assert pids(winhid.enumerate_devices(0x152A, 0x892F)) == [0x892F]
+        assert pids(winhid.enumerate_devices(0x152A)) == [0x0001, 0x880A, 0x892F]
+    finally:
+        winhid._interface_paths, winhid._probe, winhid._load = (
+            real_paths, real_probe, real_load)
 
 
 def test_output_reports_are_padded_to_the_exact_report_length():

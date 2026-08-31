@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron'
 import { join } from 'node:path'
 import type { CheckId, Mode, Prefs, Progress } from '../shared/types.js'
 import * as clients from './clients.js'
@@ -36,7 +36,15 @@ function create(): void {
     minWidth: 720,
     minHeight: 520,
     show: false,
-    backgroundColor: '#12100d',
+    // macOS gets an opaque ground under its native frame. Windows is frameless
+    // and the KIT draws the window shape itself (`body.win .app`: 12px radius +
+    // a 1px rim, squared again when maximized), so the window has to be
+    // transparent for those corners to exist at all - an opaque backgroundColor
+    // paints square corners straight over them, which is what shipped. Windows
+    // 11 rounds frameless windows itself via DWM; Windows 10 does not, so
+    // without this the 12px is invisible there.
+    backgroundColor: IS_MAC ? '#12100d' : '#00000000',
+    transparent: !IS_MAC,
     // frameless with the traffic lights inset, so the kit's .titlebar can own
     // the top strip and stay draggable
     titleBarStyle: IS_MAC ? 'hiddenInset' : 'hidden',
@@ -51,9 +59,29 @@ function create(): void {
   })
 
   win.on('ready-to-show', () => win?.show())
-  const notify = (): void => emit('window:maximized', Boolean(win?.isMaximized()))
+  // The renderer squares the window's corners off when this is true. Aero Snap
+  // never fires 'maximize', but a snapped window is just as flush against the
+  // work area — and now that the window is transparent, leaving it rounded shows
+  // the desktop through four notches at the screen edge. So judge by the bounds,
+  // and watch resize/move as well.
+  const flush = (): boolean => {
+    if (!win) return false
+    if (win.isMaximized()) return true
+    const b = win.getBounds()
+    const wa = screen.getDisplayMatching(b).workArea
+    return b.y <= wa.y && b.y + b.height >= wa.y + wa.height
+  }
+  let was: boolean | null = null
+  const notify = (): void => {
+    const now = flush()
+    if (now === was) return // resize/move fire continuously; only edges matter
+    was = now
+    emit('window:maximized', now)
+  }
   win.on('maximize', notify)
   win.on('unmaximize', notify)
+  win.on('resize', notify)
+  win.on('move', notify)
 
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
@@ -142,12 +170,12 @@ function handlers(): void {
     }
     return state.push(true)
   })
-  ipcMain.handle('cortex:quit', async () => {
-    await cortex.quit()
-    return state.push()
-  })
   ipcMain.handle('cortex:focus', async () => {
     await cortex.focus(state.getPaths())
+    return state.push()
+  })
+  ipcMain.handle('cortex:quit', async () => {
+    await cortex.quit()
     return state.push()
   })
   ipcMain.handle('cortex:rebuild', async () => {

@@ -29,6 +29,8 @@ import sys
 import threading
 import time
 
+from .backend import QC_VID, device_ids, not_found_error
+
 # Plain ctypes aliases rather than ctypes.wintypes: wintypes only imports on
 # Windows, and keeping this module importable everywhere lets the offline tests
 # check that both backends expose the same API.
@@ -266,9 +268,11 @@ def enumerate_devices(vid=None, pid=None):
     """Matching HID interfaces as dicts (path/vid/pid/report lengths/strings).
 
     A Quad Cortex publishes more than one collection; the caller picks by report
-    length. Used by `open()` and by `tools/win_hid_check.py`.
+    length. `pid` is one product id or an iterable of them (the model family);
+    None means don't filter. Used by `open()` and `tools/win_hid_check.py`.
     """
     _load()
+    wanted = None if pid is None else ({pid} if isinstance(pid, int) else set(pid))
     out = []
     for path in _interface_paths():
         info = _probe(path)
@@ -288,7 +292,7 @@ def enumerate_devices(vid=None, pid=None):
                     "product": "", "serial": "", "busy": True}
         if vid is not None and info["vid"] != vid:
             continue
-        if pid is not None and info["pid"] != pid:
+        if wanted is not None and info["pid"] not in wanted:
             continue
         out.append(info)
     return out
@@ -303,8 +307,12 @@ class WinHIDTransport:
     #: reported 60 of them. Treat it as sent; judge writes by reading back.
     BENIGN_WRITE_CODES = frozenset({0, 31})
 
-    def __init__(self, vid=0x152A, pid=0x880A, report_size=128, seize=False):
-        self.vid, self.pid = vid, pid
+    def __init__(self, vid=QC_VID, pid=None, report_size=128, seize=False):
+        self.vid = vid
+        #: product ids to accept - the whole family unless the caller pinned one
+        self.pids = device_ids(pid)
+        #: which one we actually opened; filled in by open()
+        self.pid = None
         self.report_size = report_size
         self.seize = seize
         self.path = None
@@ -320,18 +328,21 @@ class WinHIDTransport:
     # -- lifecycle --
     def open(self):
         _load()
-        cands = enumerate_devices(self.vid, self.pid)
+        cands = enumerate_devices(self.vid, self.pids)
         if not cands:
-            raise RuntimeError(
-                f"no HID device {self.vid:#06x}:{self.pid:#06x} found - is the "
-                "Quad Cortex plugged in over USB and powered on?")
+            raise RuntimeError(not_found_error(self.vid, self.pids))
         # The QC exposes several collections; the protocol one is the collection
         # whose reports are report_size+1 long. Fall back to the first match so a
         # device that reports odd caps — or one we couldn't probe because it's
         # busy (input_len 0) — still gets a chance to produce a real error.
         want = self.report_size + 1
+        # With two models attached, enumeration order decides which unit we get.
+        # Rank by self.pids order first so the choice is the same every run and
+        # matches iohid and the launcher's probe.
+        cands.sort(key=lambda c: self.pids.index(c["pid"]))
         chosen = next((c for c in cands if c["input_len"] == want), cands[0])
         self.path = chosen["path"]
+        self.pid = chosen["pid"]
         self._in_len = chosen["input_len"] or want
         self._out_len = chosen["output_len"] or want
 

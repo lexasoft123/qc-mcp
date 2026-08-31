@@ -105,7 +105,7 @@ Everything the main process reports is measured, not mocked:
 | Cortex Control | `Info.plist` via `defaults read`, or the exe's `ProductVersion` |
 | instrumented copy | `codesign -dvvv` flags **and** the entitlements — both, because injection needs the hardened runtime off *and* library validation disabled |
 | registration | each client's own config file is read for the `quad-cortex` key |
-| device | `ioreg -p IOUSB` for vid `0x152a` / pid `0x880a`, or `Get-PnpDevice` |
+| device | `ioreg -p IOUSB` for vid `0x152a` / pid `0x880a` (Quad Cortex) or `0x892f` (Mini), or `Get-PnpDevice` |
 | reports/s | counted from the interposer's own millisecond stamps in the last 2 s |
 
 Installs are real too: `uv venv` + `uv pip install -e .` (or `python -m venv` +

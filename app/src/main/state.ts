@@ -4,9 +4,12 @@ import * as clients from './clients.js'
 import * as logs from './logs.js'
 import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
-import { IS_MAC, PLATFORM, findRepo, pathsFor } from './paths.js'
+import { IS_MAC, PLATFORM, QC_PIDS, QC_VID, findRepo, pathsFor } from './paths.js'
 import { cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
 import { exists } from './util.js'
+
+/** 0x880a — how the checklist prints a USB id. */
+const hex = (n: number): string => `0x${n.toString(16).padStart(4, '0')}`
 
 let prefs: Prefs = prefsStore.DEFAULTS
 let paths = pathsFor(process.cwd())
@@ -104,7 +107,9 @@ function checksFrom(
     {
       id: 'device',
       title: 'Quad Cortex on USB',
-      detail: `vendor 0x152a · product 0x880a${device.serial ? ` · ${device.serial}` : ''}`,
+      detail: device.present
+        ? `${device.model ?? 'Quad Cortex'}${device.serial ? ` · ${device.serial}` : ''}`
+        : `vendor ${hex(QC_VID)} · product ${Object.keys(QC_PIDS).map(Number).map(hex).join(' / ')}`,
       status: device.present ? 'ok' : 'missing',
       fixable: false
     }

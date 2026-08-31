@@ -377,6 +377,30 @@ body::after {
 
 .modal-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; font-variation-settings: 'wdth' 92; }
 .modal-card > p.fine { margin-bottom: 16px; max-width: 52ch; }
+
+/*
+ * Keep a tall modal inside the window. The kit gives .modal-card a width but no
+ * height bound, and .modal-scrim centres it with `place-items: center` — so a
+ * card taller than the window overflows its grid cell in BOTH directions and is
+ * clipped top and bottom, with no scrollbar to tell you anything is missing.
+ * Preferences hit this first (its heading sat flush against the window edge and
+ * the last row was cut in half), but it is every modal's problem: they all share
+ * .modal-card, and any of them can outgrow a small window.
+ *
+ * The padding keeps the card off the window edges — the kit already assumes 30px
+ * of side margin in its own `min(480px, 100vw - 60px)` width.
+ */
+.modal-scrim { padding: 30px; }
+.modal-card {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* don't chain the scroll to the view behind */
+}
+.modal-card::-webkit-scrollbar { width: 10px; }
+.modal-card::-webkit-scrollbar-thumb {
+  background: rgba(255, 240, 214, 0.1); border-radius: 99px;
+  border: 3px solid transparent; background-clip: content-box;
+}
 .snippet {
   margin-top: 14px; padding: 11px 13px; border-radius: 12px;
   background: var(--sz-panel-deep); border: 1px solid var(--sz-line);

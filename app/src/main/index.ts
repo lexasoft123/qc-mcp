@@ -6,6 +6,7 @@ import * as cortex from './cortex.js'
 import * as install from './install.js'
 import * as logs from './logs.js'
 import * as state from './state.js'
+import * as updater from './updater.js'
 import { Leveling } from './leveling.js'
 import { IS_MAC } from './paths.js'
 import { findPython } from './system.js'
@@ -206,6 +207,11 @@ function handlers(): void {
   })
   ipcMain.handle('shell:reveal', (_e, p: string) => { shell.showItemInFolder(p) })
 
+  ipcMain.handle('update:state', () => updater.state())
+  ipcMain.handle('update:check', () => updater.check())
+  ipcMain.handle('update:download', () => updater.openDownload())
+  ipcMain.on('update:install', () => { updater.install() })
+
   // ── the leveling bench ────────────────────────────────────────────────
   ipcMain.handle('leveling:start', () => { bench().start() })
   ipcMain.handle('leveling:stop', () => { bench().stop() })
@@ -293,6 +299,8 @@ void app.whenReady().then(async () => {
   ticker = setInterval(() => { void tick() }, 2000)
   void tick()
 
+  updater.start((u) => emit('update', u), () => state.getPrefs().updates)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) create()
   })
@@ -304,6 +312,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (ticker) clearInterval(ticker)
+  updater.stop()
   leveling?.stop()
   state.getDaemon()?.stop()
   if (state.getPrefs().quitApp) void cortex.quit()

@@ -6,6 +6,7 @@ import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
 import { IS_MAC, PLATFORM, QC_PIDS, QC_VID, findRepo, pathsFor } from './paths.js'
 import { cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
+import { version } from './updater.js'
 import { exists } from './util.js'
 
 /** 0x880a — how the checklist prints a USB id. */
@@ -146,6 +147,10 @@ export async function refresh(deep = false): Promise<Snapshot> {
 
   snapshot = {
     platform: PLATFORM,
+    // the updater's, not app.getVersion() directly: one definition of "the
+    // running version", so PATCHBAY_FAKE_VERSION moves the rail and the check
+    // together instead of leaving them disagreeing
+    version: version(),
     paths,
     checks: checksFrom(python, clang, cortex, device, targets),
     clients: targets,

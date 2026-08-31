@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  Api, CheckId, LevelEvent, LogLine, Mode, Prefs, PresetFolder, PresetState, Progress, Snapshot
+  Api, CheckId, LevelEvent, LogLine, Mode, Prefs, PresetFolder, PresetState, Progress, Snapshot,
+  UpdateState
 } from '../shared/types.js'
 
 /** Subscribe to a main-process push; returns the unsubscribe. */
@@ -38,6 +39,14 @@ const api: Api = {
 
   choosePath: (what) => ipcRenderer.invoke('path:choose', what) as Promise<Snapshot>,
   reveal: (p: string) => ipcRenderer.invoke('shell:reveal', p) as Promise<void>,
+
+  update: {
+    state: () => ipcRenderer.invoke('update:state') as Promise<UpdateState>,
+    check: () => ipcRenderer.invoke('update:check') as Promise<UpdateState>,
+    install: () => ipcRenderer.send('update:install'),
+    download: () => ipcRenderer.invoke('update:download') as Promise<void>,
+    onState: (cb) => on<UpdateState>('update', cb)
+  },
 
   leveling: {
     start: () => ipcRenderer.invoke('leveling:start') as Promise<void>,

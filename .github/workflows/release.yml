@@ -270,5 +270,12 @@ jobs:
           fi
           # nullglob: each job only has its own platform's files
           shopt -s nullglob
-          FILES=(app/dist/*.dmg app/dist/*.exe app/dist/*.blockmap)
+          # latest.yml is the Windows updater's feed, written by the nsis
+          # target because electron-builder.yml carries a `publish` block —
+          # electron-builder still publishes nothing itself. The macOS leg
+          # matches nothing here and that is correct: DmgTarget never sets
+          # isWriteUpdateInfo, so a dmg-only build produces no latest-mac.yml
+          # (checked in the pinned 25.1.8). It is the same fact that leaves
+          # macOS on the "open the release page" path in src/main/updater.ts.
+          FILES=(app/dist/*.dmg app/dist/*.exe app/dist/*.blockmap app/dist/latest*.yml)
           gh release upload "$TAG" "${FILES[@]}" --clobber

@@ -26,6 +26,26 @@ compression: maximum
 afterPack: scripts/afterPack.cjs
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
+# METADATA, not publishing. Two things follow from a publish provider being
+# configured, and neither is an upload — every invocation still passes
+# `--publish never`:
+#
+#   1. the nsis target writes latest.yml beside the artifacts, which is the
+#      feed electron-updater reads on Windows. The release workflow uploads it.
+#   2. app-update.yml is packaged into the app's resources, which is where the
+#      running updater learns what feed to ask.
+#
+# Nothing equivalent happens on macOS: DmgTarget never sets isWriteUpdateInfo
+# (checked in the pinned app-builder-lib 25.1.8), so a dmg-only build has no
+# latest-mac.yml to publish — see the note in src/main/updater.ts.
+#
+# `releaseType` is left alone: it is only consulted when electron-builder does
+# the publishing, which it does not.
+publish:
+  provider: github
+  owner: lexasoft123
+  repo: qc-mcp
+
 # The qc-mcp payload. It is staged out of the bundle into userData on first run
 # (stagedRepo() in src/main/paths.ts) because the venv and the instrumented
 # build both have to write next to these sources — and inside a signed .app

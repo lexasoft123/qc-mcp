@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { Progress, Snapshot } from '@shared/types'
+import type { Progress, Snapshot, UpdateState } from '@shared/types'
 
 // ── the snapshot the main process owns ──────────────────────────────────
 
@@ -74,4 +74,30 @@ export const useProgress = (): Progress | null =>
 export function clearProgress(): void {
   progress = null
   progSubs.forEach((f) => f())
+}
+
+// ── the updater ─────────────────────────────────────────────────────────
+
+let update: UpdateState = { state: 'none' }
+const updateSubs = new Set<() => void>()
+
+function setUpdate(u: UpdateState): void {
+  update = u
+  updateSubs.forEach((f) => f())
+}
+
+window.patchbay.update.onState(setUpdate)
+// A window opened after a check has already run would otherwise sit on 'none'
+// until the next six-hourly tick.
+void window.patchbay.update.state().then(setUpdate)
+
+export const useUpdate = (): UpdateState =>
+  useSyncExternalStore(
+    (cb) => { updateSubs.add(cb); return () => { updateSubs.delete(cb) } },
+    () => update
+  )
+
+/** Check now. Windows answers through the push, so only macOS resolves usefully. */
+export async function checkForUpdates(): Promise<void> {
+  setUpdate(await window.patchbay.update.check())
 }

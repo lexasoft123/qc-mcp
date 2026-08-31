@@ -17,6 +17,9 @@
     "fetch:uv": "node scripts/fetch-uv.mjs",
     "icons": "electron build/icon/build-icons.cjs"
   },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
   "devDependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.5",
     "@fontsource-variable/martian-mono": "^5.1.1",

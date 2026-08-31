@@ -1,6 +1,6 @@
 [project]
 name = "qc-mcp"
-version = "0.1.0"
+version = "0.1.2"
 description = "MCP server to read and control a Neural DSP Quad Cortex over its reverse-engineered USB-HID protocol"
 readme = "README.md"
 license = { file = "LICENSE" }

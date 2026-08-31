@@ -98,6 +98,7 @@ body::after {
   border: 3px solid transparent; background-clip: content-box;
 }
 .view.home { display: flex; }
+.view.lvl { display: flex; overflow: hidden; }
 
 /* ————————————————————————————— device strip ————— */
 
@@ -389,6 +390,10 @@ body::after {
 .pref-group > .eyebrow { display: block; margin-bottom: 5px; padding-left: 11px; }
 .pref-row { display: flex; align-items: center; gap: 14px; padding: 9px 11px; }
 .pref-row .meta { flex: 1 1 auto; min-width: 0; }
+/* The kit's .mode-seg is overflow:hidden for its pill radius, so a flex item
+   allowed to shrink loses its last segment silently — "Direct" simply vanished
+   in the 560px Preferences card while the wider Console row showed all three. */
+.pref-row .mode-seg { flex: none; }
 .pref-row .n { font-size: 12.5px; font-weight: 600; }
 .pref-row .d { font-size: 10.5px; color: var(--sz-faint); margin-top: 3px; line-height: 1.55; overflow-wrap: anywhere; }
 .pref-row .d code { font-family: var(--sz-font-mono); font-size: 9.5px; font-variation-settings: 'wdth' 87.5; }
@@ -444,3 +449,254 @@ body.win .device::after { display: none; }
   .device::after { display: none; }
   .link.lit i { background-image: none; background: linear-gradient(90deg, var(--sz-accent-deep), #ffd489); }
 }
+
+/* ———————————————————————————— the leveling bench ————— */
+
+.lvl { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+
+.lvl-bar { display: flex; align-items: flex-start; gap: 14px; }
+.lvl-bar h2 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.lvl-bar .fine { max-width: 62ch; margin-top: 3px; }
+.lvl-bar strong { color: var(--sz-dim); font-weight: 600; }
+.lvl-auto {
+  display: flex; align-items: center; gap: 7px; flex: none;
+  font-size: 11.5px; color: var(--sz-dim); cursor: pointer; white-space: nowrap;
+}
+.lvl-auto input { accent-color: var(--sz-accent); }
+.lvl-err { margin-top: -2px; }
+
+.empty {
+  margin: auto; max-width: 46ch; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 11px;
+  padding: 42px 0;
+}
+.empty h2 { font-size: 14.5px; font-weight: 700; }
+
+/* ——— the strip of preset columns ——— */
+
+.lvl-strip {
+  /* fills the window: the cards share the width and grow with the height, so a
+     bigger window buys a taller meter rather than empty space */
+  flex: 1 1 auto; min-height: 0;
+  display: flex; gap: 12px; align-items: stretch;
+  overflow-x: auto; overflow-y: hidden; padding: 2px 2px 6px;
+}
+.lvl-strip::-webkit-scrollbar { height: 9px; }
+.lvl-strip::-webkit-scrollbar-thumb {
+  background: rgba(255, 240, 214, 0.1); border-radius: 99px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+
+.lvl-col {
+  flex: 1 1 0; min-width: 186px; max-width: 320px; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 11px 12px 13px; border-radius: 18px;
+  cursor: pointer;
+  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s;
+  /* glass: a lit top edge over a translucent pane, the way the kit's panels read
+     under the tungsten wash */
+  border: 1px solid rgba(255, 240, 214, 0.09);
+  background:
+    linear-gradient(180deg, rgba(255, 240, 214, 0.055), rgba(255, 240, 214, 0.012) 42%),
+    color-mix(in srgb, var(--sz-panel) 62%, transparent);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 240, 214, 0.09),
+    0 14px 34px -22px rgba(0, 0, 0, 0.95);
+}
+.lvl-col:hover { border-color: rgba(255, 240, 214, 0.16); }
+.lvl-col.on {
+  border-color: rgba(255, 160, 40, 0.42);
+  background:
+    linear-gradient(180deg, rgba(255, 178, 74, 0.10), rgba(255, 160, 40, 0.02) 46%),
+    color-mix(in srgb, var(--sz-panel) 72%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 214, 150, 0.16),
+    0 0 0 1px rgba(255, 160, 40, 0.12),
+    0 18px 42px -24px rgba(0, 0, 0, 0.95);
+  cursor: default;
+}
+
+/* The Dell test machine's QHD+ panel plus a weak iGPU makes backdrop blur
+   brutally expensive, so Windows keeps solid surfaces — the same rule the rest
+   of this stylesheet already follows. */
+body.win .lvl-col {
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  background: var(--sz-panel);
+}
+body.win .lvl-col.on { background: var(--sz-surface-raised); }
+.lvl-col > header {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0;
+}
+.lvl-name {
+  flex: 1 1 auto; min-width: 0; font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lvl-x {
+  flex: none; width: 18px; height: 18px; border-radius: 6px;
+  border: 0; background: transparent; color: var(--sz-faint);
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.lvl-x:hover { background: var(--sz-danger-strong-wash); color: var(--sz-danger-strong); }
+
+.lvl-db {
+  flex: none;
+  display: flex; align-items: center; justify-content: center; gap: 7px; height: 26px;
+  font-family: var(--sz-font-mono); font-size: 15px; font-weight: 600;
+  color: var(--sz-text); font-variation-settings: 'wdth' 87.5;
+}
+.lvl-db .off { color: var(--sz-faint); }
+.lvl-db .badge { font-size: 8.5px; }
+
+/* ——— meter ——— */
+
+.lvl-body {
+  flex: 1 1 auto; min-height: 0; width: 100%;
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+}
+.lvl-meter-wrap {
+  flex: 0 1 auto; min-height: 0; align-self: stretch;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+/* `lvl-` prefixed throughout: the Console view already owns a `.meter`, and its
+   `align-items: center` collapsed these bars to nothing. */
+.lvl-meter {
+  position: relative; display: flex; align-items: stretch; gap: 8px;
+  justify-content: center; flex: 1 1 auto; min-height: 84px;
+}
+.lvl-meter-note {
+  font-size: 9px; color: var(--sz-faint); text-transform: uppercase;
+  letter-spacing: 0.1em; font-family: var(--sz-font-mono);
+}
+.lvl-meter-bars { display: flex; gap: 4px; }
+.lvl-meter-bar {
+  position: relative; width: 15px; border-radius: 3px;
+  background: var(--sz-panel-deep); border: 1px solid var(--sz-line);
+  overflow: hidden;
+}
+.lvl-meter-fill {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(180deg, #ffd489, var(--sz-accent) 40%, var(--sz-success));
+  transition: height 0.06s linear;
+}
+.lvl-meter-fill.hot { background: linear-gradient(180deg, var(--sz-danger), var(--sz-accent) 55%); }
+.lvl-meter-peak {
+  position: absolute; left: 0; right: 0; height: 2px;
+  background: rgba(255, 240, 214, 0.75);
+}
+.lvl-meter-scale {
+  /* full height, or every tick's `bottom:` resolves against nothing and they
+     all stack on one line */
+  position: relative; width: 24px; height: 100%;
+  font-family: var(--sz-font-mono); font-size: 8px; color: var(--sz-faint);
+}
+.lvl-meter-scale span { position: absolute; left: 0; transform: translateY(50%); }
+.lvl-meter.idle .lvl-meter-fill { opacity: 0; }
+
+/* ——— knob ——— */
+
+.knob { position: relative; cursor: ns-resize; outline: none; touch-action: none; flex: none; }
+.knob:focus-visible { border-radius: 50%; box-shadow: 0 0 0 2px rgba(255, 160, 40, 0.55); }
+.knob.off { cursor: default; opacity: 0.4; }
+.knob-track { fill: none; stroke: var(--sz-line-strong); stroke-width: 5; stroke-linecap: round; }
+.knob-fill { fill: none; stroke: var(--sz-accent); stroke-width: 5; stroke-linecap: round; }
+.knob.off .knob-fill { stroke: var(--sz-faint); }
+.knob-unity { stroke: rgba(255, 240, 214, 0.4); stroke-width: 1.5; }
+.knob-cap { fill: var(--sz-panel-deep); stroke: var(--sz-line-strong); stroke-width: 1; }
+.knob-pointer { stroke: var(--sz-text); stroke-width: 2.5; stroke-linecap: round; }
+
+/* ——— lanes ——— */
+
+.lvl-lanes {
+  /* four reserved rows: every card is the same height whatever is loaded */
+  width: 100%; flex: none; display: grid; gap: 3px;
+  grid-template-rows: repeat(4, 22px);
+}
+.lvl-lanes-hint {
+  grid-row: 1 / -1; display: grid; place-items: center;
+  font-size: 11px; color: var(--sz-faint);
+}
+.lvl-lane {
+  display: flex; align-items: center; gap: 6px; height: 22px;
+  font-size: 10.5px; color: var(--sz-dim);
+  padding: 0 5px; border-radius: 7px; background: var(--sz-panel-deep);
+}
+/* a reserved slot: the QC has four rows, so every card keeps four */
+.lvl-lane.empty { background: transparent; }
+.lvl-lane.off { opacity: 0.42; }
+.lvl-out { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lvl-lane .mono { color: var(--sz-text); font-size: 9.5px; }
+.lvl-trim { display: flex; gap: 2px; flex: none; }
+.lvl-trim button {
+  width: 15px; height: 15px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--sz-line-strong); background: transparent;
+  color: var(--sz-dim); font-size: 10px; line-height: 1; padding: 0;
+}
+.lvl-trim button:hover { border-color: var(--sz-accent); color: var(--sz-accent); }
+
+/* ——— scenes ——— */
+
+.lvl-scenes {
+  width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; flex: none;
+}
+.lvl-scene {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; height: 28px; padding: 0 2px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--sz-line); background: var(--sz-panel-deep);
+  color: var(--sz-dim); overflow: hidden;
+}
+.lvl-scene b { font-size: 10.5px; font-weight: 700; }
+.lvl-scene em {
+  font-style: normal; font-size: 7.5px; color: var(--sz-faint);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lvl-scene.empty { opacity: 0.45; }
+.lvl-scene.on {
+  border-color: var(--sz-accent); background: var(--sz-accent-soft); color: var(--sz-accent);
+}
+.lvl-scene:disabled { cursor: default; }
+
+.lvl-add {
+  flex: 0 0 104px; border-radius: 18px; cursor: pointer; align-self: stretch;
+  border: 1px dashed var(--sz-line-strong); background: transparent;
+  color: var(--sz-faint); font-size: 10.5px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+}
+.lvl-add span { font-size: 21px; line-height: 1; }
+.lvl-add:hover { border-color: var(--sz-accent); color: var(--sz-accent); }
+
+.lvl-keys { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.lvl-keys kbd {
+  font-family: var(--sz-font-mono); font-size: 9px; padding: 2px 5px;
+  border-radius: 5px; border: 1px solid var(--sz-line-strong);
+  background: var(--sz-panel-deep); color: var(--sz-dim);
+}
+
+/* ——— the picker ——— */
+
+.picker-card { width: min(720px, 92vw); }
+.pick-tools { display: flex; gap: 9px; margin: 12px 0 10px; }
+.pick-search {
+  flex: 1 1 auto; padding: 8px 11px; border-radius: 10px;
+  border: 1px solid var(--sz-line-strong); background: var(--sz-panel-deep);
+  color: var(--sz-text); font: inherit; font-size: 12px; outline: none;
+}
+.pick-search:focus { border-color: var(--sz-accent); }
+.pick-list { max-height: 46vh; overflow-y: auto; display: grid; gap: 13px; }
+.pick-list h3 {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--sz-faint); margin-bottom: 6px;
+  display: flex; align-items: center; gap: 7px;
+}
+.pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 4px; }
+.pick {
+  display: flex; align-items: center; gap: 7px; min-width: 0;
+  padding: 6px 9px; border-radius: 9px; cursor: pointer; text-align: left;
+  border: 1px solid var(--sz-line); background: var(--sz-panel-deep);
+  color: var(--sz-dim); font: inherit; font-size: 11.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pick .mono { flex: none; color: var(--sz-faint); font-size: 9px; }
+.pick:hover { border-color: var(--sz-line-strong); color: var(--sz-text); }
+.pick.on { border-color: var(--sz-accent); background: var(--sz-accent-soft); color: var(--sz-accent); }

@@ -1,19 +1,21 @@
 import { useState } from 'react'
 import { Button, SegmentedControl, StatusDot, WindowButtons } from '@singz/ui'
-import { isMac, railText, regCount } from './derive.js'
+import { isMac, railText, regCount, sessionMode } from './derive.js'
 import { useSnapshot, useToast } from './store.js'
 import { Gear } from './components/Icons.js'
 import { Home } from './views/Home.js'
 import { Console } from './views/Console.js'
 import { Setup } from './views/Setup.js'
 import { Logs } from './views/Logs.js'
+import { Leveling } from './views/Leveling.js'
 import { Prefs } from './modals/Prefs.js'
 
-type View = 'home' | 'console' | 'setup' | 'logs'
+type View = 'home' | 'console' | 'leveling' | 'setup' | 'logs'
 
 const VIEWS: { value: View; label: string }[] = [
   { value: 'home', label: 'Home' },
   { value: 'console', label: 'Console' },
+  { value: 'leveling', label: 'Leveling' },
   { value: 'setup', label: 'Setup' },
   { value: 'logs', label: 'Logs' }
 ]
@@ -49,7 +51,7 @@ export function App(): React.JSX.Element {
           <StatusDot tone={live ? 'ok' : 'idle'} />
           <span>
             {live
-              ? `${snap.prefs.mode === 'direct' ? 'direct' : 'bridge'} session · ${n} ${n === 1 ? 'client' : 'clients'}`
+              ? `${sessionMode(snap)} session · ${n} ${n === 1 ? 'client' : 'clients'}`
               : 'daemon stopped'}
           </span>
         </div>
@@ -61,6 +63,7 @@ export function App(): React.JSX.Element {
 
       {view === 'home' && <Home snap={snap} goto={(v) => setView(v as View)} />}
       {view === 'console' && <Console snap={snap} />}
+      {view === 'leveling' && <Leveling snap={snap} />}
       {view === 'setup' && <Setup snap={snap} />}
       {view === 'logs' && <Logs snap={snap} />}
 

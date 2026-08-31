@@ -29,9 +29,17 @@ device's firmware (PROTOCOL.md §12) — on **macOS and Windows** (`docs/WINDOWS
     (add/delete block, params, per-scene params, splits/mixers, routing, bypass,
     captures, IRs), recall/save, list_directory.
   - `catalog.py` — `ModelRepo.xml` parser + value taper (log/linear, `to_norm`/
-    `to_display`). Data attribution: neuraldsp.com/device-list.
+    `to_display`). `SYMBOLIC` resolves the ranges the XML leaves as names
+    (`MIN_MIXER_DB` = -40, `MAX_MIXER_DB` = +12, calibrated against the app —
+    only add a name once measured). Data attribution: neuraldsp.com/device-list.
   - `preset.py` — `describe(bp)` ⇄ `build(spec)` + `apply_spec` (spec ⇄ BinaryPreset).
   - `directory.py` — structure/search the on-device catalog (presets/IRs/captures).
+    A file's slot is its **array position** (the `index` field is 0 in a whole
+    read), so a setlist's 256 entries map straight to recall positions.
+  - `leveling.py` — the preset-leveling bench Patchbay's Leveling view drives
+    (`qc-mcp --leveling --socket …`, newline-JSON on stdio, attaches to the
+    daemon like any other client). Reads/writes LaneOutputControl VOLUME in dB
+    and streams `IOMeter`.
   - `server.py` — FastMCP server (~30 tools). `connect(mode=auto|bridge|direct)`:
     when nothing is running it RETURNS the mode options (relay the question to the
     user); `mode='bridge'` self-launches `interceptor/run-bridge.sh` (~20s cold) and
@@ -132,7 +140,16 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   folder+position. And **recalls REQUIRE `folder_key`** — a folderless SetlistPosition
   UPDATE is silently refused (device echoes the unchanged position back). `recall_preset`
   now defaults to the current folder and verifies the position actually moved.
-- Value taper: `min>0 and max/min>=5` ⇒ power taper (k≈1.667), else linear.
+- Value taper: `min>0 and max/min>=5` ⇒ power taper (k≈1.667), else linear. Ranges
+  that are symbolic names in the XML need a calibrated entry in `catalog.SYMBOLIC`
+  or they fall through unconverted (raw 0-1).
+- **Lane output level** = `LaneOutputControl`(23000) param 0 VOLUME, **-40..+12 dB**
+  linear (0 dB = 0.769230783). It lives in `Chain.output_control`, so it is stored
+  in the preset — the right knob for balancing presets against each other. PAN is
+  idx 1, shown as 50L..C..50R = `(nv-0.5)*100`.
+- **`IOMeter`(5) streams at ~4 Hz** after a bare `IOMeter` CREATE, `request_id=0`
+  (take the latest). Values are **linear amplitude 0..1, not dB**. One bridge-mode
+  session produced no frames at all — treat "no reading" as a resting state.
 - **One bridge reader at a time.** The out FIFO is a single stream: if the MCP
   server holds a bridge connection and a script opens another, they steal each
   other's frames and reads silently return `None` (telemetry still flows, so it

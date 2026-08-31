@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Api, CheckId, LogLine, Mode, Prefs, Progress, Snapshot } from '../shared/types.js'
+import type {
+  Api, CheckId, LevelEvent, LogLine, Mode, Prefs, PresetFolder, PresetState, Progress, Snapshot
+} from '../shared/types.js'
 
 /** Subscribe to a main-process push; returns the unsubscribe. */
 function on<T>(channel: string, cb: (v: T) => void): () => void {
@@ -36,6 +38,25 @@ const api: Api = {
 
   choosePath: (what) => ipcRenderer.invoke('path:choose', what) as Promise<Snapshot>,
   reveal: (p: string) => ipcRenderer.invoke('shell:reveal', p) as Promise<void>,
+
+  leveling: {
+    start: () => ipcRenderer.invoke('leveling:start') as Promise<void>,
+    stop: () => ipcRenderer.invoke('leveling:stop') as Promise<void>,
+    state: () => ipcRenderer.invoke('leveling:state') as Promise<PresetState>,
+    folders: (refresh?: boolean) =>
+      ipcRenderer.invoke('leveling:folders', refresh) as Promise<PresetFolder[]>,
+    open: (key: string, pos: number, factory: boolean, cloudId: string) =>
+      ipcRenderer.invoke('leveling:open', key, pos, factory, cloudId) as Promise<PresetState>,
+    level: (row: number, db: number) =>
+      ipcRenderer.invoke('leveling:level', row, db) as Promise<number>,
+    toggle: (row: number, which: 'mute' | 'solo', on: boolean) =>
+      ipcRenderer.invoke('leveling:toggle', row, which, on) as Promise<boolean>,
+    scene: (index: number) => ipcRenderer.invoke('leveling:scene', index) as Promise<number>,
+    save: (name?: string) =>
+      ipcRenderer.invoke('leveling:save', name) as Promise<{ name: string; position: number }>,
+    meter: (on: boolean) => ipcRenderer.invoke('leveling:meter', on) as Promise<boolean>,
+    onEvent: (cb) => on<LevelEvent>('leveling:event', cb)
+  },
 
   window: {
     isMaximized: () => ipcRenderer.invoke('window:isMaximized') as Promise<boolean>,

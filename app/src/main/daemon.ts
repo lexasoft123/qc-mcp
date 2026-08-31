@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { connect } from 'node:net'
 import { mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { DaemonInfo, Mode, Paths } from '../shared/types.js'
+import type { DaemonInfo, Mode, Paths, SessionMode } from '../shared/types.js'
 import { IS_MAC } from './paths.js'
 import { exists, sleep } from './util.js'
 
@@ -42,6 +42,8 @@ export class Daemon {
   private supported = true
   private error: string | null = null
   private mode: Mode = 'bridge'
+  /** What the daemon said it actually opened — `auto` only resolves there. */
+  private session: SessionMode | null = null
   private state: DaemonInfo['state'] = 'stopped'
   private clientNames: string[] = []
 
@@ -58,6 +60,7 @@ export class Daemon {
       startedAt: this.startedAt,
       socket: this.paths.socket,
       mode: this.mode,
+      session: this.session,
       supported: this.supported,
       error: this.error,
       reportsPerSecond: 0,
@@ -92,6 +95,7 @@ export class Daemon {
     }
     this.state = 'starting'
     this.error = null
+    this.session = null
     onChange()
 
     if (IS_MAC) {
@@ -108,6 +112,17 @@ export class Daemon {
       detached: false
     })
     this.child = child
+    // The daemon announces what it resolved on stdout:
+    //   qc-mcp daemon listening on <path> (mode=bridge|shared|direct, firmware=…)
+    // Without reading it every view has to guess from the preference, and `auto`
+    // then reads as bridge even when the daemon opened the device directly.
+    child.stdout?.on('data', (d) => {
+      const m = /\bmode=(bridge|shared|direct)\b/.exec(String(d))
+      if (m && m[1] !== this.session) {
+        this.session = m[1] as SessionMode
+        onChange()
+      }
+    })
     child.stderr?.on('data', (d) => { stderr += String(d) })
     child.on('error', (e) => { stderr += String(e) })
     child.on('exit', () => {
@@ -149,6 +164,7 @@ export class Daemon {
   stop(): void {
     this.state = 'stopped'
     this.startedAt = null
+    this.session = null
     const child = this.child
     this.child = null
     if (child && child.pid) {

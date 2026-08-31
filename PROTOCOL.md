@@ -175,6 +175,46 @@ Stored parameter values are normalized 0..1. Display↔normalized conversion
 Implemented in `catalog.to_norm` / `to_display`. (A naive linear conversion put a
 "220 ms" delay at ~25 ms — always use the taper.)
 
+**Symbolic bounds.** Some `ModelRepo.xml` ranges are names, not numbers —
+`MIN_MIXER_DB`, `MAX_EQ_DB`, `MIN_FXLOOP_OUT_GAIN_DB`, `MIN_TEMPO`… (~90
+parameters). The app resolves them from a table compiled into its binary, so the
+XML alone cannot convert those params and `to_display` returns the raw 0..1.
+`catalog.SYMBOLIC` holds the ones we have **calibrated against Cortex Control**;
+add a name only once it has been measured. Solved so far:
+
+| name | value | how it was measured |
+|---|---|---|
+| `MIN_MIXER_DB` | **-40 dB** | Lane output VOLUME `0.5` reads **-14.0 dB** in the app, |
+| `MAX_MIXER_DB` | **+12 dB** | and the untouched default `0.769230783` is 0 dB. Two points ⇒ linear over -40..+12 (-40/52 = 10/13 exactly). Confirmed on a second lane. |
+
+Lane **PAN** (idx 1) is stored 0..1 and displayed as 50L…C…50R, i.e.
+`display = (nv - 0.5)·100` — `0.35` reads "15 L", `0.65` reads "15 R".
+
+### Metering — `IOMeter`(5) and `GridModelMeter`(37)
+`IOMeterMessage` carries a float per physical point — `input_1/2`, `return_1/2`,
+`xlr_1/2` (+ `*_limiter`), `out_3/4`, `send_1/2`, `hp_l/r`, all 8 USB in/out
+pairs — plus `grid_xlr_1`…`grid_send_2` for the tap selected by
+`GridModelMeter{row, column}` (`column = -1` meters nothing).
+
+On connect Cortex Control sends `GridModelMeter` once per row with `column=-1`,
+then a bare `IOMeter{request_id}` (action CREATE) — that CREATE is the
+subscription. The device then broadcasts `IOMeter` at **~4 Hz**, `request_id=0`
+like the rest of the telemetry, so take the **latest** frame, never the first
+buffered. `DELETE` unsubscribes.
+
+**Values are linear amplitude, 0..1 — not dB.** Convert with
+`20·log₁₀(level)` before showing them on a dB scale (`leveling.py` /
+`Meter.tsx` floor at -40 dB, matching the app's own OUT LEVEL readout). The
+`*_limiter` fields read `1.0` at rest; their exact meaning is not pinned down,
+so nothing depends on them yet.
+
+*Caveat:* one **bridge**-mode session produced zero inbound `IOMeter` frames over
+a 26k-message capture, on our subscription and on Cortex Control's own, with the
+app's I/O page open and its meter parked at the -40 dB floor. The same
+subscription in **direct** mode streams normally. Whether that is a bridge-mode
+quirk or that session's device state is unresolved — so a client should treat
+"no frames" as a resting state to display honestly, not as an error.
+
 ---
 
 ## 6. Presets & setlists

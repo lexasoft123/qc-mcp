@@ -80,6 +80,21 @@ def test_search_preset_gives_load_pointer():
     assert h["is_factory"] is False
 
 
+def test_position_comes_from_array_order_not_the_index_field():
+    """A whole-folder READ leaves every `index` field 0 — the slot is the file's
+    place in the array. A setlist is a fixed 256-slot table (empty slots carry a
+    blank name), so this is what makes a recall land on the right preset."""
+    msgs = [_Msg(0, _Folder("/media/p4/Presets/My Presets", "My Presets",
+                            [_F(0, "", "s0.pb"),          # empty slot 0
+                             _F(0, "Second", "s1.pb"),    # device sends index=0…
+                             _F(0, "Third", "s2.pb")]))]  # …for every one of them
+    files = directory.structure_directory(msgs)["presets"][0]["files"]
+    assert [f["index"] for f in files] == [0, 1, 2]
+    hits = directory.search({"presets": [{"key": "k", "name": "n", "is_factory": False,
+                                          "files": files}]}, "Third", "presets")
+    assert hits[0]["index"] == 2
+
+
 def test_search_capture_by_folder_name_and_key():
     cat = _catalog()
     hits = directory.search(cat, "Test Amp", "captures")

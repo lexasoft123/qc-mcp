@@ -1563,6 +1563,8 @@ def main(argv=None):
         qc-mcp --daemon --socket PATH          hold the device, serve clients
         qc-mcp --attach --socket PATH          stdio MCP server that rides the
                                                daemon's session
+        qc-mcp --leveling --socket PATH        preset-leveling bench on stdio,
+                                               riding the daemon's session
 
     The default is unchanged and takes no arguments, so every existing client
     registration keeps working exactly as before.
@@ -1574,18 +1576,24 @@ def main(argv=None):
                     help="run as the long-lived daemon that owns the device")
     ap.add_argument("--attach", action="store_true",
                     help="serve MCP over stdio, using a running daemon's session")
+    ap.add_argument("--leveling", action="store_true",
+                    help="serve the preset-leveling bench over stdio (Patchbay)")
     ap.add_argument("--socket", default=default_socket(),
                     help="daemon endpoint (default: %(default)s)")
     ap.add_argument("--mode", default="auto", choices=("auto", "bridge", "direct"),
                     help="how the daemon opens the device (--daemon only)")
     args = ap.parse_args(argv)
 
-    if args.daemon and args.attach:
-        ap.error("--daemon and --attach are opposites; pick one")
+    if sum((args.daemon, args.attach, args.leveling)) > 1:
+        ap.error("--daemon, --attach and --leveling are alternatives; pick one")
 
     if args.daemon:
         from .daemon import serve
         return serve(args.socket, mode=args.mode)
+
+    if args.leveling:
+        from .leveling import serve as serve_leveling
+        return serve_leveling(args.socket)
 
     if args.attach:
         global _attach_socket

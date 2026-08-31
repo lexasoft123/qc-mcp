@@ -18,7 +18,11 @@ export const DEFAULTS: Prefs = {
   // when it is not.
   mode: 'auto',
   repo: null,
-  cortex: null
+  cortex: null,
+  bench: [],
+  // Off by default: levelling writes into real preset files, so the first save
+  // is always a deliberate one.
+  benchAutoSave: false
 }
 
 export function load(): Prefs {

@@ -9,7 +9,8 @@ __pycache__/
 /dist/
 
 # Interceptor build artifacts — do NOT commit a copy of Cortex Control
-interceptor/CortexControl-instrumented.app/
+# no trailing slash: a dev setup may symlink this rather than build it here
+interceptor/CortexControl-instrumented.app
 interceptor/interpose.dylib
 interceptor/ent.plist
 interceptor/entitlements.plist

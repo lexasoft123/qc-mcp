@@ -42,6 +42,27 @@ is 3.9.6, under the 3.10 the package needs, and Windows has none at all.
 - **Your installed Cortex Control is never touched.** The instrumented build is
   a *local copy*, re-signed ad-hoc with the app's own entitlements carried over.
 
+### Leveling — balance a setlist without walking the rig
+
+Park the presets you want to balance on one strip. Patchbay loads them on the
+device one at a time, so the arrow keys A/B them without touching the hardware,
+and it remembers the scene each preset was left on.
+
+The knob moves the **lane output** block — the level stored *in the preset*, so a
+save makes the balance permanent. A preset with several output lanes moves as a
+unit and keeps their relative balance; an internal merge bus is listed but left
+alone, since trimming it as well would apply the same change twice. Each lane
+also has its own ±0.5 dB trim.
+
+The meters are the device's own `IOMeter` stream, converted from the linear
+amplitude the QC sends onto the -40…+12 dB scale Cortex Control uses, with a
+per-preset peak hold so you can compare a column you are not standing on.
+Levels are written as you turn and read back afterwards, so the number on screen
+is the device's, never an optimistic guess.
+
+`⌘S` saves; **Auto-save** writes every change straight into the preset file (off
+by default — this edits real presets).
+
 ### Console — every module, measured
 
 ![The Console view: the connected Quad Cortex, which MCP clients hold the server entry, and the running daemon with its mode, socket, session and live reports-per-second](../docs/patchbay/console.png)

@@ -6,6 +6,7 @@ Layer stack (host <-> QC):
   message = <protobuf bytes> + [command u16 LE][u32 reserved][u16 hash]
 """
 from __future__ import annotations
+import functools
 import os
 import re
 import struct
@@ -196,11 +197,22 @@ def pool(version=None):
     return _pools[ver]
 
 
-def message_class(command, version=None):
-    """Return the generated message class for a command id or name."""
-    name = command if isinstance(command, str) else COMMANDS[command]
-    desc = pool(version).FindMessageTypeByName(f"{PACKAGE}.{name}Message")
+@functools.lru_cache(maxsize=512)
+def _message_class(name, ver):
+    desc = pool(ver).FindMessageTypeByName(f"{PACKAGE}.{name}Message")
     return _msg_class(desc)
+
+
+def message_class(command, version=None):
+    """Return the generated message class for a command id or name.
+
+    Memoized on the RESOLVED generation, not on `version=None` — otherwise a
+    later `set_version` would keep handing back the previous schema's class.
+    Worth caching: a client that decodes streamed telemetry calls this for every
+    frame, and the pool lookup plus class build is the bulk of that work.
+    """
+    name = command if isinstance(command, str) else COMMANDS[command]
+    return _message_class(name, version or _active_version)
 
 
 # --- message (protobuf + trailer) -----------------------------------------

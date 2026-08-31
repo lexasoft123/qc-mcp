@@ -270,19 +270,32 @@ jobs:
           fi
           # nullglob: each job only has its own platform's files
           shopt -s nullglob
-          # latest.yml, NOT latest*.yml. The Windows nsis target writes
-          # latest.yml because electron-builder.yml carries a `publish` block
-          # (electron-builder still publishes nothing itself), and that file is
-          # the feed the in-app updater reads.
+          FILES=(app/dist/*.dmg app/dist/*.exe app/dist/*.blockmap)
+
+          # latest.yml is the feed the in-app updater reads on Windows, written
+          # by the nsis target because electron-builder.yml carries a `publish`
+          # block (electron-builder still publishes nothing itself).
           #
-          # The macOS leg writes latest-mac.yml too — dmg-builder's DmgTarget
-          # sets `isWriteUpdateInfo` from the blockmap it builds, so a dmg-only
-          # build does produce one. It is deliberately NOT uploaded: the two mac
-          # arches are separate electron-builder invocations writing the same
-          # filename, so the file only ever describes whichever ran last (x64).
-          # Publishing it would leave correct-looking update metadata that
-          # offers an Apple Silicon user the Intel build the day someone wires
-          # macOS up to electron-updater. Nothing reads it today — macOS asks
-          # the releases API instead, see src/main/updater.ts.
-          FILES=(app/dist/*.dmg app/dist/*.exe app/dist/*.blockmap app/dist/latest.yml)
+          # The macOS leg writes a latest-mac.yml as well — dmg-builder's
+          # DmgTarget sets `isWriteUpdateInfo` from the blockmap it builds, so a
+          # dmg-only build does produce one — and it is deliberately NOT
+          # uploaded: the two mac arches are separate electron-builder
+          # invocations writing the same filename, so it only ever describes
+          # whichever ran last (x64). Publishing it would leave correct-looking
+          # update metadata that offers an Apple Silicon user the Intel build
+          # the day someone wires macOS up to electron-updater. Nothing reads it
+          # today — macOS asks the releases API, see src/main/updater.ts.
+          #
+          # Named in an `if`, not added to the glob list. `shopt -s nullglob`
+          # drops a PATTERN that matches nothing; a literal path is not a
+          # pattern, so it survives into the array and `gh release upload` then
+          # fails on a file the macOS runner never had. That is exactly how the
+          # first v0.1.3 build lost its mac leg. And `if/then` rather than
+          # `[ -f … ] && FILES+=(…)`, because this step runs under `bash -e` and
+          # a trailing AND-list that tests false fails the step — the same trap
+          # the signing step above documents.
+          if [ -f app/dist/latest.yml ]; then
+            FILES+=(app/dist/latest.yml)
+          fi
+
           gh release upload "$TAG" "${FILES[@]}" --clobber

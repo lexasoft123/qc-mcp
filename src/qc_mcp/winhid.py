@@ -336,6 +336,10 @@ class WinHIDTransport:
         # device that reports odd caps — or one we couldn't probe because it's
         # busy (input_len 0) — still gets a chance to produce a real error.
         want = self.report_size + 1
+        # With two models attached, enumeration order decides which unit we get.
+        # Rank by self.pids order first so the choice is the same every run and
+        # matches iohid and the launcher's probe.
+        cands.sort(key=lambda c: self.pids.index(c["pid"]))
         chosen = next((c for c in cands if c["input_len"] == want), cands[0])
         self.path = chosen["path"]
         self.pid = chosen["pid"]

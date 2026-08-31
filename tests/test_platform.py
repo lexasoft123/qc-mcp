@@ -109,10 +109,19 @@ def test_windows_auto_shares_even_with_cortex_control_shut():
         def open(self, handshake=True):
             raise RuntimeError("stop here - we only care about the mode choice")
 
-    real_qc, real_platform = T.QuadCortex, D.sys.platform
+    class WinSys:
+        """Only daemon.py is told it is on Windows. Assigning to `D.sys.platform`
+        would set it on the real sys module, i.e. for every module in the
+        process - including any that reads or caches it while serve() runs."""
+        platform = "win32"
+
+        def __getattr__(self, name):
+            return getattr(sys, name)
+
+    real_qc, real_sys = T.QuadCortex, D.sys
     try:
         T.QuadCortex = FakeQC
-        D.sys.platform = "win32"
+        D.sys = WinSys()
         import qc_mcp.server as S
         for cortex_up in (False, True):
             opened.clear()
@@ -127,7 +136,7 @@ def test_windows_auto_shares_even_with_cortex_control_shut():
             assert opened == {"bridge": False, "share": True}, \
                 f"Cortex Control running={cortex_up} should still share, got {opened}"
     finally:
-        T.QuadCortex, D.sys.platform = real_qc, real_platform
+        T.QuadCortex, D.sys = real_qc, real_sys
 
 
 def test_open_hid_picks_the_backend_for_the_platform():

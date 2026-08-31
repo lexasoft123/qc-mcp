@@ -76,15 +76,21 @@ def main():
     if args.list:
         return 0
 
-    print("\n== opening exclusively ==")
+    # This check deliberately SEIZES, to prove exclusive access is possible.
+    # The daemon does not: on Windows its auto mode takes a non-exclusive handle
+    # so it can run alongside Cortex Control, so a failure here is not a failure
+    # of the MCP.
+    print("\n== opening exclusively (only this check seizes; the daemon shares) ==")
+    # pid=None keeps the whole family; the transport reports what it opened
     io = winhid.WinHIDTransport(vid=args.vid, pid=args.pid, seize=True)
-    # (pid=None keeps the whole family; the transport reports what it opened)
     try:
         io.open()
     except RuntimeError as e:
         print(f"  FAILED: {e}")
-        print("\nIf Cortex Control is running, quit it (direct mode needs the device\n"
-              "to itself - Windows has no bridge mode) and run this again.")
+        print("\nSomething else holds the device, so no EXCLUSIVE handle is available.\n"
+              "Quit Cortex Control and run this again to confirm the device itself is\n"
+              "fine. Note the daemon does NOT need an exclusive handle on Windows -\n"
+              "its auto mode shares, and runs alongside the app.")
         return 4
     print(f"  ok: {device_name(io.pid)} ({io.pid:#06x})\n     {io.path}\n"
           f"     exclusive={io.exclusive} in={io._in_len} out={io._out_len}")

@@ -142,24 +142,43 @@ export async function readDevice(deep = true): Promise<DeviceInfo> {
       return { ...absent, present: /\bQuad Cortex\b/.test(t.out) }
     }
     const r = await run('ioreg', ['-p', 'IOUSB', '-l', '-w0'], { timeout: 8000 })
-    if (!r.out.includes(`"idVendor" = ${QC_VID}`)) return absent
-    // ioreg prints the ids in decimal; take whichever model is actually there.
-    const pid = pids.find((p) => r.out.includes(`"idProduct" = ${p}`))
-    if (pid === undefined) return absent
-    const idx = r.out.indexOf(`"idProduct" = ${pid}`)
-    const serial = r.out.slice(Math.max(0, idx - 4000), idx + 4000)
-      .match(/"USB Serial Number" = "([^"]+)"/)?.[1] ?? null
-    return { present: true, model: QC_PIDS[pid], serial, firmware: null }
+    // One node per `+-o` block. Vendor and product have to come from the SAME
+    // block: tested separately over the whole dump, an unrelated device sharing
+    // this (USB-audio middleware) vendor and any device whose product id
+    // happens to collide would together fake a match.
+    const nodes = r.out.split('+-o ')
+    // ioreg prints the ids in decimal. pids is in QC_PIDS order, so with two
+    // models attached this picks the same one as the transports do.
+    let found: { pid: number; node: string } | null = null
+    for (const p of pids) {
+      const node = nodes.find(
+        (b) => b.includes(`"idVendor" = ${QC_VID}`) && b.includes(`"idProduct" = ${p}`)
+      )
+      if (node !== undefined) {
+        found = { pid: p, node }
+        break
+      }
+    }
+    if (!found) return absent
+    const serial = found.node.match(/"USB Serial Number" = "([^"]+)"/)?.[1] ?? null
+    return { present: true, model: QC_PIDS[found.pid], serial, firmware: null }
   }
 
   const filter = pids.map((p) => `$_.InstanceId -like '*VID_${hex(QC_VID)}&PID_${hex(p)}*'`).join(' -or ')
-  const id = await ps(
+  // Every match, not `-First 1`: with two models attached the first row is
+  // whatever PnP happened to return. Choose in QC_PIDS order instead, so the
+  // checklist names the same unit the transports open.
+  const out = await ps(
     `(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | ` +
     `Where-Object { ${filter} } | ` +
-    `Select-Object -First 1 -ExpandProperty InstanceId)`
+    `Select-Object -ExpandProperty InstanceId)`
   )
-  if (!id) return absent
-  const pid = pids.find((p) => id.toUpperCase().includes(`PID_${hex(p)}`))
+  const ids = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+  if (!ids.length) return absent
+  const pid = pids.find((p) => ids.some((i) => i.toUpperCase().includes(`PID_${hex(p)}`)))
+  const id = pid === undefined
+    ? ids[0]
+    : ids.find((i) => i.toUpperCase().includes(`PID_${hex(pid)}`)) ?? ids[0]
   return {
     present: true,
     model: pid === undefined ? null : QC_PIDS[pid],

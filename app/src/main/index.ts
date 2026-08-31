@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron'
 import { join } from 'node:path'
 import type { CheckId, Mode, Prefs, Progress } from '../shared/types.js'
 import * as clients from './clients.js'
@@ -59,9 +59,29 @@ function create(): void {
   })
 
   win.on('ready-to-show', () => win?.show())
-  const notify = (): void => emit('window:maximized', Boolean(win?.isMaximized()))
+  // The renderer squares the window's corners off when this is true. Aero Snap
+  // never fires 'maximize', but a snapped window is just as flush against the
+  // work area — and now that the window is transparent, leaving it rounded shows
+  // the desktop through four notches at the screen edge. So judge by the bounds,
+  // and watch resize/move as well.
+  const flush = (): boolean => {
+    if (!win) return false
+    if (win.isMaximized()) return true
+    const b = win.getBounds()
+    const wa = screen.getDisplayMatching(b).workArea
+    return b.y <= wa.y && b.y + b.height >= wa.y + wa.height
+  }
+  let was: boolean | null = null
+  const notify = (): void => {
+    const now = flush()
+    if (now === was) return // resize/move fire continuously; only edges matter
+    was = now
+    emit('window:maximized', now)
+  }
   win.on('maximize', notify)
   win.on('unmaximize', notify)
+  win.on('resize', notify)
+  win.on('move', notify)
 
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
@@ -149,6 +169,10 @@ function handlers(): void {
       })
     }
     return state.push(true)
+  })
+  ipcMain.handle('cortex:focus', async () => {
+    await cortex.focus(state.getPaths())
+    return state.push()
   })
   ipcMain.handle('cortex:quit', async () => {
     await cortex.quit()

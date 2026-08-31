@@ -25,6 +25,7 @@ const api: Api = {
   setMode: (mode: Mode) => ipcRenderer.invoke('daemon:mode', mode) as Promise<Snapshot>,
 
   cortexLaunch: () => ipcRenderer.invoke('cortex:launch') as Promise<Snapshot>,
+  cortexFocus: () => ipcRenderer.invoke('cortex:focus') as Promise<Snapshot>,
   cortexQuit: () => ipcRenderer.invoke('cortex:quit') as Promise<Snapshot>,
   cortexRebuild: () => ipcRenderer.invoke('cortex:rebuild') as Promise<Snapshot>,
 

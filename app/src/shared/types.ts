@@ -233,6 +233,7 @@ export interface Api {
   setMode(mode: Mode): Promise<Snapshot>
 
   cortexLaunch(): Promise<Snapshot>
+  cortexFocus(): Promise<Snapshot>
   cortexQuit(): Promise<Snapshot>
   /** Bring a running Cortex Control forward WITHOUT relaunching it. */
   cortexRebuild(): Promise<Snapshot>

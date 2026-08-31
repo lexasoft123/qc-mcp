@@ -139,12 +139,19 @@ class IOHIDTransport:
         arr = (VoidP * n)()
         CF.CFSetGetValues(devset, ctypes.cast(arr, VoidP))
         # The vendor id belongs to a USB-audio middleware house, not to Neural
-        # DSP alone, so drop anything whose product id isn't one of ours.
-        self.dev = next((d for d in (arr[i] for i in range(n))
-                         if _dev_int(d, "ProductID") in self.pids), None)
-        if not self.dev:
+        # DSP alone, so drop anything whose product id isn't one of ours. Read
+        # the id ONCE and keep it beside its device, so self.dev and self.pid
+        # cannot describe two different units.
+        ours = [(p, d) for p, d in ((_dev_int(d, "ProductID"), d)
+                                    for d in (arr[i] for i in range(n)))
+                if p in self.pids]
+        if not ours:
             raise RuntimeError(not_found_error(self.vid, self.pids))
-        self.pid = _dev_int(self.dev, "ProductID")
+        # A CFSet has no order, so with two models attached the winner would
+        # otherwise vary run to run. Pick by self.pids order instead, which is
+        # what winhid and the launcher's probe also do.
+        ours.sort(key=lambda t: self.pids.index(t[0]))
+        self.pid, self.dev = ours[0]
         opts = kIOHIDOptionsTypeSeizeDevice if self.seize else kIOHIDOptionsTypeNone
         r = IOKit.IOHIDDeviceOpen(self.dev, opts)
         if r != 0:

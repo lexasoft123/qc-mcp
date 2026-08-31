@@ -35,9 +35,11 @@ artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 #   2. app-update.yml is packaged into the app's resources, which is where the
 #      running updater learns what feed to ask.
 #
-# Nothing equivalent happens on macOS: DmgTarget never sets isWriteUpdateInfo
-# (checked in the pinned app-builder-lib 25.1.8), so a dmg-only build has no
-# latest-mac.yml to publish — see the note in src/main/updater.ts.
+# macOS gets a latest-mac.yml out of the same block — dmg-builder's DmgTarget
+# sets `isWriteUpdateInfo` from the blockmap it builds, so a dmg-only build
+# writes one. The release workflow deliberately does not upload it: the two
+# arches are separate invocations writing the same filename, so it describes
+# only whichever ran last. Nothing reads it — see src/main/updater.ts.
 #
 # `releaseType` is left alone: it is only consulted when electron-builder does
 # the publishing, which it does not.

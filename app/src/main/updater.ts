@@ -53,13 +53,15 @@ export function version(): string {
  * macOS is told about updates rather than given them.
  *
  * Not a signing problem — the dmg is Developer ID-signed and notarized (see
- * docs/MACOS-SIGNING.md). It is packaging. Squirrel.Mac installs from a `zip`
- * feed, and `electron-builder.yml` builds `dmg` only: DmgTarget does not even
- * set isWriteUpdateInfo, so there is no latest-mac.yml for an updater to read.
- * Adding a zip target means a third artifact through Apple's notary queue on
- * every release, per arch — its own piece of work, not a flag to flip here.
- * Until then `available` is macOS's terminal state and the button opens the
- * release page.
+ * docs/MACOS-SIGNING.md). It is packaging: Squirrel.Mac installs from a `zip`
+ * feed and `electron-builder.yml` builds `dmg` only. Adding a zip target means
+ * a third artifact through Apple's notary queue on every release, per arch —
+ * its own piece of work, not a flag to flip here.
+ *
+ * A latest-mac.yml IS written (dmg-builder sets isWriteUpdateInfo from the
+ * blockmap) but it is not published, because the two arches are separate
+ * invocations writing one filename and it ends up naming only the last. So
+ * `available` is macOS's terminal state and the button opens the release page.
  *
  * The outcome is kept in a local and returned, rather than read back off
  * `current`: two checks can overlap (the six-hourly tick and a Check now

@@ -62,6 +62,23 @@ function newer(tag: string, base: string): boolean {
 }
 
 /**
+ * One readable line out of whatever threw.
+ *
+ * Measured, not guessed: when the newest release carries no latest.yml — every
+ * release cut before the updater existed, and any release where the upload is
+ * missed — electron-updater's 404 arrives as ~2 KB. The URL, then GitHub's full
+ * response headers, then a stack trace through the asar. Put verbatim into a
+ * Preferences row that is a wall of text, so this keeps the first line (which
+ * is the part that says what went wrong) and caps it.
+ */
+function reason(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  const line = raw.split('\n')[0].trim()
+  if (!line) return 'check failed'
+  return line.length > 160 ? line.slice(0, 159) + '…' : line
+}
+
+/**
  * A release URL is a value read off the network, and it ends up in
  * `shell.openExternal` — which will happily launch a `file:` or custom-scheme
  * handler. Only GitHub over https survives; anything else falls back to the
@@ -109,7 +126,7 @@ async function checkViaGithub(): Promise<UpdateState> {
       set({ state: 'none' })
     }
   } catch (err) {
-    set({ state: 'error', message: String(err instanceof Error ? err.message : err) })
+    set({ state: 'error', message: reason(err) })
   } finally {
     clearTimeout(kill)
   }
@@ -146,7 +163,7 @@ function checkViaElectronUpdater(): void {
   )
   autoUpdater.on('update-downloaded', (info) => set({ state: 'ready', version: info.version }))
   autoUpdater.on('update-not-available', () => set({ state: 'none' }))
-  autoUpdater.on('error', (err) => set({ state: 'error', message: String(err instanceof Error ? err.message : err) }))
+  autoUpdater.on('error', (err) => set({ state: 'error', message: reason(err) }))
   void autoUpdater.checkForUpdates().catch(() => {})
 }
 

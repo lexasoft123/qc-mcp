@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import type { CortexInfo, DeviceInfo, InstrumentedInfo, Paths } from '../shared/types.js'
 import { IS_MAC, QC_PIDS, QC_VID, UV_PYTHON, instrumentedApp, uvBin } from './paths.js'
 import { exists, ps, run } from './util.js'
+import { t } from '../shared/i18n/index.js'
 
 // ── python ──────────────────────────────────────────────────────────────
 
@@ -45,8 +46,10 @@ export async function findPython(): Promise<PythonInfo> {
 
 /** Human label for the python check — the uv case has nothing to install. */
 export function pythonDetail(p: PythonInfo): string {
-  if (p.uv) return `bundled <code>uv ${p.version ?? ''}</code> installs Python ${UV_PYTHON} — nothing to set up`
-  return p.version ? `<code>${p.path}</code> · ${p.version}` : `<code>${p.path}</code> — not found`
+  if (p.uv) return t('check.python.uv', { version: p.version ?? '', py: UV_PYTHON })
+  return p.version
+    ? t('check.python.found', { path: p.path, version: p.version })
+    : t('check.python.notFound', { path: p.path })
 }
 
 export async function hasClang(): Promise<boolean> {

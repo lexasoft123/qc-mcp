@@ -11,6 +11,17 @@
   --sz-font-mono: 'Martian Mono Variable', ui-monospace, 'SF Mono', monospace;
 }
 
+/*
+ * Chinese. Bricolage has no CJK glyphs, so the browser falls through to the
+ * next face for every Han character — and left to itself it picks a serif on
+ * some Windows machines. Name the system UI faces so Latin stays Bricolage and
+ * the rest lands on PingFang / YaHei. <html lang> is set from the snapshot.
+ */
+html:lang(zh) {
+  --sz-font-display: 'Bricolage Grotesque Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
+}
+html:lang(zh) body { line-height: 1.5; }
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #root { height: 100%; }
 
@@ -422,10 +433,20 @@ body::after {
 /* The kit's .mode-seg is overflow:hidden for its pill radius, so a flex item
    allowed to shrink loses its last segment silently — "Direct" simply vanished
    in the 560px Preferences card while the wider Console row showed all three. */
-.pref-row .mode-seg { flex: none; }
+.pref-row .mode-seg, .pref-row .lang { flex: none; }
 .pref-row .n { font-size: 12.5px; font-weight: 600; }
 .pref-row .d { font-size: 10.5px; color: var(--sz-faint); margin-top: 3px; line-height: 1.55; overflow-wrap: anywhere; }
 .pref-row .d code { font-family: var(--sz-font-mono); font-size: 9.5px; font-variation-settings: 'wdth' 87.5; }
+/* After Apply: what each chosen client does with the entry, and how to check. */
+.hints { display: grid; gap: 6px; margin-top: 14px; }
+.hints > .eyebrow { margin-bottom: 2px; }
+.hint { display: flex; gap: 10px; font-size: 11px; color: var(--sz-dim); line-height: 1.5; }
+.hint b { flex: none; min-width: 96px; color: var(--sz-text); font-weight: 600; }
+.hint code { font-family: var(--sz-font-mono); font-size: 10px; color: var(--sz-faint); font-variation-settings: 'wdth' 87.5; }
+.snippet-label { margin-top: 12px; font-size: 11px; color: var(--sz-faint); line-height: 1.5; }
+.snippet-label code { font-family: var(--sz-font-mono); font-size: 10px; }
+.snippet-label + .snippet { margin-top: 6px; }
+
 /* In the clients sheet the amber fill means "installed here" — a real choice.
    A preference is just on or off, so only the box carries the state. */
 .prefs-card .tog[aria-pressed='true'] { background: transparent; border-color: transparent; }

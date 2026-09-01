@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { Progress, Snapshot, UpdateState } from '@shared/types'
+import { getLocale, setLocale } from '@shared/i18n'
 
 // ── the snapshot the main process owns ──────────────────────────────────
 
@@ -7,6 +8,13 @@ let snap: Snapshot | null = null
 const subs = new Set<() => void>()
 
 export function publish(s: Snapshot): void {
+  // The language rides the snapshot. Set it BEFORE the subscribers run, so
+  // the render that follows already reads the new dictionary — and put it on
+  // <html>, which is what the CJK font fallback and :lang() rules key on.
+  if (s.locale !== getLocale()) {
+    setLocale(s.locale)
+    document.documentElement.lang = s.locale
+  }
   snap = s
   subs.forEach((f) => f())
 }

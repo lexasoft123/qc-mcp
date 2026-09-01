@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Modal, ModalActions } from '@singz/ui'
 import type { BenchSlot, PresetFolder, PresetRef } from '@shared/types'
 import { slotId } from '../derive.js'
+import { t, tn } from '../i18n.js'
 
 /**
  * Pick presets to park on the bench.
@@ -63,38 +64,35 @@ export function PresetPicker({
   }
 
   return (
-    <Modal onClose={onClose} cardClassName="picker-card" aria-label="Add presets to the bench">
-      <h2>Add presets to the bench</h2>
-      <p className="fine">
-        Everything here is read from the Quad Cortex&apos;s own directory. Pick the
-        presets you want to balance against each other.
-      </p>
+    <Modal onClose={onClose} cardClassName="picker-card" aria-label={t('pick.title')}>
+      <h2>{t('pick.title')}</h2>
+      <p className="fine">{t('pick.intro')}</p>
 
       <div className="pick-tools">
         <input
           className="pick-search"
-          placeholder="Search presets…"
+          placeholder={t('pick.search')}
           value={query}
           autoFocus
           onChange={(e) => setQuery(e.target.value)}
         />
         <Button size="sm" onClick={() => load(true)} disabled={busy}>
-          {busy ? 'Reading…' : 'Re-read device'}
+          {busy ? t('pick.reading') : t('pick.reread')}
         </Button>
       </div>
 
       {error && <div className="strip bad"><span className="grow">{error}</span></div>}
 
       <div className="pick-list">
-        {!folders && !error && <div className="fine">Reading the directory…</div>}
+        {!folders && !error && <div className="fine">{t('pick.readingDir')}</div>}
         {folders && hits.length === 0 && (
-          <div className="fine">No preset matches “{query}”.</div>
+          <div className="fine">{t('pick.noMatch', { q: query })}</div>
         )}
         {hits.map((f) => (
           <section key={f.key}>
             <h3>
               {f.name}
-              {f.isFactory && <Badge className="off">factory</Badge>}
+              {f.isFactory && <Badge className="off">{t('pick.factory')}</Badge>}
             </h3>
             <div className="pick-grid">
               {f.presets.map((p) => (
@@ -114,13 +112,13 @@ export function PresetPicker({
       </div>
 
       <ModalActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose}>{t('pick.cancel')}</Button>
         <Button
           variant="primary"
           disabled={picked.length === 0}
           onClick={() => onAdd(picked)}
         >
-          Add {picked.length || ''} {picked.length === 1 ? 'preset' : 'presets'}
+          {picked.length ? tn('pick.add', picked.length) : t('pick.addNone')}
         </Button>
       </ModalActions>
     </Modal>

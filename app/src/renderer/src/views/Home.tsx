@@ -3,6 +3,7 @@ import { Button } from '@singz/ui'
 import type { Snapshot } from '@shared/types'
 import { isLinked, isMac, setupPending, sharedWriters } from '../derive.js'
 import { act, publish, say, useProgress } from '../store.js'
+import { T, t } from '../i18n.js'
 import { SignalPath } from '../components/SignalPath.js'
 import { Strip } from '../components/Bits.js'
 
@@ -20,7 +21,7 @@ async function connect(): Promise<void> {
   if (isMac(s) && s.prefs.mode !== 'direct' && !s.cortex.running) s = await window.patchbay.cortexLaunch()
   if (s.daemon.state !== 'running') s = await window.patchbay.daemonStart()
   publish(s)
-  if (s.daemon.state === 'running') say('Connected — Claude can reach your Quad Cortex')
+  if (s.daemon.state === 'running') say(t('home.connectedToast'))
   else if (s.daemon.error) say(s.daemon.error, true)
 }
 
@@ -40,37 +41,33 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
   let second: [string, () => void] | null = null
 
   if (busy) {
-    title = 'Getting you connected'
-    lede = 'This part only happens once. Every step is listed under Setup if you want to watch.'
-    label = 'Working…'
+    title = t('home.busy.title')
+    lede = t('home.busy.lede')
+    label = t('home.working')
     disabled = true
   } else if (!snap.device.present) {
-    title = 'Plug in your Quad Cortex'
-    lede = 'Connect it to this computer with a USB cable and Patchbay will pick it up. Nothing else to do.'
-    label = 'Connect'
+    title = t('home.plug.title')
+    lede = t('home.plug.lede')
+    label = t('home.connect')
     disabled = true
   } else if (pending) {
-    title = 'One-time setup'
-    lede = mac
-      ? 'Patchbay installs qc-mcp, builds its own copy of Cortex Control, and registers the server with Claude. It never asks for your password.'
-      : 'Patchbay installs qc-mcp and registers the server with Claude. No copy to build on Windows, and it never asks for your password.'
-    label = 'Set up and connect'
-    second = ['See each step', () => goto('setup')]
+    title = t('home.setup.title')
+    lede = mac ? t('home.setup.ledeMac') : t('home.setup.ledeWin')
+    label = t('home.setup.label')
+    second = [t('home.setup.second'), () => goto('setup')]
   } else if (snap.daemon.state !== 'running') {
-    title = 'Ready when you are'
-    lede = mac
-      ? 'One press starts the daemon and opens Cortex Control, so Claude can read and change presets on your Quad Cortex.'
-      : 'One press starts the daemon, and Claude can read and change presets on your Quad Cortex — with or without Cortex Control open.'
-    label = 'Connect'
+    title = t('home.ready.title')
+    lede = mac ? t('home.ready.ledeMac') : t('home.ready.ledeWin')
+    label = t('home.connect')
   } else if (!linked) {
     // macOS only: bridge mode rides the app's session, so the app must be up
-    title = 'Almost there'
-    lede = "Bridge mode shares Cortex Control's session with Claude, so the app needs to be open too."
-    label = 'Open Cortex Control'
+    title = t('home.almost.title')
+    lede = t('home.almost.lede')
+    label = t('home.openApp')
   } else {
-    title = "You're connected"
-    lede = 'Ask Claude for a tone and it will build it on the Quad Cortex.'
-    label = 'Disconnect'
+    title = t('home.connected.title')
+    lede = t('home.connected.lede')
+    label = t('home.disconnect')
     action = 'disconnect'
     // Launch/quit like the Console page's button, which is what makes this work
     // on Windows at all — `cortexFocus` was `open -a` behind an IS_MAC guard, so
@@ -79,10 +76,10 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
     // app's session, so quitting would silently drop the connection we just told
     // the user they had. Raise it instead.
     second = !snap.cortex.running
-      ? ['Open Cortex Control', () => { void act(() => window.patchbay.cortexLaunch()) }]
+      ? [t('home.openApp'), () => { void act(() => window.patchbay.cortexLaunch()) }]
       : mac
-        ? ['Show Cortex Control', () => { void act(() => window.patchbay.cortexFocus()) }]
-        : ['Quit Cortex Control', () => { void act(() => window.patchbay.cortexQuit()) }]
+        ? [t('home.showApp'), () => { void act(() => window.patchbay.cortexFocus()) }]
+        : [t('home.quitApp'), () => { void act(() => window.patchbay.cortexQuit()) }]
   }
 
   const press = async (): Promise<void> => {
@@ -90,7 +87,7 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
       let s = await window.patchbay.daemonStop()
       if (s.cortex.running && snap.prefs.quitApp) s = await window.patchbay.cortexQuit()
       publish(s)
-      say('Disconnected. Your presets are untouched.')
+      say(t('home.disconnectedToast'))
       return
     }
     setBusy(true)
@@ -113,7 +110,7 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
                 style={{ width: `${progress && progress.total ? Math.round((progress.done / progress.total) * 100) : 8}%` }}
               />
             </span>
-            <div className="lbl">{progress?.label ?? 'Checking what is missing'}</div>
+            <div className="lbl">{progress?.label ?? t('home.checking')}</div>
           </div>
         )}
 
@@ -132,24 +129,20 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
         <div className="home-warn">
           {!busy && sharedWriters(snap) && (
             <Strip>
-              <span className="grow">
-                Cortex Control is open too. Both are writing to the same device — fine for ordinary
-                edits, but use <b>Direct</b> for heavy work.
-              </span>
+              <span className="grow"><T k="home.sharedWarn" /></span>
             </Strip>
           )}
           {!busy && mac && snap.device.present && !pending && snap.cortex.needsRebuild && (
             <Strip>
               <span className="grow">
-                Cortex Control updated to <b>{snap.cortex.version}</b>. Its instrumented copy is{' '}
-                {snap.cortex.instrumented?.version} — rebuild to stay in sync.
+                <T k="home.rebuildWarn" vars={{ version: snap.cortex.version ?? '', old: snap.cortex.instrumented?.version ?? '' }} />
               </span>
-              <Button size="sm" onClick={() => goto('console')}>Rebuild</Button>
+              <Button size="sm" onClick={() => goto('console')}>{t('home.rebuild')}</Button>
             </Strip>
           )}
         </div>
 
-        {!busy && <p className="home-note">Every one of these has a detailed view under Console.</p>}
+        {!busy && <p className="home-note">{t('home.note')}</p>}
       </div>
     </div>
   )

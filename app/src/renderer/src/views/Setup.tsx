@@ -3,9 +3,11 @@ import { Badge, Button } from '@singz/ui'
 import type { CheckId, Snapshot } from '@shared/types'
 import { isMac, setupPending } from '../derive.js'
 import { act, say, useProgress } from '../store.js'
+import { T, t, type Key } from '../i18n.js'
 import { Detail } from '../components/Bits.js'
 
-const COUNT: Record<number, string> = { 4: 'four', 5: 'five', 6: 'six', 7: 'seven' }
+/** "seven" in English, "7" in Chinese — the dictionary decides. */
+const count = (n: number): string => (n >= 4 && n <= 7 ? t(`num.${n}` as Key) : String(n))
 
 export function Setup({ snap }: { snap: Snapshot }): React.JSX.Element {
   const [running, setRunning] = useState<CheckId | 'all' | null>(null)
@@ -18,7 +20,7 @@ export function Setup({ snap }: { snap: Snapshot }): React.JSX.Element {
     setRunning(only ?? 'all')
     try {
       await act(() => window.patchbay.runSetup(only ? [only] : undefined))
-      say(only ? 'Done' : 'Setup complete — qc-mcp is ready')
+      say(only ? t('setup.done') : t('setup.completeToast'))
     } finally {
       setRunning(null)
     }
@@ -27,13 +29,10 @@ export function Setup({ snap }: { snap: Snapshot }): React.JSX.Element {
   return (
     <div className="view">
       <div className="setup-head">
-        <h1>Set up once, then forget it</h1>
+        <h1>{t('setup.title')}</h1>
         <p className="fine">
-          Patchbay checks the {COUNT[snap.checks.length] ?? snap.checks.length} things qc-mcp needs,
-          and fixes the ones it can.{' '}
-          {isMac(snap)
-            ? <>The instrumented build re-signs a <b>local copy</b> of Cortex Control — your installed app is never touched.</>
-            : <>Nothing is copied or re-signed here: the daemon shares the device by opening a <b>second HID handle</b> beside Cortex Control.</>}
+          {t('setup.intro', { count: count(snap.checks.length) })}{' '}
+          <T k={isMac(snap) ? 'setup.introMac' : 'setup.introWin'} />
         </p>
       </div>
 
@@ -50,12 +49,12 @@ export function Setup({ snap }: { snap: Snapshot }): React.JSX.Element {
               </span>
               <span className="right">
                 {busy
-                  ? <Badge className="attn">working…</Badge>
+                  ? <Badge className="attn">{t('setup.working')}</Badge>
                   : c.status === 'ok'
-                    ? <Badge className="live">ok</Badge>
-                    : <Badge className={c.fixable ? 'off' : 'bad'}>{c.fixable ? 'to do' : 'missing'}</Badge>}
+                    ? <Badge className="live">{t('setup.ok')}</Badge>
+                    : <Badge className={c.fixable ? 'off' : 'bad'}>{c.fixable ? t('setup.todo') : t('setup.missing')}</Badge>}
                 {c.status !== 'ok' && c.fixable && !running && (
-                  <Button size="sm" onClick={() => void run(c.id)}>Fix</Button>
+                  <Button size="sm" onClick={() => void run(c.id)}>{t('setup.fix')}</Button>
                 )}
               </span>
             </div>
@@ -65,19 +64,19 @@ export function Setup({ snap }: { snap: Snapshot }): React.JSX.Element {
 
       <div className="setup-foot">
         <Button variant="primary" disabled={!pending || running !== null} onClick={() => void run()}>
-          {running ? 'Working…' : pending ? 'Run setup' : 'Everything is set up'}
+          {running ? t('setup.busy') : pending ? t('setup.run') : t('setup.allDone')}
         </Button>
         <Button disabled={running !== null} onClick={() => void act(() => window.patchbay.runChecks())}>
-          Re-check
+          {t('setup.recheck')}
         </Button>
         <span className="grow" />
         <span className="fine">
           {progress?.label
             ?? (deviceMissing
-              ? 'Plug your Quad Cortex into USB to finish the last check.'
+              ? t('setup.plugHint')
               : pending
-                ? 'Nothing here needs your password.'
-                : 'Re-check after a Cortex Control update.')}
+                ? t('setup.noPassword')
+                : t('setup.recheckHint'))}
         </span>
       </div>
     </div>

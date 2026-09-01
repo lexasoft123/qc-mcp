@@ -1,5 +1,7 @@
 # Patchbay
 
+**中文用户：**[简体中文上手指南 → README.zh-CN.md](README.zh-CN.md)
+
 Ask Claude for a tone and it builds it on your Quad Cortex. Patchbay is the
 launcher that makes that true: it installs [qc-mcp](../README.md), registers the
 server with your MCP clients, runs the daemon that owns the device, and opens
@@ -33,7 +35,12 @@ is 3.9.6, under the 3.10 the package needs, and Windows has none at all.
 - **One daemon, every client** — the daemon owns the device and fans
   device→host reports out to every attached MCP client, each with a disjoint
   `request_id` range so two can never mistake each other's replies. Claude Code,
-  Claude Desktop, Cursor and VS Code can all be attached at the same time.
+  Claude Desktop, Cursor, VS Code, Zed and Codex can all be attached at the
+  same time — see [Connecting an AI client](#connecting-an-ai-client).
+- **Speaks your language** — English and Simplified Chinese, following the
+  system language on first launch; Preferences has the switcher. Everything
+  switches at once: the views, the checklist, the progress lines, the update
+  messages. See [Language](#language).
 - **Setup that actually checks** — seven probes on macOS, five on Windows, each
   one a real measurement rather than a stored flag, with a fix for the ones
   Patchbay can perform. It never asks for your password.
@@ -79,6 +86,67 @@ selector switches auto / bridge / direct on a running daemon.
 
 ![The Logs view streaming HID reports with timestamps, direction, byte counts and hex, with failed writes highlighted](../docs/patchbay/logs.png)
 
+## Connecting an AI client
+
+Patchbay registers `quad-cortex` with every client it finds on the machine
+the first time setup runs, and **Console → Manage clients…** is where you
+change that later. Every entry is the same three words — the `qc-mcp` binary,
+`--attach`, and the daemon's socket — written into each client's own file, and
+the sheet shows what each client does with it once you press **Apply**.
+
+| client | config file | written how | then |
+|---|---|---|---|
+| Claude Code | `~/.claude.json` | `claude mcp add --scope user` when the CLI is on PATH, else a JSON merge | new sessions see it; `claude mcp list` confirms |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` · `%APPDATA%\Claude\…` | JSON merge under `mcpServers` | quit and reopen the app; it reads the file at launch |
+| Cursor | `~/.cursor/mcp.json` | JSON merge under `mcpServers` | Settings → MCP lists it; switch it on if it is off |
+| VS Code | `~/Library/Application Support/Code/User/mcp.json` · `%APPDATA%\Code\User\…` | JSON merge under `servers` | **MCP: List Servers** from the Command Palette, and start it |
+| Zed | `~/.config/zed/settings.json` · `%APPDATA%\Zed\…` | JSON merge under `context_servers` | restart Zed; the Agent panel's settings list it |
+| Codex | `~/.codex/config.toml` | its own `[mcp_servers.quad-cortex]` table, the rest of the file untouched | new sessions see it; `codex mcp list` confirms |
+
+A client that is not on this list gets the same entry by hand. JSON clients:
+
+```json
+{ "mcpServers": { "quad-cortex": {
+    "command": "/absolute/path/to/.venv/bin/qc-mcp",
+    "args": ["--attach", "--socket", "/absolute/path/to/daemon.sock"] } } }
+```
+
+and the TOML twin for Codex (or anything else that reads TOML):
+
+```toml
+[mcp_servers.quad-cortex]
+command = "/absolute/path/to/.venv/bin/qc-mcp"
+args = ["--attach", "--socket", "/absolute/path/to/daemon.sock"]
+```
+
+The real paths are in the sheet, filled in for your machine — Preferences →
+Locations shows where the repo is, and the socket lives under
+`~/Library/Application Support/qc-mcp/` on macOS and `%LOCALAPPDATA%\qc-mcp\`
+on Windows. `--attach` is what makes several clients share one device: an
+entry without it (the shape `install.sh` used to write) opens the device for
+itself and fails while the daemon holds it, which is what the amber
+**opens the device itself** in Console means. **Re-point** rewrites it.
+
+## Language
+
+Patchbay follows the system language: a Mac or PC set to Simplified Chinese
+gets a Chinese Patchbay on first launch, nothing to find first. Preferences
+has the switcher — the first group in the dialog, on purpose — with a
+*System* entry that says which language it currently resolves to, and each
+language listed by its own name.
+
+Both processes translate: the renderer for the views, and the main process
+for what it originates — the Setup checklist, the progress lines during an
+install, the daemon's errors — so a toast reads in the same language as the
+button that caused it. The dictionaries live in
+[`src/shared/i18n/`](src/shared/i18n/), typed against English, so a string
+missing from a translation is a compile error rather than an English line on a
+Chinese screen. `npm test` checks the placeholders and markup match too.
+
+Traditional Chinese (`zh-TW`, `zh-HK`) is deliberately not mapped onto the
+Simplified translation: it is one click away in the switcher, but nobody is
+handed it.
+
 ## Install
 
 Download the installer for your platform from
@@ -104,7 +172,7 @@ Everything the main process reports is measured, not mocked:
 | clang | `clang --version` (macOS only) |
 | Cortex Control | `Info.plist` via `defaults read`, or the exe's `ProductVersion` |
 | instrumented copy | `codesign -dvvv` flags **and** the entitlements — both, because injection needs the hardened runtime off *and* library validation disabled |
-| registration | each client's own config file is read for the `quad-cortex` key |
+| registration | each client's own config file is read for the `quad-cortex` key — JSON, or Codex's `[mcp_servers.quad-cortex]` table |
 | device | `ioreg -p IOUSB` for vid `0x152a` / pid `0x880a` (Quad Cortex) or `0x892f` (Mini), or `Get-PnpDevice` |
 | reports/s | counted from the interposer's own millisecond stamps in the last 2 s |
 

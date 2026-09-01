@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Button, SegmentedControl, StatusDot, WindowButtons } from '@singz/ui'
-import { isMac, railText, regCount, sessionMode } from './derive.js'
+import { isMac, railText, regCount, sessionWord } from './derive.js'
 import { useSnapshot, useToast, useUpdate } from './store.js'
+import { t, tn } from './i18n.js'
 import { Gear } from './components/Icons.js'
 import { UpdateChip } from './components/Bits.js'
 import { Home } from './views/Home.js'
@@ -13,12 +14,13 @@ import { Prefs } from './modals/Prefs.js'
 
 type View = 'home' | 'console' | 'leveling' | 'setup' | 'logs'
 
-const VIEWS: { value: View; label: string }[] = [
-  { value: 'home', label: 'Home' },
-  { value: 'console', label: 'Console' },
-  { value: 'leveling', label: 'Leveling' },
-  { value: 'setup', label: 'Setup' },
-  { value: 'logs', label: 'Logs' }
+/** Built per render: the labels follow the language. */
+const views = (): { value: View; label: string }[] => [
+  { value: 'home', label: t('view.home') },
+  { value: 'console', label: t('view.console') },
+  { value: 'leveling', label: t('view.leveling') },
+  { value: 'setup', label: t('view.setup') },
+  { value: 'logs', label: t('view.logs') }
 ]
 
 export function App(): React.JSX.Element {
@@ -47,17 +49,17 @@ export function App(): React.JSX.Element {
     <div className="app">
       <div className="titlebar">
         <span className="logo">Patch<span>bay</span></span>
-        <SegmentedControl options={VIEWS} value={view} onChange={setView} aria-label="View" />
+        <SegmentedControl options={views()} value={view} onChange={setView} aria-label={t('aria.view')} />
         <span className="grow" />
         <div className="tb-status">
           <StatusDot tone={live ? 'ok' : 'idle'} />
           <span>
             {live
-              ? `${sessionMode(snap)} session · ${n} ${n === 1 ? 'client' : 'clients'}`
-              : 'daemon stopped'}
+              ? t('tb.session', { mode: sessionWord(snap), clients: tn('clients', n) })
+              : t('tb.stopped')}
           </span>
         </div>
-        <Button size="sm" icon title="Preferences" aria-label="Preferences" onClick={() => setPrefs(true)}>
+        <Button size="sm" icon title={t('prefs.open')} aria-label={t('prefs.open')} onClick={() => setPrefs(true)}>
           <Gear />
         </Button>
         {onWindows && <WindowButtons api={window.patchbay.window} />}
@@ -80,7 +82,7 @@ export function App(): React.JSX.Element {
         <span className="grow" />
         <UpdateChip update={update} />
         <span className="ver">
-          Patchbay {snap.version} · {isMac(snap) ? 'macOS' : 'Windows'}
+          {t('rail.version', { version: snap.version, os: isMac(snap) ? 'macOS' : 'Windows' })}
         </span>
       </div>
 

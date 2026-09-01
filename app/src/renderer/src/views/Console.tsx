@@ -3,14 +3,15 @@ import { Badge, Button, Modal, ModalActions, SegmentedControl, StatusDot } from 
 import type { Mode, Snapshot } from '@shared/types'
 import { clash, isMac, sessionFact, sharedWriters, staleClients, uptime } from '../derive.js'
 import { act, say, useProgress } from '../store.js'
+import { T, t, tn } from '../i18n.js'
 import { Facts, Strip, Tag } from '../components/Bits.js'
 import { Sparkline } from '../components/Sparkline.js'
 import { Clients } from '../modals/Clients.js'
 
-const MODES: { value: Mode; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'bridge', label: 'Bridge' },
-  { value: 'direct', label: 'Direct' }
+export const modes = (): { value: Mode; label: string }[] => [
+  { value: 'auto', label: t('mode.auto') },
+  { value: 'bridge', label: t('mode.bridge') },
+  { value: 'direct', label: t('mode.direct') }
 ]
 
 /** Keep a minute of the measured rate for the meter. */
@@ -34,12 +35,14 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
   const live = snap.daemon.state === 'running'
   const online = snap.device.present && (live || snap.cortex.running)
   const series = useSeries(snap.daemon.reportsPerSecond, live || snap.cortex.running)
+  const installed = snap.clients.filter((c) => c.installed).length
+  const stale = staleClients(snap)
 
   const rebuild = async (): Promise<void> => {
     setRebuilding(true)
     try {
       await act(() => window.patchbay.cortexRebuild())
-      say('Rebuilt the instrumented copy')
+      say(t('rebuild.toast'))
     } finally {
       setRebuilding(false)
       setSheet(null)
@@ -52,15 +55,15 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
         <div className="device-id">
           <div className={online ? 'qc-mark' : 'qc-mark off'}>QC</div>
           <div>
-            <h1>Quad Cortex</h1>
+            <h1>{t('console.device')}</h1>
             <div className="sub">
               <span className="fine mono">
                 {snap.device.present
-                  ? `USB · ${snap.device.serial ?? 'serial unavailable'}`
-                  : 'no Quad Cortex on USB — check the cable'}
+                  ? t('console.usb', { serial: snap.device.serial ?? t('console.serialNA') })
+                  : t('console.noDevice')}
               </span>
               <Badge className={online ? 'live' : 'off'}>
-                {!snap.device.present ? 'not found' : online ? 'connected' : 'no session'}
+                {!snap.device.present ? t('console.notFound') : online ? t('console.connected') : t('console.noSession')}
               </Badge>
             </div>
           </div>
@@ -74,26 +77,23 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
         {/* ── MCP registration ── */}
         <article className="mod">
           <div className="mod-head">
-            <StatusDot tone={snap.clients.some((c) => c.installed) ? 'ok' : 'idle'} />
-            <h2>MCP registration</h2>
-            <Badge className={snap.clients.some((c) => c.installed) ? '' : 'off'}>
-              {snap.clients.filter((c) => c.installed).length || 'no'} clients
+            <StatusDot tone={installed ? 'ok' : 'idle'} />
+            <h2>{t('console.reg')}</h2>
+            <Badge className={installed ? '' : 'off'}>
+              {installed ? tn('clients', installed) : t('console.regNone')}
             </Badge>
             <span className="grow" />
             <div className="acts">
-              <Button size="sm" onClick={() => setSheet('clients')}>Manage clients…</Button>
+              <Button size="sm" onClick={() => setSheet('clients')}>{t('console.manage')}</Button>
             </div>
           </div>
           <div className="mod-body">
-            {staleClients(snap).length > 0 && (
+            {stale.length > 0 && (
               <Strip>
                 <span className="grow">
-                  {staleClients(snap).map((c) => c.name).join(', ')}{' '}
-                  {staleClients(snap).length === 1 ? 'was' : 'were'} registered before the daemon and
-                  still open the device directly, so {staleClients(snap).length === 1 ? 'it' : 'they'}{' '}
-                  will fail while the daemon holds it.
+                  {tn('console.stale', stale.length, { names: stale.map((c) => c.name).join(', ') })}
                 </span>
-                <Button size="sm" onClick={() => setSheet('clients')}>Re-point</Button>
+                <Button size="sm" onClick={() => setSheet('clients')}>{t('console.repoint')}</Button>
               </Strip>
             )}
             <div className="clients">
@@ -103,15 +103,12 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
                   <span className="name">{c.name}</span>
                   <span className="path mono">{c.path}</span>
                   <span className={c.installed && !c.stale ? 'state on' : 'state'}>
-                    {!c.installed ? 'not installed' : c.stale ? 'opens the device itself' : 'installed'}
+                    {!c.installed ? t('console.notInstalled') : c.stale ? t('console.opensItself') : t('console.installed')}
                   </span>
                 </div>
               ))}
             </div>
-            <p className="fine">
-              Every client points at the same binary — <code>{snap.paths.show.bin}</code>. Move the repo
-              and Patchbay rewrites all of them.
-            </p>
+            <p className="fine"><T k="console.samePath" vars={{ bin: snap.paths.show.bin }} /></p>
           </div>
         </article>
 
@@ -119,21 +116,19 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
         <article className={live ? 'mod live' : 'mod'}>
           <div className="mod-head">
             <StatusDot tone={live ? 'ok' : snap.daemon.state === 'starting' ? 'warn' : 'idle'} />
-            <h2>qc-mcp daemon</h2>
+            <h2>{t('console.daemon')}</h2>
             <Badge className={live ? 'live' : snap.daemon.state === 'starting' ? 'attn' : 'off'}>
-              {snap.daemon.state}
+              {t(`state.${snap.daemon.state}`)}
             </Badge>
             <span className="grow" />
             <div className="acts">
               <SegmentedControl
-                options={MODES}
+                options={modes()}
                 value={snap.prefs.mode}
-                aria-label="Connection mode"
+                aria-label={t('aria.mode')}
                 onChange={(m) => {
                   void act(() => window.patchbay.setMode(m))
-                  if (m === 'direct' && snap.cortex.running) {
-                    say('Direct mode needs the device to itself — quit Cortex Control.', true)
-                  }
+                  if (m === 'direct' && snap.cortex.running) say(t('console.directNeedsApp'), true)
                 }}
               />
               <Button
@@ -142,52 +137,42 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
                 disabled={snap.daemon.state === 'starting'}
                 onClick={() => void act(() => (live ? window.patchbay.daemonStop() : window.patchbay.daemonStart()))}
               >
-                {live ? 'Stop' : snap.daemon.state === 'starting' ? 'Starting…' : 'Start daemon'}
+                {live ? t('console.stop') : snap.daemon.state === 'starting' ? t('console.starting') : t('console.start')}
               </Button>
             </div>
           </div>
           <div className="mod-body">
             {clash(snap) && (
               <Strip bad>
-                <span className="grow">
-                  Direct mode needs the device to itself. Cortex Control is holding it — quit the
-                  app, or switch back to Bridge.
-                </span>
+                <span className="grow">{t('console.clash')}</span>
                 <Button variant="danger" size="sm" onClick={() => void act(() => window.patchbay.cortexQuit())}>
-                  Quit app
+                  {t('console.quitApp')}
                 </Button>
               </Strip>
             )}
             {sharedWriters(snap) && (
               <Strip>
-                <span className="grow">
-                  Cortex Control and the daemon are independent writers on one handle. Reads and
-                  single-value edits are atomic, so this is safe for ordinary use — switch to{' '}
-                  <b>Direct</b> for write-heavy work.
-                </span>
+                <span className="grow"><T k="console.sharedWriters" /></span>
               </Strip>
             )}
             {!snap.daemon.supported && snap.daemon.error && (
               <Strip bad>
-                <span className="grow">
-                  This qc-mcp build has no daemon entry point yet. Patchbay expects{' '}
-                  <code>qc-mcp --daemon --socket …</code>. {snap.daemon.error}
-                </span>
+                <span className="grow"><T k="console.noDaemon" vars={{ error: snap.daemon.error }} /></span>
               </Strip>
             )}
             <div className="meter" style={{ opacity: live || snap.cortex.running ? 1 : 0.32 }}>
               <div className="box"><Sparkline series={series} live={live || snap.cortex.running} /></div>
               <div className="read">
                 <div className="n">{live || snap.cortex.running ? snap.daemon.reportsPerSecond : '—'}</div>
-                <div className="u">reports/s</div>
+                <div className="u">{t('console.rps')}</div>
               </div>
             </div>
             <Facts
               rows={[
-                ['status', live ? `pid ${snap.daemon.pid} · up ${uptime(snap.daemon.startedAt)}` : 'not running', live ? '' : 'off'],
-                [mac ? 'socket' : 'named pipe', snap.paths.show.socket, live ? 'muted' : 'off'],
-                ['session', live ? sessionFact(snap) : '—', live ? '' : 'off'],
-                ['attached clients', live ? (snap.daemon.clients.join(', ') || 'none') : '—', live ? 'muted' : 'off']
+                [t('fact.status'), live ? t('fact.pidUp', { pid: snap.daemon.pid ?? '', uptime: uptime(snap.daemon.startedAt) }) : t('fact.notRunning'), live ? '' : 'off'],
+                [mac ? t('fact.socket') : t('fact.pipe'), snap.paths.show.socket, live ? 'muted' : 'off'],
+                [t('fact.session'), live ? sessionFact(snap) : '—', live ? '' : 'off'],
+                [t('fact.clients'), live ? (snap.daemon.clients.join(', ') || t('fact.none')) : '—', live ? 'muted' : 'off']
               ]}
             />
           </div>
@@ -198,14 +183,14 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
           <div className="mod-head">
             <StatusDot tone={snap.cortex.running ? 'ok' : 'idle'} />
             <h2>
-              Cortex Control{' '}
-              {mac && <Badge className="attn">instrumented</Badge>}
+              {t('console.app')}{' '}
+              {mac && <Badge className="attn">{t('console.instrumented')}</Badge>}
             </h2>
             <span className="grow" />
             <div className="acts">
               {mac && (
                 <Button size="sm" disabled={!snap.cortex.installed} onClick={() => setSheet('rebuild')}>
-                  Rebuild…
+                  {t('console.rebuild')}
                 </Button>
               )}
               <Button
@@ -213,51 +198,50 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
                 disabled={!snap.cortex.installed}
                 onClick={() => void act(() => (snap.cortex.running ? window.patchbay.cortexQuit() : window.patchbay.cortexLaunch()))}
               >
-                {snap.cortex.running ? 'Quit app' : 'Launch'}
+                {snap.cortex.running ? t('console.quitApp') : t('console.launch')}
               </Button>
             </div>
           </div>
           <div className="mod-body">
             {mac && !snap.cortex.instrumented?.built && (
               <Strip bad>
-                <span className="grow">No instrumented copy yet. Run setup to build one.</span>
+                <span className="grow">{t('console.noCopy')}</span>
               </Strip>
             )}
             {mac && snap.cortex.needsRebuild && (
               <Strip>
                 <span className="grow">
-                  Cortex Control updated to <b>{snap.cortex.version}</b>. The instrumented copy is{' '}
-                  {snap.cortex.instrumented?.version} — rebuild to stay in sync.
+                  <T k="console.appUpdated" vars={{ version: snap.cortex.version ?? '', old: snap.cortex.instrumented?.version ?? '' }} />
                 </span>
               </Strip>
             )}
             <div className="tags">
               {mac ? (
                 <>
-                  <Tag label="hardened runtime" value={snap.cortex.instrumented?.hardenedRuntimeOff ? 'off' : 'on'} on={Boolean(snap.cortex.instrumented?.hardenedRuntimeOff)} />
-                  <Tag label="library validation" value={snap.cortex.instrumented?.libraryValidationOff ? 'disabled' : 'enforced'} on={Boolean(snap.cortex.instrumented?.libraryValidationOff)} />
-                  <Tag label="app" value={snap.cortex.running ? 'running' : 'closed'} on={snap.cortex.running} />
+                  <Tag label={t('tag.hardened')} value={snap.cortex.instrumented?.hardenedRuntimeOff ? t('tag.off') : t('tag.on')} on={Boolean(snap.cortex.instrumented?.hardenedRuntimeOff)} />
+                  <Tag label={t('tag.libval')} value={snap.cortex.instrumented?.libraryValidationOff ? t('tag.disabled') : t('tag.enforced')} on={Boolean(snap.cortex.instrumented?.libraryValidationOff)} />
+                  <Tag label={t('tag.app')} value={snap.cortex.running ? t('tag.running') : t('tag.closed')} on={snap.cortex.running} />
                 </>
               ) : (
                 <>
-                  <Tag label="HID handle" value="non-exclusive" on />
-                  <Tag label="input reports" value="copied to both" on />
-                  <Tag label="writes" value="independent" on />
-                  <Tag label="app" value={snap.cortex.running ? 'running' : 'closed'} on={snap.cortex.running} />
+                  <Tag label={t('tag.hid')} value={t('tag.nonExclusive')} on />
+                  <Tag label={t('tag.inputReports')} value={t('tag.copiedBoth')} on />
+                  <Tag label={t('tag.writes')} value={t('tag.independent')} on />
+                  <Tag label={t('tag.app')} value={snap.cortex.running ? t('tag.running') : t('tag.closed')} on={snap.cortex.running} />
                 </>
               )}
             </div>
             <Facts
               rows={mac
                 ? [
-                    ['source app', `${snap.cortex.path}${snap.cortex.version ? ` · ${snap.cortex.version}` : ''}`, 'muted'],
-                    ['instrumented copy', snap.cortex.instrumented?.built ? `interceptor/CortexControl-instrumented.app · ${snap.cortex.instrumented.version}` : 'not built', snap.cortex.instrumented?.built ? 'muted' : 'off'],
-                    ['process', snap.cortex.running ? `pid ${snap.cortex.pid}` : 'not running', snap.cortex.running ? '' : 'off']
+                    [t('fact.sourceApp'), `${snap.cortex.path}${snap.cortex.version ? ` · ${snap.cortex.version}` : ''}`, 'muted'],
+                    [t('fact.copy'), snap.cortex.instrumented?.built ? `interceptor/CortexControl-instrumented.app · ${snap.cortex.instrumented.version}` : t('fact.notBuilt'), snap.cortex.instrumented?.built ? 'muted' : 'off'],
+                    [t('fact.process'), snap.cortex.running ? t('fact.pid', { pid: snap.cortex.pid ?? '' }) : t('fact.notRunning'), snap.cortex.running ? '' : 'off']
                   ]
                 : [
-                    ['installed', `${snap.cortex.path}${snap.cortex.version ? ` · ${snap.cortex.version}` : ''}`, 'muted'],
-                    ['needed for', 'nothing — the daemon reaches the device on its own', 'muted'],
-                    ['process', snap.cortex.running ? `pid ${snap.cortex.pid}` : 'not running', snap.cortex.running ? '' : 'off']
+                    [t('fact.installed'), `${snap.cortex.path}${snap.cortex.version ? ` · ${snap.cortex.version}` : ''}`, 'muted'],
+                    [t('fact.neededFor'), t('fact.nothing'), 'muted'],
+                    [t('fact.process'), snap.cortex.running ? t('fact.pid', { pid: snap.cortex.pid ?? '' }) : t('fact.notRunning'), snap.cortex.running ? '' : 'off']
                   ]}
             />
           </div>
@@ -267,18 +251,15 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
       {sheet === 'clients' && <Clients snap={snap} onClose={() => setSheet(null)} />}
 
       {sheet === 'rebuild' && (
-        <Modal onClose={() => setSheet(null)} busy={rebuilding} aria-label="Rebuild the instrumented copy">
-          <h2>Rebuild the instrumented copy</h2>
-          <p className="fine">
-            This copies Cortex Control {snap.cortex.version} again, re-signs it ad-hoc without the
-            hardened runtime, and verifies that injection is permitted. The running app quits first.
-          </p>
-          {rebuilding && <div className="build-list"><div className="build-row"><span className="mk">›</span>{progress?.label ?? 'Working…'}</div></div>}
+        <Modal onClose={() => setSheet(null)} busy={rebuilding} aria-label={t('rebuild.title')}>
+          <h2>{t('rebuild.title')}</h2>
+          <p className="fine">{t('rebuild.body', { version: snap.cortex.version ?? '' })}</p>
+          {rebuilding && <div className="build-list"><div className="build-row"><span className="mk">›</span>{progress?.label ?? t('home.working')}</div></div>}
           <ModalActions>
             <Button variant="primary" disabled={rebuilding} onClick={() => void rebuild()}>
-              {rebuilding ? 'Rebuilding…' : 'Rebuild and relaunch'}
+              {rebuilding ? t('rebuild.busy') : t('rebuild.go')}
             </Button>
-            <Button disabled={rebuilding} onClick={() => setSheet(null)}>Not now</Button>
+            <Button disabled={rebuilding} onClick={() => setSheet(null)}>{t('rebuild.notNow')}</Button>
           </ModalActions>
         </Modal>
       )}

@@ -1,4 +1,5 @@
 import type { MeterOutput } from '@shared/types'
+import { t } from '../i18n.js'
 
 /** The scale the QC's own OUT LEVEL readout uses: -40 dB floor, +12 ceiling. */
 export const FLOOR = -40
@@ -61,8 +62,8 @@ export function Meter({
       </div>
       <div className="lvl-meter-note">
         {heard
-          ? peak !== null ? `peak ${peak.toFixed(1)} dB` : 'live'
-          : live ? 'play to read' : 'not loaded'}
+          ? peak !== null ? t('meter.peak', { db: peak.toFixed(1) }) : t('meter.live')
+          : live ? t('meter.play') : t('meter.notLoaded')}
       </div>
     </div>
   )

@@ -1,5 +1,7 @@
 /** The contract between the main process and the renderer. */
 
+import type { Language, Locale } from './i18n/rules.js'
+
 export type Platform = 'mac' | 'win'
 export type Mode = 'auto' | 'bridge' | 'direct'
 /**
@@ -36,6 +38,9 @@ export interface ClientTarget {
   found: boolean
   /** our server entry is present in its config */
   installed: boolean
+  /** How the config is written — Codex keeps TOML, the rest JSON. The clients
+   *  sheet shows the matching snippet. */
+  format: 'json' | 'toml'
   /** installed, but from before the daemon: it still opens the device itself,
    *  so it will fail while the daemon holds one */
   stale: boolean
@@ -116,12 +121,18 @@ export interface Prefs {
   benchAutoSave: boolean
   /** Ask GitHub every few hours whether a newer Patchbay is out. */
   updates: boolean
+  /** The UI language: a locale, or `system` to follow the machine. */
+  language: Language
 }
 
 export interface Snapshot {
   platform: Platform
   /** The running app version, from the updater — see its `version()`. */
   version: string
+  /** The locale in use, resolved from the preference and the system. */
+  locale: Locale
+  /** What `system` would pick right now — the switcher names it. */
+  systemLocale: Locale
   paths: Paths
   checks: Check[]
   clients: ClientTarget[]

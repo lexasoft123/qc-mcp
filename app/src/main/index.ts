@@ -10,6 +10,7 @@ import * as updater from './updater.js'
 import { Leveling } from './leveling.js'
 import { IS_MAC } from './paths.js'
 import { findPython } from './system.js'
+import { t } from '../shared/i18n/index.js'
 
 let win: BrowserWindow | null = null
 let ticker: NodeJS.Timeout | null = null
@@ -135,7 +136,7 @@ function handlers(): void {
         return state.push(true)
       }
     }
-    emit('progress', { label: notice ?? 'Done', done, total, finished: true })
+    emit('progress', { label: notice ?? t('prog.done'), done, total, finished: true })
     return state.push(true)
   })
 
@@ -168,10 +169,10 @@ function handlers(): void {
     // Wait for the bridge rather than just for the process: whoever starts the
     // daemon next needs it actually open, or auto silently picks direct.
     if (!err && IS_MAC && state.getPrefs().mode !== 'direct') {
-      emit('progress', { label: 'Opening Cortex Control', done: 0, total: 0 })
+      emit('progress', { label: t('prog.openingApp'), done: 0, total: 0 })
       const ok = await cortex.waitForBridge(paths.repo)
       emit('progress', {
-        label: ok ? 'Cortex Control is up' : 'Cortex Control did not open in time; using direct mode',
+        label: ok ? t('prog.appUp') : t('prog.appTimeout'),
         done: 0, total: 0, finished: true
       })
     }
@@ -188,7 +189,7 @@ function handlers(): void {
   ipcMain.handle('cortex:rebuild', async () => {
     await cortex.quit()
     const err = await install.buildInstrumented(state.getPaths(), (p) => emit('progress', p))
-    emit('progress', { label: err ?? 'Rebuilt', done: 1, total: 1, finished: true, error: err ?? undefined })
+    emit('progress', { label: err ?? t('prog.rebuilt'), done: 1, total: 1, finished: true, error: err ?? undefined })
     return state.push(true)
   })
 
@@ -204,9 +205,9 @@ function handlers(): void {
 
   ipcMain.handle('path:choose', async (_e, what: 'repo' | 'cortex') => {
     const r = await dialog.showOpenDialog(win!, {
-      title: what === 'repo' ? 'Choose the qc-mcp folder' : 'Choose Cortex Control',
+      title: what === 'repo' ? t('dialog.chooseRepo') : t('dialog.chooseApp'),
       properties: what === 'repo' ? ['openDirectory'] : IS_MAC ? ['openFile', 'treatPackageAsDirectory'] : ['openFile'],
-      filters: what === 'cortex' && !IS_MAC ? [{ name: 'Application', extensions: ['exe'] }] : undefined
+      filters: what === 'cortex' && !IS_MAC ? [{ name: t('dialog.application'), extensions: ['exe'] }] : undefined
     })
     if (!r.canceled && r.filePaths[0]) state.updatePrefs({ [what]: r.filePaths[0] } as Partial<Prefs>)
     return state.push(true)

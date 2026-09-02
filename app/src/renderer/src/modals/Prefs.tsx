@@ -1,12 +1,11 @@
-import { Button, LanguageSwitcher, Modal, ModalActions, SegmentedControl } from '@singz/ui'
+import { Button, Modal, ModalActions, SegmentedControl } from '@singz/ui'
 import type { Prefs as P, Snapshot, UpdateState } from '@shared/types'
-import type { Language } from '@shared/i18n'
 import { isMac } from '../derive.js'
 import { act, checkForUpdates, say, useUpdate } from '../store.js'
-import { LOCALES, t, type Key } from '../i18n.js'
+import { t } from '../i18n.js'
 import { modes } from '../views/Console.js'
 import { Check } from '../components/Icons.js'
-import { FLAGS } from '../components/Flags.js'
+import { Language } from '../components/Language.js'
 
 type Flag = 'login' | 'autoconnect' | 'quitApp' | 'verbose' | 'autoRebuild' | 'updates'
 
@@ -54,15 +53,6 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
     onToggle: () => set({ [id]: !p[id] } as Partial<P>)
   })
 
-  // Each language by its own name, with its name in THIS language underneath
-  // when the two differ — "English / 英语" on a Chinese screen, and no
-  // redundant "English / English" on an English one.
-  const languages = LOCALES.map((l) => {
-    const named = t(`lang.${l.value}` as Key)
-    return { value: l.value, label: l.label, code: l.code, flag: FLAGS[l.value], hint: named !== l.label ? named : undefined }
-  })
-  const systemName = LOCALES.find((l) => l.value === snap.systemLocale)?.label ?? ''
-
   return (
     <Modal onClose={onClose} cardClassName="prefs-card" aria-label={t('prefs.title')}>
       <h2>{t('prefs.title')}</h2>
@@ -76,18 +66,7 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
             <div className="n">{t('prefs.language')}</div>
             <div className="d">{t('prefs.languageDesc', { os })}</div>
           </div>
-          <LanguageSwitcher
-            options={languages}
-            value={p.language}
-            onChange={(language) => set({ language: language as Language })}
-            system={{
-              label: t('lang.system'),
-              hint: t('lang.systemHint', { os, name: systemName }),
-              resolves: snap.systemLocale,
-              badge: t('lang.auto')
-            }}
-            aria-label={t('prefs.language')}
-          />
+          <Language snap={snap} />
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import { useSnapshot, useToast, useUpdate } from './store.js'
 import { t, tn } from './i18n.js'
 import { Gear } from './components/Icons.js'
 import { UpdateChip } from './components/Bits.js'
+import { Language } from './components/Language.js'
 import { Home } from './views/Home.js'
 import { Console } from './views/Console.js'
 import { Setup } from './views/Setup.js'
@@ -59,6 +60,10 @@ export function App(): React.JSX.Element {
               : t('tb.stopped')}
           </span>
         </div>
+        {/* The flag alone, beside the gear: the one control someone who cannot
+            read the window needs to find, on every screen, without opening a
+            dialog whose title they cannot read either. */}
+        <Language snap={snap} compact />
         <Button size="sm" icon title={t('prefs.open')} aria-label={t('prefs.open')} onClick={() => setPrefs(true)}>
           <Gear />
         </Button>

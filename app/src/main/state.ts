@@ -40,6 +40,11 @@ let inflight: Promise<Snapshot> | null = null
  * pick, which can be English on a machine whose owner reads Chinese second.
  */
 function systemTags(): string[] {
+  // A testing hook, like the updater's PATCHBAY_FAKE_VERSION: comma-separated
+  // BCP-47 tags that stand in for the machine's list, so a localised build can
+  // be seen in the other language on a machine set to English.
+  const fake = process.env.PATCHBAY_FAKE_LANGUAGES
+  if (fake) return fake.split(',').map((tag) => tag.trim()).filter(Boolean)
   try {
     const list = app.getPreferredSystemLanguages()
     if (list.length) return list

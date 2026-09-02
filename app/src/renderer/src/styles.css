@@ -89,6 +89,10 @@ body::after {
 
 /* ————————————————————————————————— titlebar ————— */
 
+/* the flag-only switcher sits beside the gear; its menu hangs off the right
+   edge so it never crosses the window buttons on Windows */
+.titlebar .lang { flex: none; }
+
 .logo {
   font-weight: 800; font-size: 16px; letter-spacing: 0.01em;
   font-variation-settings: 'wdth' 88; flex: none; white-space: nowrap;
@@ -615,9 +619,10 @@ body.win .lvl-col.on { background: var(--sz-surface-raised); }
   position: relative; display: flex; align-items: stretch; gap: 8px;
   justify-content: center; flex: 1 1 auto; min-height: 84px;
 }
+/* no uppercase: it turned "dB" into "DB", which is a different unit */
 .lvl-meter-note {
-  font-size: 9px; color: var(--sz-faint); text-transform: uppercase;
-  letter-spacing: 0.1em; font-family: var(--sz-font-mono);
+  font-size: 9px; color: var(--sz-faint);
+  letter-spacing: 0.08em; font-family: var(--sz-font-mono);
 }
 .lvl-meter-bars { display: flex; gap: 4px; }
 .lvl-meter-bar {

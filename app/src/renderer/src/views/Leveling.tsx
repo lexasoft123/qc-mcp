@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge, Button, StatusDot } from '@singz/ui'
 import type { BenchSlot, LevelEvent, MeterOutput, PresetState, Snapshot } from '@shared/types'
-import { slotId } from '../derive.js'
+import { isMac, slotId } from '../derive.js'
 import { act, say } from '../store.js'
 import { T, t } from '../i18n.js'
 import { Knob } from '../components/Knob.js'
@@ -464,7 +464,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       <div className="lvl-keys fine">
         <kbd>←</kbd><kbd>→</kbd> {t('keys.preset')} · <kbd>↑</kbd><kbd>↓</kbd> {t('keys.scene')} ·
         <kbd>A</kbd>–<kbd>H</kbd> {t('keys.jump')} · <kbd>−</kbd><kbd>+</kbd> {t('keys.level')}
-        (<kbd>⇧</kbd> {t('keys.fine')}) · <kbd>⌘S</kbd> {t('keys.save')}
+        (<kbd>⇧</kbd> {t('keys.fine')}) · <kbd>{isMac(snap) ? '⌘S' : 'Ctrl+S'}</kbd> {t('keys.save')}
       </div>
 
       {picking && (

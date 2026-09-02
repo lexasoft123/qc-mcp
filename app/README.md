@@ -147,6 +147,18 @@ Traditional Chinese (`zh-TW`, `zh-HK`) is deliberately not mapped onto the
 Simplified translation: it is one click away in the switcher, but nobody is
 handed it.
 
+The choice is stored in `prefs.json` and survives a restart. The default is
+`system`, resolved when Patchbay starts — change the machine's language and
+Patchbay follows it the next time it opens. To see the other language on a
+machine set to English:
+
+```bash
+PATCHBAY_FAKE_LANGUAGES=zh-Hans-CN,en-US npm run dev
+```
+
+That stands in for the machine's own list, the way `PATCHBAY_FAKE_VERSION`
+stands in for the running version.
+
 ## Install
 
 Download the installer for your platform from

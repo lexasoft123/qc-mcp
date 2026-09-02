@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { t } from '../i18n.js'
 
 const SWEEP = 135          // degrees either side of top
 const PER_PIXEL = 0.35     // dB per pixel of drag
@@ -110,11 +111,11 @@ export function Knob({
       style={{ width: size, height: size }}
       tabIndex={disabled ? -1 : 0}
       role="slider"
-      aria-label={label ?? 'Level'}
+      aria-label={label ?? t('knob.level')}
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={Math.round(db * 10) / 10}
-      aria-valuetext={`${db >= 0 ? '+' : ''}${db.toFixed(1)} decibels`}
+      aria-valuetext={t('knob.value', { db: `${db >= 0 ? '+' : ''}${db.toFixed(1)}` })}
       aria-disabled={disabled}
       onPointerDown={down}
       onKeyDown={keys}

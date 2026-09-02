@@ -2,6 +2,7 @@ import { app, net, shell } from 'electron'
 import electronUpdater from 'electron-updater'
 import type { UpdateState } from '../shared/types.js'
 import { newer, reason, safeUrl } from './update-rules.js'
+import { t } from '../shared/i18n/index.js'
 
 /**
  * Releases are cut from the qc-mcp repository — Patchbay is packaged out of it
@@ -86,7 +87,7 @@ async function checkViaGithub(): Promise<UpdateState> {
       result = { state: 'available', version: tag.replace(/^v/, ''), url: safeUrl(rel.html_url, RELEASES_PAGE) }
     }
   } catch (err) {
-    result = { state: 'error', message: reason(err) }
+    result = { state: 'error', message: reason(err, t('update.checkFailed')) }
   } finally {
     clearTimeout(kill)
   }
@@ -124,7 +125,7 @@ function checkViaElectronUpdater(): void {
   )
   autoUpdater.on('update-downloaded', (info) => set({ state: 'ready', version: info.version }))
   autoUpdater.on('update-not-available', () => set({ state: 'none' }))
-  autoUpdater.on('error', (err) => set({ state: 'error', message: reason(err) }))
+  autoUpdater.on('error', (err) => set({ state: 'error', message: reason(err, t('update.checkFailed')) }))
   void autoUpdater.checkForUpdates().catch(() => {})
 }
 

@@ -18,10 +18,13 @@ files:
 asar: true
 npmRebuild: false
 
-# Chromium ships 57 locale .pak files, ~40 MB unpacked, for an app whose own
-# strings are English only. Both names are listed because the two platforms
-# spell it differently: macOS keeps en.lproj, Windows locales/en-US.pak.
-electronLanguages: [en, en-US]
+# Chromium ships 57 locale .pak files, ~40 MB unpacked. Patchbay's own strings
+# come from src/shared/i18n and need none of them; the packs only localise what
+# Chromium itself draws (a context menu, a form control's tooltip), so ship the
+# packs for the languages Patchbay speaks and no more. Both spellings of
+# English are listed because the two platforms differ: macOS keeps en.lproj,
+# Windows locales/en-US.pak.
+electronLanguages: [en, en-US, zh-CN, zh_CN]
 compression: maximum
 afterPack: scripts/afterPack.cjs
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}

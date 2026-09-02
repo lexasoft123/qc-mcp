@@ -44,10 +44,10 @@ export function newer(tag: string, base: string): boolean {
  * Preferences row that is a wall of text, so this keeps the first line (which
  * is the part that says what went wrong) and caps it.
  */
-export function reason(err: unknown): string {
+export function reason(err: unknown, fallback = 'check failed'): string {
   const raw = err instanceof Error ? err.message : String(err)
   const line = raw.split('\n')[0].trim()
-  if (!line) return 'check failed'
+  if (!line) return fallback
   return line.length > 160 ? line.slice(0, 159) + '…' : line
 }
 

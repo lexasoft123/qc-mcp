@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 import type { DaemonInfo, Mode, Paths, SessionMode } from '../shared/types.js'
 import { IS_MAC } from './paths.js'
 import { exists, sleep } from './util.js'
+import { t } from '../shared/i18n/index.js'
 
 /**
  * Supervises the long-lived qc-mcp daemon — the process that owns the device
@@ -89,7 +90,7 @@ export class Daemon {
   async start(onChange: () => void): Promise<void> {
     if (this.state !== 'stopped') return
     if (!exists(this.paths.bin)) {
-      this.error = `qc-mcp is not installed at ${this.paths.bin} — run setup first.`
+      this.error = t('daemon.notInstalled', { bin: this.paths.bin })
       onChange()
       return
     }
@@ -131,7 +132,7 @@ export class Daemon {
       if (this.state !== 'stopped') {
         this.state = 'stopped'
         this.error = stderr.trim().split('\n').slice(-3).join(' ').slice(0, 400)
-          || 'The daemon exited immediately.'
+          || t('daemon.exited')
         // an immediate exit with an argument error means this build has no daemon
         if (/unrecognized arguments|no such option|--daemon/i.test(stderr)) this.supported = false
         onChange()
@@ -154,9 +155,7 @@ export class Daemon {
     // A timeout is not proof the entry point is missing — only an argument
     // error is (handled on 'exit'). Leave `supported` alone so one slow start
     // does not disable autoconnect for the rest of the session.
-    this.error =
-      `${socketPath} never opened, 30s after starting ${this.paths.bin} --daemon. ` +
-      'Check Logs, then try again.'
+    this.error = t('daemon.timeout', { socket: socketPath, bin: this.paths.bin })
     this.stop()
     onChange()
   }

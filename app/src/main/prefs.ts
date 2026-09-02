@@ -26,7 +26,11 @@ export const DEFAULTS: Prefs = {
   // On: the check is one request to GitHub every six hours and it never
   // installs anything on its own — macOS opens a page, Windows waits for a
   // quit. Turning it off silences the chip in the rail as well.
-  updates: true
+  updates: true,
+  // Follow the machine. Someone whose Mac or PC is in Chinese gets Patchbay
+  // in Chinese on first launch, with nothing to find first — the switcher in
+  // Preferences is for the case where the two should differ.
+  language: 'system'
 }
 
 export function load(): Prefs {

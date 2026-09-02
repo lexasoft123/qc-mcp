@@ -3,6 +3,7 @@ import type { Paths } from '../shared/types.js'
 import { BRIDGE_FIFOS, IS_MAC, bridgeScript, instrumentedApp } from './paths.js'
 import { cortexPid } from './system.js'
 import { exists, run, sleep } from './util.js'
+import { t } from '../shared/i18n/index.js'
 
 /**
  * Launch Cortex Control.
@@ -19,12 +20,12 @@ export async function launch(paths: Paths): Promise<string | null> {
       spawn(script, [], { cwd: paths.repo, detached: true, stdio: 'ignore' }).unref()
       return null
     }
-    if (!exists(paths.cortex)) return 'Cortex Control is not installed.'
+    if (!exists(paths.cortex)) return t('cortex.notInstalled')
     // no instrumented copy: the stock app still works, bridge mode will not
     spawn('open', ['-a', paths.cortex], { detached: true, stdio: 'ignore' }).unref()
     return null
   }
-  if (!exists(paths.cortex)) return 'Cortex Control is not installed.'
+  if (!exists(paths.cortex)) return t('cortex.notInstalled')
   spawn(paths.cortex, [], { detached: true, stdio: 'ignore' }).unref()
   return null
 }

@@ -1,4 +1,5 @@
 import type { ClientTarget, SessionMode, Snapshot } from '@shared/types'
+import { t } from '@shared/i18n'
 
 export const isMac = (s: Snapshot): boolean => s.platform === 'mac'
 
@@ -45,39 +46,35 @@ export function uptime(startedAt: number | null): string {
   const secs = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
   const h = Math.floor(secs / 3600)
   const m = Math.floor((secs % 3600) / 60)
-  return `${h ? `${h}h ` : ''}${m}m ${String(secs % 60).padStart(2, '0')}s`
+  const s = String(secs % 60).padStart(2, '0')
+  return h ? t('uptime.hms', { h, m, s }) : t('uptime.ms', { m, s })
 }
 
+/** "bridge" / "shared" / "direct", in the current language. */
+export const sessionWord = (s: Snapshot): string => t(`session.${sessionMode(s)}`)
+
 export function railText(s: Snapshot): string {
-  if (!s.device.present) return 'No Quad Cortex found on USB'
-  if (s.daemon.state !== 'running') {
-    return s.daemon.error ?? 'Daemon stopped — no MCP client can reach the device'
-  }
-  if (clash(s)) return 'Direct mode blocked — Cortex Control is still holding the device'
+  if (!s.device.present) return t('rail.noDevice')
+  if (s.daemon.state !== 'running') return s.daemon.error ?? t('rail.daemonStopped')
+  if (clash(s)) return t('rail.clash')
   switch (sessionMode(s)) {
     case 'direct':
-      return isMac(s)
-        ? 'Direct session — the daemon holds the USB interface'
-        : 'Direct session — exclusive HID handle'
+      return isMac(s) ? t('rail.directMac') : t('rail.directWin')
     case 'shared':
-      return s.cortex.running
-        ? 'Sharing the device with Cortex Control · second HID handle'
-        : 'Daemon has the device · Cortex Control is closed'
+      return s.cortex.running ? t('rail.sharedApp') : t('rail.sharedNoApp')
     default:
-      return s.cortex.running
-        ? "Sharing Cortex Control's session · FIFOs healthy"
-        : 'Waiting for Cortex Control — bridge mode needs the instrumented app'
+      return s.cortex.running ? t('rail.bridgeApp') : t('rail.bridgeNoApp')
   }
 }
 
 export const sessionFact = (s: Snapshot): string => {
   switch (sessionMode(s)) {
     case 'direct':
-      return isMac(s) ? 'direct · IOHIDDevice seized' : 'direct · exclusive HID handle'
+      return isMac(s) ? t('fact.directMac') : t('fact.directWin')
     case 'shared':
-      return 'shared · second HID handle, non-exclusive'
+      return t('fact.shared')
     default:
-      return 'bridge · /tmp/qc_inject ⇄ /tmp/qc_in'
+      return t('fact.bridge')
   }
 }
 

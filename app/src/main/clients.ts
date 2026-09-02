@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import type { ClientTarget, Paths } from '../shared/types.js'
 import { IS_MAC, tilde } from './paths.js'
 import { exists, run } from './util.js'
+import { arrayStrings, readTable, tomlString, writeTable } from './toml-table.js'
 
 const HOME = homedir()
 const APPDATA = process.env.APPDATA || join(HOME, 'AppData', 'Roaming')
@@ -15,30 +16,57 @@ interface Target {
   id: string
   name: string
   file: string
-  /** where the servers map lives inside the JSON */
+  /** where the servers map lives inside the JSON — or, for TOML, the table
+   *  our `[<at>.quad-cortex]` hangs under */
   at: string[]
+  format: 'json' | 'toml'
 }
 
 /**
  * Each client keeps MCP servers in its own file under its own key. We only
  * ever touch that one entry and write the rest of the document back untouched.
+ *
+ * Codex is the odd one out: TOML, in ~/.codex/config.toml on both platforms,
+ * one `[mcp_servers.<name>]` table per server. It was the client the first
+ * localisation request came from, and the reason its setup had been "a little
+ * confusing" was that it was not in this list at all.
  */
 export function targets(): Target[] {
+  const codex: Target = { id: 'codex', name: 'Codex', file: join(HOME, '.codex', 'config.toml'), at: ['mcp_servers'], format: 'toml' }
   return IS_MAC
     ? [
-        { id: 'code', name: 'Claude Code', file: join(HOME, '.claude.json'), at: ['mcpServers'] },
-        { id: 'desktop', name: 'Claude Desktop', file: join(HOME, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'), at: ['mcpServers'] },
-        { id: 'cursor', name: 'Cursor', file: join(HOME, '.cursor', 'mcp.json'), at: ['mcpServers'] },
-        { id: 'vscode', name: 'VS Code', file: join(HOME, 'Library', 'Application Support', 'Code', 'User', 'mcp.json'), at: ['servers'] },
-        { id: 'zed', name: 'Zed', file: join(HOME, '.config', 'zed', 'settings.json'), at: ['context_servers'] }
+        { id: 'code', name: 'Claude Code', file: join(HOME, '.claude.json'), at: ['mcpServers'], format: 'json' },
+        { id: 'desktop', name: 'Claude Desktop', file: join(HOME, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'), at: ['mcpServers'], format: 'json' },
+        { id: 'cursor', name: 'Cursor', file: join(HOME, '.cursor', 'mcp.json'), at: ['mcpServers'], format: 'json' },
+        { id: 'vscode', name: 'VS Code', file: join(HOME, 'Library', 'Application Support', 'Code', 'User', 'mcp.json'), at: ['servers'], format: 'json' },
+        { id: 'zed', name: 'Zed', file: join(HOME, '.config', 'zed', 'settings.json'), at: ['context_servers'], format: 'json' },
+        codex
       ]
     : [
-        { id: 'code', name: 'Claude Code', file: join(HOME, '.claude.json'), at: ['mcpServers'] },
-        { id: 'desktop', name: 'Claude Desktop', file: join(APPDATA, 'Claude', 'claude_desktop_config.json'), at: ['mcpServers'] },
-        { id: 'cursor', name: 'Cursor', file: join(HOME, '.cursor', 'mcp.json'), at: ['mcpServers'] },
-        { id: 'vscode', name: 'VS Code', file: join(APPDATA, 'Code', 'User', 'mcp.json'), at: ['servers'] },
-        { id: 'zed', name: 'Zed', file: join(APPDATA, 'Zed', 'settings.json'), at: ['context_servers'] }
+        { id: 'code', name: 'Claude Code', file: join(HOME, '.claude.json'), at: ['mcpServers'], format: 'json' },
+        { id: 'desktop', name: 'Claude Desktop', file: join(APPDATA, 'Claude', 'claude_desktop_config.json'), at: ['mcpServers'], format: 'json' },
+        { id: 'cursor', name: 'Cursor', file: join(HOME, '.cursor', 'mcp.json'), at: ['mcpServers'], format: 'json' },
+        { id: 'vscode', name: 'VS Code', file: join(APPDATA, 'Code', 'User', 'mcp.json'), at: ['servers'], format: 'json' },
+        { id: 'zed', name: 'Zed', file: join(APPDATA, 'Zed', 'settings.json'), at: ['context_servers'], format: 'json' },
+        codex
       ]
+}
+
+function readText(file: string): string {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+/** `mcp_servers.quad-cortex` — the header of our table in a TOML config. */
+const tableOf = (t: Target): string => `${t.at.join('.')}.${SERVER_KEY}`
+
+/** Our table's body, in TOML. Basic strings, so a Windows path survives. */
+function tomlEntry(paths: Paths): string {
+  const args = ['--attach', '--socket', paths.socket].map(tomlString).join(', ')
+  return `command = ${tomlString(paths.bin)}\nargs = [${args}]`
 }
 
 function readJson(file: string): Record<string, unknown> {
@@ -65,6 +93,19 @@ function found(t: Target): boolean {
 
 export function list(): ClientTarget[] {
   return targets().map((t) => {
+    if (t.format === 'toml') {
+      const body = readTable(readText(t.file), tableOf(t))
+      const args = body === null ? null : arrayStrings(body, 'args')
+      return {
+        id: t.id,
+        name: t.name,
+        path: tilde(t.file),
+        found: found(t),
+        installed: body !== null,
+        stale: body !== null && !(args?.includes('--attach') ?? false),
+        format: t.format
+      }
+    }
     let node: unknown = readJson(t.file)
     for (const key of t.at) node = (node as Record<string, unknown> | undefined)?.[key]
     const entryVal = node && typeof node === 'object'
@@ -81,7 +122,8 @@ export function list(): ClientTarget[] {
       path: tilde(t.file),
       found: found(t),
       installed: Boolean(entryVal),
-      stale: Boolean(entryVal) && !(Array.isArray(args) && args.includes('--attach'))
+      stale: Boolean(entryVal) && !(Array.isArray(args) && args.includes('--attach')),
+      format: t.format
     }
   })
 }
@@ -102,13 +144,21 @@ export function write(paths: Paths, wanted: string[], skip: string[] = []): void
   for (const t of targets()) {
     if (skip.indexOf(t.id) >= 0) continue
     if (!found(t) && wanted.indexOf(t.id) < 0) continue
-    const doc = readJson(t.file)
-    const node = bucket(doc, t.at)
-    if (wanted.indexOf(t.id) >= 0) node[SERVER_KEY] = entry(paths)
-    else delete node[SERVER_KEY]
+    let text: string
+    if (t.format === 'toml') {
+      const before = readText(t.file)
+      text = writeTable(before, tableOf(t), wanted.indexOf(t.id) >= 0 ? tomlEntry(paths) : null)
+      if (text === before) continue
+    } else {
+      const doc = readJson(t.file)
+      const node = bucket(doc, t.at)
+      if (wanted.indexOf(t.id) >= 0) node[SERVER_KEY] = entry(paths)
+      else delete node[SERVER_KEY]
+      text = JSON.stringify(doc, null, 2) + '\n'
+    }
     try {
       mkdirSync(dirname(t.file), { recursive: true })
-      writeFileSync(t.file, JSON.stringify(doc, null, 2) + '\n', 'utf8')
+      writeFileSync(t.file, text, 'utf8')
     } catch {
       // a client we cannot write to is reported as not installed on the next read
     }

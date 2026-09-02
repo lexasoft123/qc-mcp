@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import type { LevelEvent, Paths, PresetFolder, PresetState } from '../shared/types.js'
 import { exists } from './util.js'
+import { t } from '../shared/i18n/index.js'
 
 /**
  * Supervises the preset-leveling bench — `qc-mcp --leveling`, one more client
@@ -43,7 +44,7 @@ export class Leveling {
   start(): void {
     if (this.child) return
     if (!exists(this.paths.bin)) {
-      this.emit({ event: 'fatal', error: `qc-mcp is not installed at ${this.paths.bin}.` })
+      this.emit({ event: 'fatal', error: t('bench.notInstalled', { bin: this.paths.bin }) })
       return
     }
     this.stderr = ''
@@ -60,7 +61,7 @@ export class Leveling {
       this.child = null
       // Fail every in-flight call, or a renderer await hangs for ever.
       const why = this.stderr.trim().split('\n').slice(-2).join(' ').slice(0, 300)
-      this.pending.forEach((p) => p.fail(new Error(why || 'the leveling bench exited')))
+      this.pending.forEach((p) => p.fail(new Error(why || t('bench.exited'))))
       this.pending.clear()
       this.emit({ event: 'stopped', error: why || null })
     })
@@ -69,7 +70,7 @@ export class Leveling {
   stop(): void {
     const child = this.child
     this.child = null
-    this.pending.forEach((p) => p.fail(new Error('the leveling bench was stopped')))
+    this.pending.forEach((p) => p.fail(new Error(t('bench.stopped'))))
     this.pending.clear()
     if (child) {
       try { child.stdin?.end() } catch { /* already closed */ }
@@ -98,17 +99,17 @@ export class Leveling {
   call(op: string, args: Record<string, unknown> = {}, timeoutMs = 30000): Promise<Reply> {
     if (!this.child) this.start()
     const child = this.child
-    if (!child) return Promise.reject(new Error('the leveling bench is not running'))
+    if (!child) return Promise.reject(new Error(t('bench.notRunning')))
     const id = ++this.seq
     return new Promise<Reply>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error(`the bench did not answer '${op}' within ${Math.round(timeoutMs / 1000)}s`))
+        reject(new Error(t('bench.timeout', { op, s: Math.round(timeoutMs / 1000) })))
       }, timeoutMs)
       this.pending.set(id, {
         ok: (v) => {
           clearTimeout(timer)
-          if (v.ok === false) reject(new Error(String(v.error ?? `'${op}' failed`)))
+          if (v.ok === false) reject(new Error(String(v.error ?? t('bench.opFailed', { op }))))
           else resolve(v)
         },
         fail: (e) => { clearTimeout(timer); reject(e) }

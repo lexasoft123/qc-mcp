@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Button, StatusDot } from '@singz/ui'
 import type { UpdateState } from '@shared/types'
+import { t } from '../i18n.js'
 import { Alert } from './Icons.js'
 
 export type FactTone = '' | 'muted' | 'off'
@@ -64,17 +65,17 @@ export function UpdateChip({ update }: { update: UpdateState }): React.JSX.Eleme
         <Button
           size="sm"
           className="update-chip"
-          title="Opens the release page — Patchbay will not install it for you"
+          title={t('update.getTitle')}
           onClick={() => { void window.patchbay.update.download() }}
         >
-          Get {update.version}
+          {t('update.get', { version: update.version })}
         </Button>
       )
     case 'downloading':
       return (
         <span className="chip-tag update-chip">
           <StatusDot tone="idle" />
-          downloading {update.percent}%
+          {t('update.downloading', { percent: update.percent })}
         </span>
       )
     case 'ready':
@@ -83,10 +84,10 @@ export function UpdateChip({ update }: { update: UpdateState }): React.JSX.Eleme
           size="sm"
           variant="primary"
           className="update-chip"
-          title={`Quits Patchbay and installs ${update.version}`}
+          title={t('update.restartTitle', { version: update.version })}
           onClick={() => window.patchbay.update.install()}
         >
-          Restart to update
+          {t('update.restart')}
         </Button>
       )
     default:

@@ -1,6 +1,6 @@
 {
   "name": "patchbay",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Launcher for qc-mcp — installs the MCP, runs the daemon, opens Cortex Control",
   "author": "lexasoft <lexasoft@gmail.com>",

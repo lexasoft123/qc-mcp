@@ -24,7 +24,7 @@
   "devDependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.5",
     "@fontsource-variable/martian-mono": "^5.1.1",
-    "@singz/ui": "https://github.com/lexasoft123/singz-ui/archive/refs/tags/v1.1.0.tar.gz",
+    "@singz/ui": "https://github.com/lexasoft123/singz-ui/archive/refs/tags/v1.5.0.tar.gz",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

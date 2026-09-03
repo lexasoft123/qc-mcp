@@ -130,12 +130,16 @@ def test_dry_run_measures_but_never_writes():
 
 
 def test_routing_is_swapped_in_and_restored():
+    """Input and output are set separately, so a preset whose signal enters and
+    leaves on different lanes can be measured without cutting the chain."""
     qc = FakeQC(in_port=1, out_port=19)
     script(m(-18.1))
     leveling.level_current(qc, target=-18.0)
-    assert qc.routing_calls[0] == (0, leveling.IN_PORT_USB_5_6,
-                                   leveling.OUT_PORT_USB_5_6), qc.routing_calls
-    assert qc.routing_calls[-1] == (0, 1, 19), qc.routing_calls
+    assert (0, leveling.IN_PORT_USB_5_6, None) in qc.routing_calls, qc.routing_calls
+    assert (0, None, leveling.OUT_PORT_USB_5_6) in qc.routing_calls, qc.routing_calls
+    # and both ends are put back
+    assert (0, 1, None) in qc.routing_calls, qc.routing_calls
+    assert (0, None, 19) in qc.routing_calls, qc.routing_calls
     assert qc.chain.in_portid == 1 and qc.chain.out_portid == 19
 
 
@@ -151,7 +155,28 @@ def test_routing_is_restored_even_when_measurement_raises():
         pass
     assert qc.chain.in_portid == 1 and qc.chain.out_portid == 19, \
         "routing must be restored on failure"
-    assert qc.routing_calls[-1] == (0, 1, 19), qc.routing_calls
+    assert (0, 1, None) in qc.routing_calls, qc.routing_calls
+    assert (0, None, 19) in qc.routing_calls, qc.routing_calls
+
+
+def test_measurement_rows_finds_the_head_and_the_tail():
+    """A two-row preset: In 1 on row 0, out over the internal bus to row 2, which
+    leaves by Multi Out. Found on real hardware — a single-lane fake cannot show it."""
+    qc = FakeQC()
+    head = _Chain(in_port=1, out_port=16, models=[_Model(12345), _Model(0), _Model(0)])
+    tail = _Chain(in_port=0, out_port=19, models=[_Model(999), _Model(0), _Model(0)])
+    idle = _Chain(in_port=0, out_port=0, models=[_Model(0)])
+    qc.get_current_preset = lambda timeout_ms=6000: _Preset([head, idle, tail, idle])
+    assert leveling.measurement_rows(qc) == (0, 2), leveling.measurement_rows(qc)
+
+
+def test_tap_only_leaves_the_instrument_input_alone():
+    """feed=False measures what the player plays: only the output is diverted."""
+    qc = FakeQC(in_port=1, out_port=19)
+    with leveling.reamp_routing(qc, row=0, feed=False):
+        assert qc.chain.in_portid == 1, "the input must not be touched"
+        assert qc.chain.out_portid == leveling.OUT_PORT_USB_5_6
+    assert qc.chain.out_portid == 19, "the output must be put back"
 
 
 def test_silent_capture_aborts_before_writing():

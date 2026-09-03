@@ -563,7 +563,19 @@ flags the 2-4k/4-8k bands; identical inputs → all deltas ≈ 0.
   list, `review-preset` ground-truth + gain-staging) now point at `output_meter`,
   `measure_loudness` and `suggest_levels`.
 
-## Not yet verified on hardware
+## Verified on hardware (2026-09-03)
+- Device resolves by name; capture works on every USB pair.
+- `out_portid=14` **does** land on host inputs 5/6 — confirmed by tapping the tail
+  lane and capturing the preset's noise floor.
+- The full reamp loop: stimulus played to host out 5/6 reached The Grid, went through
+  the preset, and came back on host in 5/6 at −13.2 LUFS.
+- `level_current` converged in one correction (−4.7 dB) to within 0.08 dB of target,
+  through the Bench's lane-volume knob. Routing and fader restored.
+- **New, and only visible on real hardware:** a preset's signal enters and leaves on
+  *different lanes*. `measurement_rows()` now finds the head and the tail; the old
+  single-row assumption would have measured nothing.
+
+## Still not verified on hardware
 Everything below needs the device plus a recorded riff, and playback into the rig:
 - the reamp loop end to end (`measure_preset`, `level_preset`) — nothing has yet played
   audio INTO the QC from here;

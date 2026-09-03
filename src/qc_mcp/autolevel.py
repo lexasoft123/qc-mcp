@@ -58,22 +58,69 @@ def _lane_ports(qc, row):
     return int(getattr(ch, "in_portid", 0)), int(getattr(ch, "out_portid", 0))
 
 
+# Ports that mean "this lane feeds another lane", not "this lane leaves the box".
+INTERNAL_OUT_PORTS = {0, 16, 17, 18}
+PHYSICAL_IN_PORTS = {1, 2, 3, 4, 5, 6}      # In 1/2, Return 1/2 and their pairs
+
+
+def measurement_rows(qc):
+    """Which lane takes the instrument in, and which one carries the sound out.
+
+    They are often not the same lane: a two-row preset takes In 1 on row 0, feeds
+    row 2 over the internal bus (out_port 16-18), and leaves from row 2. Swapping
+    both ends of one row would then either capture nothing or cut the chain in
+    half, which is exactly what a fake single-lane device cannot show you.
+    """
+    bp = qc.get_current_preset()
+    if not bp:
+        raise LevelingError("could not read the current preset")
+    in_row = out_row = None
+    for pos, ch in enumerate(bp.chains):
+        has_blocks = any(getattr(m, "hash", 0) for m in ch.models)
+        ip = int(getattr(ch, "in_portid", 0) or 0)
+        op = int(getattr(ch, "out_portid", 0) or 0)
+        if in_row is None and ip in PHYSICAL_IN_PORTS:
+            in_row = pos
+        if op and op not in INTERNAL_OUT_PORTS and has_blocks:
+            out_row = pos                      # the last such lane wins: it is the tail
+    if in_row is None:
+        in_row = 0
+    if out_row is None:
+        out_row = in_row
+    return in_row, out_row
+
+
 @contextlib.contextmanager
 def reamp_routing(qc, row=0, in_port=IN_PORT_USB_5_6, out_port=OUT_PORT_USB_5_6,
-                  restore=True):
-    """Point a lane at the USB reamp path for the duration of a measurement.
+                  restore=True, in_row=None, out_row=None, feed=True, tap=True):
+    """Point a preset at the USB reamp path for the duration of a measurement.
 
-    Always restores, including on error — a preset left listening to USB is silent to
-    the player and looks like a broken preset.
+    `in_row`/`out_row` default to `row`; pass both (or let `measurement_rows` find
+    them) when the signal enters and leaves on different lanes. `feed=False` leaves
+    the instrument input alone and only taps the output — the safe shape for
+    measuring what the player is actually playing.
+
+    Always restores, including on error: a preset left listening to USB is silent
+    to the player and looks like a broken preset.
     """
-    original_in, original_out = _lane_ports(qc, row)
+    ir = row if in_row is None else in_row
+    orow = row if out_row is None else out_row
+    orig_in, _ = _lane_ports(qc, ir)
+    _, orig_out = _lane_ports(qc, orow)
     try:
-        qc.set_routing(row, in_portid=in_port, out_portid=out_port)
-        yield {"row": row, "original_in": original_in, "original_out": original_out}
+        if feed:
+            qc.set_routing(ir, in_portid=in_port)
+        if tap:
+            qc.set_routing(orow, out_portid=out_port)
+        yield {"in_row": ir, "out_row": orow,
+               "original_in": orig_in, "original_out": orig_out}
     finally:
         if restore:
             try:
-                qc.set_routing(row, in_portid=original_in, out_portid=original_out)
+                if feed:
+                    qc.set_routing(ir, in_portid=orig_in)
+                if tap:
+                    qc.set_routing(orow, out_portid=orig_out)
             except Exception:
                 pass
 
@@ -230,12 +277,17 @@ def _delta(result, target, metric):
 def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
                   tolerance=DEFAULT_TOLERANCE_LU, max_iterations=DEFAULT_MAX_ITERATIONS,
                   row=0, di_path=None, perceived=None, dry_run=False,
-                  true_peak_ceiling=TRUE_PEAK_CEILING_DBTP, trim=None, on_step=None):
+                  true_peak_ceiling=TRUE_PEAK_CEILING_DBTP, trim=None, on_step=None,
+                  in_row=None, out_row=None):
     """Measure -> correct -> verify the CURRENT preset until it lands within tolerance.
 
     `dry_run=True` measures once and reports the correction without touching anything —
     the report-only mode. Returns a dict with every iteration, so a caller can show the
     convergence rather than just the final number.
+
+    `in_row`/`out_row` say where the signal enters and leaves; when omitted they are
+    found with `measurement_rows`, because a preset routinely takes its input on one
+    lane and leaves from another and getting that wrong measures nothing.
 
     `trim` picks the knob: a `GainBlockTrim` (default) or a `LaneVolumeTrim` when the
     caller has a Bench and would rather move the lane's own output level than add a
@@ -244,10 +296,15 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
     """
     if perceived is None:
         perceived = (metric == "perceived")
+    if in_row is None or out_row is None:
+        found_in, found_out = measurement_rows(qc)
+        in_row = found_in if in_row is None else in_row
+        out_row = found_out if out_row is None else out_row
     out = {"target": target, "metric": metric, "tolerance": tolerance,
-           "row": row, "iterations": [], "written": False}
+           "row": row, "in_row": in_row, "out_row": out_row,
+           "iterations": [], "written": False}
 
-    with reamp_routing(qc, row=row):
+    with reamp_routing(qc, in_row=in_row, out_row=out_row):
         first = measure(di_path=di_path, perceived=perceived)
         if first.get("error"):
             out["error"] = first["error"]
@@ -315,7 +372,8 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
 
 
 def level_scenes(qc, scenes=None, target=DEFAULT_TARGET_LUFS, metric="lufs",
-                 tolerance=DEFAULT_TOLERANCE_LU, row=0, di_path=None, dry_run=False):
+                 tolerance=DEFAULT_TOLERANCE_LU, row=0, di_path=None, dry_run=False,
+                 in_row=None, out_row=None):
     """Measure and trim each scene of the current preset independently.
 
     Per-scene values only exist once the parameter is assigned to scenes, which is what
@@ -327,8 +385,12 @@ def level_scenes(qc, scenes=None, target=DEFAULT_TARGET_LUFS, metric="lufs",
     out = {"target": target, "metric": metric, "row": row, "scenes": [],
            "written": False}
 
+    if in_row is None or out_row is None:
+        found_in, found_out = measurement_rows(qc)
+        in_row = found_in if in_row is None else in_row
+        out_row = found_out if out_row is None else out_row
     col = None
-    with reamp_routing(qc, row=row):
+    with reamp_routing(qc, in_row=in_row, out_row=out_row):
         if not dry_run:
             col, added = ensure_gain_block(qc, row)
             out["trim_block"] = {"row": row, "column": col, "added": added}

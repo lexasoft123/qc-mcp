@@ -55,16 +55,34 @@ notes channel names update on the host only after reconnecting or power cycling.
 ## The measurement rig
 
 ```
-Mac  --host out 5/6-->  Grid USB Input 5/6   (lane in_portid 12)
+Mac  --host out 5/6-->  Grid USB Input 5/6    (in_portid 12, on the HEAD lane)
                               |
                         preset under test
                               |
-Mac  <--host in 5/6---  Grid USB Output 5/6  (lane out_portid 14)
+Mac  <--host in 5/6---  Grid USB Output 5/6   (out_portid 14, on the TAIL lane)
 ```
 
-Both ends are temporary. `leveling.reamp_routing` records the lane's original ports and
-restores them in a `finally`, so an aborted run never leaves a preset wired to USB and
-silent to the player.
+**The head and the tail are usually different lanes.** A two-row preset takes In 1 on
+row 0, hands off over the internal bus (`out_portid` 16–18), and leaves from row 2.
+Swapping both ends of one row would cut the chain in half and measure nothing.
+`autolevel.measurement_rows()` finds them: the first lane on a physical input, and the
+last lane with blocks whose output is not internal. Pass `in_row`/`out_row` to override.
+
+Both ends are temporary. `reamp_routing` records the original ports and restores them in
+a `finally`, so an aborted run never leaves a preset wired to USB and silent to the
+player. `feed=False` taps only the output, leaving the instrument input alone — the shape
+for measuring what the player is actually playing.
+
+**A measurement is silent in the room.** While the tail lane's output is tapped to USB it
+is no longer going to the XLRs, so nothing reaches the monitors during a run.
+
+### Verified on hardware (2026-09-03, CorOS 4.1.0, preset "Blackmore")
+
+    rows: input row 0, output row 2
+    pass 1: -13.29 LUFS, off by -4.7 dB
+    pass 2: wrote -9.59 dB -> -17.92 LUFS, off by -0.08 dB — converged
+
+Routing and the fader were both restored afterwards.
 
 ## What gets trimmed
 

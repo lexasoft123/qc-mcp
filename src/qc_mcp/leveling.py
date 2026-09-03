@@ -405,7 +405,11 @@ def measure_ops(bench, emit):
                 perceived=bool(m.get("perceived")))}
 
     def do_autolevel(m):
-        row = int(m.get("row", 0))
+        # Trim the lane the sound leaves by, not row 0: a preset that enters on one
+        # lane and exits on another would otherwise have its head trimmed while its
+        # tail is what gets measured.
+        _in_row, tail = autolevel.measurement_rows(bench.qc)
+        row = int(m.get("row", tail))
         # The lane's own output volume is the right knob here: it is stored in the
         # preset, it is what the bench's fader already shows, and it adds nothing
         # to the grid. Scene work still needs the Gain block.

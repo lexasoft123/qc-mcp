@@ -16,6 +16,20 @@ dependencies = [
 re = ["capstone>=5.0", "pyusb>=1.2", "python-rtmidi>=1.5"]
 # only needed for the GUI verification harness in tools/gui/ (screenshots/clicks)
 gui = ["pyobjc>=10"]
+# only needed for loudness metering + preset leveling (qc_mcp/loudness.py, audio_io.py).
+# All ship as prebuilt wheels on macOS arm64 / CPython 3.14 — no compiler, and PortAudio
+# is bundled inside the sounddevice wheel, so Homebrew is not needed either.
+# matplotlib is NOT ours: mosqito imports it at module scope without declaring it, so
+# omitting it makes `from mosqito.sq_metrics import loudness_zwtv` fail at runtime.
+audio = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "sounddevice>=0.5",
+    "soundfile>=0.12",
+    "pyloudnorm>=0.1.1",
+    "mosqito>=1.2",
+    "matplotlib>=3.8",
+]
 
 [project.urls]
 Homepage = "https://github.com/lexasoft123/qc-mcp"

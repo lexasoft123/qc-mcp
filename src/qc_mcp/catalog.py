@@ -26,7 +26,8 @@ def _parse(xml_bytes):
             mid = mdl.get("id")
             params = [{"name": p.get("name"), "type": p.get("type"),
                        "default": p.get("defaultValue"), "min": p.get("min"),
-                       "max": p.get("max"), "units": p.get("units")}
+                       "max": p.get("max"), "units": p.get("units"),
+                       "skew": p.get("skew")}
                       for p in mdl.findall("Parameter")]
             out[int(mid)] = {
                 "id": int(mid), "name": mdl.get("name"),
@@ -57,9 +58,18 @@ def load_from_bytes(model_repo_payload):
     return len(_by_id)
 
 
-# Parameter taper (reverse-engineered by calibration): frequency/time/ratio
-# params use a power taper  display = min + (max-min) * nv**LOG_TAPER  (nv in 0..1);
-# level/dB/percent params are linear. Heuristic split: min>0 and max/min>=5 => log.
+# Parameter taper. ModelRepo declares an explicit `skew` on 773 params, which follows
+# the JUCE NormalisableRange convention:
+#     norm    = ((display - lo) / (hi - lo)) ** skew
+#     display = lo + (hi - lo) * norm ** (1 / skew)
+# Sanity check that pins the convention: Gain (16005) LEVEL is lo=-60, hi=+12,
+# skew=3.8018, and 0 dB maps to norm 0.5000 exactly - a deliberate unity centre detent.
+# Symbolic values appear too: LIN_SKEW (409 params) is linear, LOG_SKEW (16) falls
+# through to the heuristic below.
+#
+# Where no usable skew is declared, keep the older reverse-engineered heuristic:
+# frequency/time/ratio params use display = lo + (hi-lo) * nv**LOG_TAPER; level/dB/
+# percent params are linear. Heuristic split: min>0 and max/min>=5 => log.
 LOG_TAPER = 1.667
 
 
@@ -78,6 +88,20 @@ def _is_log(lo, hi):
     return lo > 0 and hi / lo >= 5
 
 
+def _skew(block_hash, param_index):
+    """Declared JUCE skew for a param, or None when it is absent/symbolic/degenerate."""
+    m = lookup(block_hash)
+    if not m or param_index >= len(m["params"]):
+        return None
+    try:
+        sk = float(m["params"][param_index].get("skew"))
+    except (TypeError, ValueError):
+        return None                      # absent, LIN_SKEW (= linear) or LOG_SKEW
+    if sk <= 0 or abs(sk - 1.0) < 1e-9:
+        return None                      # 1.0 is linear; the plain path handles it
+    return sk
+
+
 def to_norm(block_hash, param_index, display_value):
     """Convert a display value to the normalized 0-1 the device stores."""
     rng = _prange(block_hash, param_index)
@@ -87,6 +111,9 @@ def to_norm(block_hash, param_index, display_value):
     if hi <= lo:
         return float(display_value)
     r = max(0.0, min(1.0, (float(display_value) - lo) / (hi - lo)))
+    sk = _skew(block_hash, param_index)
+    if sk is not None:
+        return r ** sk
     return r ** (1.0 / LOG_TAPER) if _is_log(lo, hi) else r
 
 
@@ -96,7 +123,11 @@ def to_display(block_hash, param_index, nv):
     if not rng:
         return nv
     lo, hi = rng
-    r = nv ** LOG_TAPER if _is_log(lo, hi) else nv
+    sk = _skew(block_hash, param_index)
+    if sk is not None:
+        r = max(0.0, min(1.0, float(nv))) ** (1.0 / sk)
+    else:
+        r = nv ** LOG_TAPER if _is_log(lo, hi) else nv
     return lo + r * (hi - lo)
 
 

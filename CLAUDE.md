@@ -93,7 +93,19 @@ Needs **Claude.app** granted Screen Recording + Accessibility (macOS TCC).
   folder+position. And **recalls REQUIRE `folder_key`** — a folderless SetlistPosition
   UPDATE is silently refused (device echoes the unchanged position back). `recall_preset`
   now defaults to the current folder and verifies the position actually moved.
-- Value taper: `min>0 and max/min>=5` ⇒ power taper (k≈1.667), else linear.
+- **Value taper**: ModelRepo declares a JUCE `skew` on 773 params and `catalog.py` now
+  honours it — `norm = ((display-lo)/(hi-lo))**skew`. Sanity anchor: Gain (16005) LEVEL
+  is −60..+12 dB, skew 3.8018, and 0 dB lands on norm **0.5** exactly. Symbolic
+  `LIN_SKEW`/`LOG_SKEW` and skew-less params fall back to the old heuristic:
+  `min>0 and max/min>=5` ⇒ power taper (k≈1.667), else linear.
+- **Audio / leveling** (`loudness.py`, `audio_io.py`, `leveling.py`; extra `.[audio]`):
+  measure on **host USB in 5/6**, never 3/4 — 3/4 is fed from the *analog outputs* so it
+  folds master volume into the reading. **Never play on host outputs 1–4**: they bypass
+  The Grid straight to the analog jacks (full level into the monitors); the code raises.
+  Reamp = lane `in_portid=12` (USB 5/6) + `out_portid=14`, both restored in a `finally`.
+  A **silent capture means denied microphone permission**, not a quiet preset — macOS
+  returns silence rather than failing, so never level against it. Trim with the **Gain
+  block (16005) param 0**, never the amp master. See docs/LEVELING.md + docs/METERS.md.
 
 ## Conventions
 - This is for interop/debugging on hardware you own + licensed software. Keep capture logs

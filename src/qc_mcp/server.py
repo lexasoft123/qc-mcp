@@ -353,6 +353,449 @@ def cpu_load(detail: bool = True) -> dict:
     return out
 
 
+# IOMeter port fields, grouped as the hardware presents them. Each entry is
+# (label, level field, limiter field or None). The headphones carry a SINGLE
+# `hp_limiter_active` flag for both channels, not one per channel.
+_METER_PORTS = [
+    ("input_1", "input_1", None), ("input_2", "input_2", None),
+    ("return_1", "return_1", None), ("return_2", "return_2", None),
+    ("xlr_1", "xlr_1", "xlr_1_limiter"), ("xlr_2", "xlr_2", "xlr_2_limiter"),
+    ("out_3", "out_3", "out_3_limiter"), ("out_4", "out_4", "out_4_limiter"),
+    ("send_1", "send_1", None), ("send_2", "send_2", None),
+    ("hp_l", "hp_l", None), ("hp_r", "hp_r", None),
+]
+# The grid-side taps, i.e. what the preset feeds each output before the output stage.
+_METER_GRID = ["grid_xlr_1", "grid_xlr_2", "grid_out_3", "grid_out_4",
+               "grid_send_1", "grid_send_2"]
+_METER_USB_OUT = ["usb_output_%d%s" % (n, s) for n in (1, 2, 3, 4) for s in ("l", "r")]
+_METER_USB_IN = ["usb_input_%d%s" % (n, s) for n in (1, 2, 3, 4) for s in ("l", "r")]
+
+# IOMeter reports LINEAR AMPLITUDE 0..1, not dB — established by the Patchbay Leveling
+# bench, which converts with 20*log10 and displays on the -40..+12 dB scale the QC's own
+# OUT LEVEL readout uses. Straight to a bar the linear value buries everything below
+# -6 dBFS in the bottom tenth, which is where guitar playing actually lives.
+METER_FLOOR_DB = -40.0
+METER_CEIL_DB = 12.0
+
+
+def _meter_db(level):
+    """Linear amplitude -> dB on the device's own -40..+12 scale."""
+    import math
+    if level is None or level <= 0:
+        return None
+    return round(max(METER_FLOOR_DB, 20.0 * math.log10(float(level))), 1)
+
+
+@mcp.tool()
+def output_meter(hold_s: float = 1.0, detail: bool = False) -> dict:
+    """READ the device's live output meters (IOMeter telemetry) over a hold window.
+
+    Returns per-port {peak, last} plus the per-output LIMITER flags — the reliable way
+    to answer "is signal reaching the outputs?" and "is this preset clipping?" without
+    guessing from the grid. Ports: input_1/2, return_1/2, xlr_1/2, out_3/4, send_1/2,
+    hp_l/hp_r; detail=True adds the grid-side taps and all USB channels.
+
+    `hold_s` is a peak-hold window: the device streams these continuously, so a longer
+    hold catches transients a single sample would miss. Play while it runs.
+
+    Levels come back both as the raw linear amplitude the device sends (0..1) and as dB
+    on the -40..+12 scale the QC's own OUT LEVEL readout uses. See docs/METERS.md."""
+    qc = _conn()
+    msgs = qc.latest_broadcast("IOMeter", hold_s=hold_s)
+    if not msgs:
+        return {"note": "no IOMeter update captured",
+                "hint": ("The device streams IOMeter continuously in bridge mode. If "
+                         "this stays empty, the session may be stale — disconnect() "
+                         "then connect() — or in direct mode the stream may need the "
+                         "app running to be subscribed.")}
+
+    def fold(field):
+        vals = [float(getattr(m, field, 0.0) or 0.0) for m in msgs]
+        pk = max(vals)
+        return {"peak": round(pk, 5), "last": round(vals[-1], 5),
+                "peak_db": _meter_db(pk), "last_db": _meter_db(vals[-1])}
+
+    ports = {label: fold(lvl) for label, lvl, _lim in _METER_PORTS}
+    limiters = {}
+    for label, _lvl, lim in _METER_PORTS:
+        if lim:
+            limiters[label] = any(bool(getattr(m, lim, 0.0)) for m in msgs)
+    limiters["hp"] = any(bool(getattr(m, "hp_limiter_active", False)) for m in msgs)
+
+    out = {"samples": len(msgs), "hold_s": hold_s, "ports": ports,
+           "limiters": limiters, "any_limiting": any(limiters.values()),
+           "scale": {"raw": "linear amplitude 0..1", "db_floor": METER_FLOOR_DB,
+                     "db_ceiling": METER_CEIL_DB}}
+    if detail:
+        out["grid"] = {f: fold(f) for f in _METER_GRID}
+        out["usb_out"] = {f: fold(f) for f in _METER_USB_OUT}
+        out["usb_in"] = {f: fold(f) for f in _METER_USB_IN}
+    return out
+
+
+# ---------------------------------------------------------------- audio tools ----
+# All of these need the optional audio extra: pip install -e '.[audio]'
+def _audio_err(e):
+    return {"error": str(e),
+            "hint": "install the audio extra:  pip install -e '.[audio]'"}
+
+
+@mcp.tool()
+def audio_devices() -> dict:
+    """LIST the Mac's CoreAudio devices and flag the Quad Cortex.
+
+    The QC enumerates as 8 in / 8 out at a fixed 48 kHz. Device indices move as other
+    interfaces come and go, so everything else here resolves the device BY NAME."""
+    try:
+        from . import audio_io
+        devs = audio_io.list_devices()
+    except Exception as e:
+        return _audio_err(e)
+    qc = [d for d in devs if d["is_quad_cortex"]]
+    out = {"devices": devs, "quad_cortex": qc[0] if qc else None}
+    if not qc:
+        out["hint"] = "No Quad Cortex found — connect it over USB."
+    return out
+
+
+@mcp.tool()
+def sample_arm(threshold_dbfs: float = -40.0, max_seconds: float = 30.0,
+               silence_seconds: float = 1.5) -> dict:
+    """ARM the reference-riff recorder — a looper pedal for the measurement stimulus.
+
+    Records the DRY DI (host USB inputs 1/2), so the riff is the raw instrument, not
+    something already coloured by a preset. Recording AUTO-STARTS on the first note
+    above `threshold_dbfs` and AUTO-STOPS after `silence_seconds` of quiet (or at
+    `max_seconds`, or on sample_stop). Returns immediately; poll sample_status.
+
+    Record once per guitar/pickup setting — the sample is reused for every preset, and
+    that is what makes the loudness comparisons between presets valid."""
+    try:
+        from . import audio_io
+        return audio_io.sampler().arm(threshold_dbfs=threshold_dbfs,
+                                      max_seconds=max_seconds,
+                                      silence_seconds=silence_seconds)
+    except Exception as e:
+        return _audio_err(e)
+
+
+@mcp.tool()
+def sample_status() -> dict:
+    """POLL the reference recorder: state (idle/armed/recording/done), seconds captured
+    and a live input level in dBFS. Use it to tell the player when to start."""
+    try:
+        from . import audio_io
+        return audio_io.sampler().status()
+    except Exception as e:
+        return _audio_err(e)
+
+
+@mcp.tool()
+def sample_stop(path: str = "") -> dict:
+    """STOP the reference recording (the pedal's second press), trim the silence off
+    both ends with short fades, save 24-bit/48 kHz WAV, and report duration, peak and
+    LUFS. Defaults to ~/.qc-mcp/reference_di.wav."""
+    try:
+        from . import audio_io
+        return audio_io.sampler().stop(path=path or None)
+    except Exception as e:
+        return _audio_err(e)
+
+
+@mcp.tool()
+def sample_discard() -> dict:
+    """DISCARD the current take and return to idle (the recorder's undo)."""
+    try:
+        from . import audio_io
+        return audio_io.sampler().discard()
+    except Exception as e:
+        return _audio_err(e)
+
+
+@mcp.tool()
+def measure_loudness(seconds: float = 6.0, channels: list = None,
+                     perceived: bool = False) -> dict:
+    """MEASURE what the device is putting out: integrated LUFS (BS.1770), short-term
+    LUFS, true peak (dBTP), RMS and sample peak. `perceived=True` adds ISO 532-1
+    Zwicker N5/N50 in relative sones — closer to the ear for dense high-gain tones, but
+    it costs roughly 0.9x realtime, so leave it off for routine measurements.
+
+    Captures host USB inputs 5/6 by default: those come from dedicated Grid USB output
+    blocks, so the reading is free of the analog output stage and master volume. Host
+    inputs 3/4 follow the analog outputs and would fold master volume into the number.
+    Route the lane you want to measure to USB 5/6 (out_portid=14) first.
+
+    A capture that is digital silence is reported as such with an error — on macOS a
+    DENIED microphone permission returns silence rather than failing, and that must
+    never be mistaken for a quiet preset."""
+    try:
+        from . import audio_io, loudness
+        chans = tuple(channels) if channels else audio_io.DEFAULT_MEASURE_CHANNELS
+        data, rate = audio_io.record(seconds, channels=chans)
+        out = loudness.analyze(data, rate, perceived=perceived)
+        out["channels_recorded"] = list(chans)
+        return out
+    except Exception as e:
+        return _audio_err(e)
+
+
+@mcp.tool()
+def measure_preset(perceived: bool = False, di_path: str = "",
+                   in_channels: list = None, out_channels: list = None) -> dict:
+    """PLAY the reference riff into the current preset and measure what comes back.
+
+    Sends the sample to host USB outputs 5/6, which land on The Grid's USB Input 5/6 —
+    so the lane you want to measure must take USB 5/6 as its input (in_portid=12) and
+    send its output to USB 5/6 (out_portid=14). Use with_reamp_routing to arrange that
+    and put the routing back afterwards.
+
+    Host outputs 1-4 are REFUSED: they bypass The Grid and go straight to the analog
+    jacks, i.e. full-level audio into whatever the player is monitoring on."""
+    try:
+        from . import audio_io, loudness
+        path = di_path or audio_io.DEFAULT_SAMPLE_PATH
+        import os as _os
+        if not _os.path.exists(path):
+            return {"error": "no reference sample at %s" % path,
+                    "hint": "record one first: sample_arm(), play a riff, sample_stop()"}
+        stim, rate = audio_io.load_wav(path)
+        rec, rate = audio_io.play_and_record(
+            stim, rate=rate,
+            out_channels=tuple(out_channels) if out_channels
+            else audio_io.DEFAULT_REAMP_CHANNELS,
+            in_channels=tuple(in_channels) if in_channels
+            else audio_io.DEFAULT_MEASURE_CHANNELS)
+        out = loudness.analyze(rec, rate, perceived=perceived)
+        out["stimulus"] = path
+        out["stimulus_s"] = round(stim.shape[0] / float(rate), 2)
+        return out
+    except Exception as e:
+        return _audio_err(e)
+
+
+@mcp.tool()
+def compare_presets(reference_position: int = -1, positions: list = None,
+                    setlist_key: str = "", di_path: str = "", row: int = 0,
+                    perceived: bool = False) -> dict:
+    """COMPARE presets against a reference — is the difference LEVEL or TONE?
+
+    Plays the same riff through each preset and reports, per preset: the loudness gap in
+    dB, a 9-band spectral balance difference, crest factor, and a verdict saying whether
+    trimming would fix it. A tone difference is not fixable by leveling, and trying is
+    how a preset ends up both wrong and quiet.
+
+    `reference_position=-1` uses the current preset as the reference. Writes nothing."""
+    try:
+        from . import leveling, loudness as L, audio_io  # noqa: F401
+    except Exception as e:
+        return _audio_err(e)
+    qc = _conn()
+
+    def _measure_here():
+        with leveling.reamp_routing(qc, row=row):
+            from . import audio_io as A
+            import os as _os
+            path = di_path or A.DEFAULT_SAMPLE_PATH
+            if not _os.path.exists(path):
+                raise RuntimeError("no reference sample at %s — record one with "
+                                   "sample_arm()" % path)
+            stim, rate = A.load_wav(path)
+            rec, rate = A.play_and_record(stim, rate=rate)
+            return L.analyze(rec, rate, perceived=perceived, spectrum=True)
+
+    try:
+        if reference_position >= 0:
+            qc.recall(folder_key=setlist_key, position=int(reference_position))
+        ref = _measure_here()
+        if ref.get("error"):
+            return {"error": ref["error"]}
+        rows = []
+        for pos in (positions or []):
+            qc.recall(folder_key=setlist_key, position=int(pos))
+            got = _measure_here()
+            if got.get("error"):
+                rows.append({"position": int(pos), "error": got["error"]})
+                continue
+            delta = None
+            if ref.get("lufs_integrated") is not None and got.get("lufs_integrated") is not None:
+                delta = round(got["lufs_integrated"] - ref["lufs_integrated"], 2)
+            spec = L.compare_spectra(ref.get("spectral_balance") or {},
+                                     got.get("spectral_balance") or {})
+            rows.append({
+                "position": int(pos),
+                "lufs": got.get("lufs_integrated"),
+                "level_delta_db": delta,
+                "crest_db": got.get("crest_db"),
+                "spectral_diff": spec["bands"],
+                "verdict": L.verdict(delta, spec),
+            })
+    except Exception as e:
+        return {"error": str(e)}
+    return {"reference": {"position": (reference_position if reference_position >= 0
+                                       else "current"),
+                          "lufs": ref.get("lufs_integrated"),
+                          "crest_db": ref.get("crest_db"),
+                          "spectral_balance": ref.get("spectral_balance")},
+            "presets": rows,
+            "note": "report only — nothing was written to the device"}
+
+
+@mcp.tool()
+def suggest_levels(positions: list = None, target_lufs: float = -18.0,
+                   metric: str = "lufs", setlist_key: str = "",
+                   di_path: str = "", row: int = 0) -> dict:
+    """REPORT-ONLY: measure presets and report the correction each needs, in dB.
+
+    Writes NOTHING to the device — it recalls each preset, plays the reference riff
+    through it, measures, and puts the routing back. Use level_preset / level_setlist to
+    apply. `metric="perceived"` levels by Zwicker loudness instead of LUFS, which suits
+    a setlist mixing dense high-gain presets with cleans (slower: ~0.9x realtime).
+
+    `positions` defaults to the current preset only. Record a reference riff first."""
+    try:
+        from . import leveling
+    except Exception as e:
+        return _audio_err(e)
+    qc = _conn()
+    rows = []
+    try:
+        if not positions:
+            res = leveling.level_current(qc, target=target_lufs, metric=metric,
+                                         row=row, di_path=di_path or None,
+                                         dry_run=True)
+            rows.append({"position": "current", **_level_row(res)})
+        else:
+            for pos in positions:
+                qc.recall(folder_key=setlist_key, position=int(pos))
+                res = leveling.level_current(qc, target=target_lufs, metric=metric,
+                                             row=row, di_path=di_path or None,
+                                             dry_run=True)
+                rows.append({"position": int(pos), **_level_row(res)})
+    except Exception as e:
+        return {"error": str(e), "measured": rows}
+    vals = [r["measured"] for r in rows if r.get("measured") is not None]
+    return {"target": target_lufs, "metric": metric, "presets": rows,
+            "spread": (round(max(vals) - min(vals), 2) if len(vals) > 1 else None),
+            "note": "report only — nothing was written to the device"}
+
+
+def _level_row(res):
+    return {"measured": (res.get("iterations") or [{}])[0].get("measured"),
+            "correction_db": res.get("suggested_db"),
+            "true_peak_dbtp": (res.get("iterations") or [{}])[0].get("true_peak_dbtp"),
+            "error": res.get("error")}
+
+
+@mcp.tool()
+def level_preset(target_lufs: float = -18.0, metric: str = "lufs",
+                 tolerance: float = 0.5, max_iterations: int = 4, row: int = 0,
+                 di_path: str = "", save: bool = False) -> dict:
+    """LEVEL the current preset: measure, trim, re-measure until it lands on target.
+
+    The correction goes to a Gain block at the end of the measured lane (added if
+    absent) — amp master, cab and drive are never touched. A true-peak guard backs the
+    trim off rather than pushing the preset into the output limiter.
+
+    Leaves the preset DIRTY unless save=True. Returns every iteration so you can see the
+    convergence. The reamp routing is restored even if the run fails."""
+    try:
+        from . import leveling
+    except Exception as e:
+        return _audio_err(e)
+    qc = _conn()
+    try:
+        out = leveling.level_current(qc, target=target_lufs, metric=metric,
+                                     tolerance=tolerance, max_iterations=max_iterations,
+                                     row=row, di_path=di_path or None)
+    except Exception as e:
+        return {"error": str(e)}
+    if save and out.get("written") and not out.get("error"):
+        try:
+            out["saved"] = save_preset()
+        except Exception as e:
+            out["save_error"] = str(e)
+    return out
+
+
+@mcp.tool()
+def level_scenes(target_lufs: float = -18.0, scenes: list = None,
+                 metric: str = "lufs", tolerance: float = 0.5, row: int = 0,
+                 di_path: str = "", save: bool = False, dry_run: bool = False) -> dict:
+    """LEVEL each SCENE of the current preset independently.
+
+    Measures every requested scene (default: all 8), then writes the per-scene values of
+    the Gain block's LEVEL in one pass. Scenes whose switch the device does not confirm,
+    or that cannot be measured, are reported as skipped and left untouched.
+
+    Per-scene values require the parameter to be assigned to scenes first; that is done
+    for you. Returns to scene 0 when finished."""
+    try:
+        from . import leveling
+    except Exception as e:
+        return _audio_err(e)
+    qc = _conn()
+    try:
+        out = leveling.level_scenes(qc, scenes=scenes, target=target_lufs,
+                                    metric=metric, tolerance=tolerance, row=row,
+                                    di_path=di_path or None, dry_run=dry_run)
+    except Exception as e:
+        return {"error": str(e)}
+    if save and out.get("written"):
+        try:
+            out["saved"] = save_preset()
+        except Exception as e:
+            out["save_error"] = str(e)
+    return out
+
+
+@mcp.tool()
+def level_setlist(positions: list, setlist_key: str = "", target_lufs: float = -18.0,
+                  metric: str = "lufs", tolerance: float = 0.5, row: int = 0,
+                  di_path: str = "", per_scene: bool = False,
+                  save: bool = False) -> dict:
+    """LEVEL several presets in sequence — the unattended pass over a setlist.
+
+    Recalls each position, levels it (per preset, or per scene when per_scene=True),
+    optionally saves, and moves on. Stops at the first device error and reports what was
+    done up to that point rather than carrying on blindly.
+
+    Measure first with suggest_levels to see the corrections before anything is written."""
+    try:
+        from . import leveling
+    except Exception as e:
+        return _audio_err(e)
+    qc = _conn()
+    done, failed = [], None
+    for pos in positions:
+        try:
+            qc.recall(folder_key=setlist_key, position=int(pos))
+            if per_scene:
+                res = leveling.level_scenes(qc, target=target_lufs, metric=metric,
+                                            tolerance=tolerance, row=row,
+                                            di_path=di_path or None)
+            else:
+                res = leveling.level_current(qc, target=target_lufs, metric=metric,
+                                             tolerance=tolerance, row=row,
+                                             di_path=di_path or None)
+            entry = {"position": int(pos), "converged": res.get("converged"),
+                     "final_delta_db": res.get("final_delta_db"),
+                     "final_trim_db": res.get("final_trim_db"),
+                     "limited": res.get("limited", False), "error": res.get("error")}
+            if save and res.get("written") and not res.get("error"):
+                entry["saved"] = save_preset()
+            done.append(entry)
+            if res.get("error"):
+                failed = "preset %s: %s" % (pos, res["error"])
+                break
+        except Exception as e:
+            failed = "preset %s: %s" % (pos, e)
+            break
+    return {"target": target_lufs, "metric": metric, "per_scene": per_scene,
+            "presets": done, "aborted_at": failed,
+            "note": ("routing is restored after every preset; presets not listed were "
+                     "not touched")}
+
+
 @mcp.tool()
 def switch_scene(scene: int) -> str:
     """WRITE: switch the active scene (0–7 = A–H) within the current preset.

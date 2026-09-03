@@ -160,6 +160,28 @@ class QuadCortex:
                     obj = None
                 self._pending.append((cmd, obj, raw, pb))
 
+    def latest_broadcast(self, command, hold_s=1.0, settle_s=0.25):
+        """Collect streamed telemetry for `hold_s` and return every fresh message.
+
+        Broadcast telemetry (CPULoad, IOMeter, LooperStatus) arrives unsolicited with
+        `request_id=0`, so `request()` cannot be used — it correlates on request_id.
+        The buffer also holds stale copies, so drop what is already queued first and
+        only then sample. Returns oldest-first; callers that want one value take
+        [-1], callers that want a peak-hold fold over the whole list.
+        """
+        import time
+        want = command if isinstance(command, int) else P.NAME_TO_CMD[command]
+        self._pending = [t for t in self._pending if t[0] != want]
+        fresh = []
+        deadline = time.time() + max(hold_s, settle_s)
+        while time.time() < deadline:
+            self._collect(settle_s)
+            got = [obj for cmd, obj, raw, pb in self._pending
+                   if cmd == want and obj is not None]
+            self._pending = [t for t in self._pending if t[0] != want]
+            fresh.extend(got)
+        return fresh
+
     def request(self, command, proto_message=None, proto_bytes=None,
                 expect=None, timeout_ms=2000):
         want = command if isinstance(command, int) else P.NAME_TO_CMD[command]

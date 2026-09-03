@@ -81,6 +81,13 @@ See [interceptor/](interceptor/) and PROTOCOL.md §11.
 |------|------|-------------|
 | `get_current_preset` | read | full preset: blocks, positions, routing, params (display units) |
 | `get_io_settings` | read | hardware inputs/outputs, headphones, USB |
+| `output_meter` | read | live output meters + limiter flags (IOMeter telemetry) |
+| `audio_devices` | read | CoreAudio devices, flagging the Quad Cortex |
+| `sample_arm` / `_status` / `_stop` / `_discard` | **audio** | looper‑style reference‑riff recorder |
+| `measure_loudness` | **audio** | LUFS / true peak / RMS (+ optional Zwicker) of the live output |
+| `measure_preset` | **audio** | play the riff into the current preset and measure |
+| `suggest_levels` | **audio** | report‑only table of per‑preset corrections in dB |
+| `level_preset` / `level_scenes` / `level_setlist` | **audio** | close the loop: measure → trim → verify |
 | `find_devices` | read | search the catalog by name / emulated gear / category |
 | `build_preset` | **write** | build a whole preset from a spec (chains, routing, splitters, blocks, params) |
 | `add_block` / `remove_block` | **write** | place / delete a block at (row, col) |
@@ -117,7 +124,7 @@ chunked 128‑byte reports. This project:
 ## Status
 
 Working: reading, live control, and **accurate preset building** (topology, routing,
-splitters/mixers, and parameters in real units). See [PLAN.md](PLAN.md).
+splitters/mixers, and parameters in real units). See [PLAN.md](PLAN.md). Loudness metering + automatic preset leveling: [docs/LEVELING.md](docs/LEVELING.md) and [docs/METERS.md](docs/METERS.md).
 In progress: **scenes/stomps** — per‑scene parameter/bypass values and footswitch
 (stomp) assignments.
 

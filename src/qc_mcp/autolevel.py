@@ -126,6 +126,65 @@ def read_trim_db(qc, row, col):
     return float(catalog.to_display(GAIN_HASH, GAIN_LEVEL, float(raw)))
 
 
+# ----------------------------------------------------------------- trims ----
+class GainBlockTrim:
+    """Trim with a Gain block (16005) appended to the lane.
+
+    The general-purpose choice: it works on any lane, and its LEVEL can be given
+    per-scene values, which a lane sub-block cannot.
+    """
+
+    name = "gain_block"
+
+    def __init__(self, qc, row):
+        self.qc, self.row = qc, row
+        self.col = None
+        self.added = False
+
+    def prepare(self):
+        self.col, self.added = ensure_gain_block(self.qc, self.row)
+        return {"row": self.row, "column": self.col, "added": self.added,
+                "knob": self.name}
+
+    def read(self):
+        return read_trim_db(self.qc, self.row, self.col)
+
+    def write(self, db):
+        return set_trim_db(self.qc, self.row, self.col, db)
+
+    limits = (GAIN_MIN_DB, GAIN_MAX_DB)
+
+
+class LaneVolumeTrim:
+    """Trim the lane's own output volume (LaneOutputControl 23000, param VOLUME).
+
+    Preferable when levelling a whole preset: it adds nothing to the grid, it is
+    stored in the preset, and it is the same knob the QC's own OUT LEVEL shows.
+    Its range is a calibrated -40..+12 dB. It cannot carry per-scene values, so
+    scene work still goes through GainBlockTrim.
+    """
+
+    name = "lane_volume"
+
+    def __init__(self, bench, row):
+        self.bench, self.row = bench, row
+        from . import leveling as _bench_mod
+        self.limits = tuple(_bench_mod.db_range())
+
+    def prepare(self):
+        return {"row": self.row, "knob": self.name}
+
+    def read(self):
+        state = self.bench.preset_state() or {}
+        for lane in state.get("lanes", []) or []:
+            if lane.get("row") == self.row:
+                return float(lane.get("db", 0.0))
+        return 0.0
+
+    def write(self, db):
+        return float(self.bench.set_db(self.row, db))
+
+
 # ------------------------------------------------------------- measurement ----
 def measure(di_path=None, perceived=False, in_channels=None, out_channels=None):
     """Play the reference riff into whatever the grid is currently set to, and measure."""
@@ -171,12 +230,17 @@ def _delta(result, target, metric):
 def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
                   tolerance=DEFAULT_TOLERANCE_LU, max_iterations=DEFAULT_MAX_ITERATIONS,
                   row=0, di_path=None, perceived=None, dry_run=False,
-                  true_peak_ceiling=TRUE_PEAK_CEILING_DBTP):
+                  true_peak_ceiling=TRUE_PEAK_CEILING_DBTP, trim=None, on_step=None):
     """Measure -> correct -> verify the CURRENT preset until it lands within tolerance.
 
     `dry_run=True` measures once and reports the correction without touching anything —
     the report-only mode. Returns a dict with every iteration, so a caller can show the
     convergence rather than just the final number.
+
+    `trim` picks the knob: a `GainBlockTrim` (default) or a `LaneVolumeTrim` when the
+    caller has a Bench and would rather move the lane's own output level than add a
+    block. `on_step(step)` is called after each iteration so a UI can follow along
+    instead of waiting for the whole run.
     """
     if perceived is None:
         perceived = (metric == "perceived")
@@ -190,9 +254,11 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
             out["measurement"] = first
             return out
         delta = _delta(first, target, metric)
-        out["iterations"].append({"n": 1, "measured": _metric(first, metric),
-                                  "delta_db": delta, "true_peak_dbtp":
-                                  first.get("true_peak_dbtp"), "wrote_db": None})
+        first_step = {"n": 1, "measured": _metric(first, metric), "delta_db": delta,
+                      "true_peak_dbtp": first.get("true_peak_dbtp"), "wrote_db": None}
+        out["iterations"].append(first_step)
+        if on_step:
+            on_step(first_step)
         out["measurement"] = first
         if delta is None:
             out["error"] = "could not derive a correction from the measurement"
@@ -205,13 +271,14 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
             out["final_delta_db"] = delta
             return out
 
-        col, added = ensure_gain_block(qc, row)
-        out["trim_block"] = {"row": row, "column": col, "added": added}
-        trim = read_trim_db(qc, row, col)
+        knob = trim or GainBlockTrim(qc, row)
+        out["trim_block"] = knob.prepare()
+        lo, hi = knob.limits
+        current = knob.read()
 
         for n in range(2, max_iterations + 2):
-            want = loudness.clamp_db(trim + delta, GAIN_MIN_DB, GAIN_MAX_DB)
-            trim = set_trim_db(qc, row, col, want)
+            want = loudness.clamp_db(current + delta, lo, hi)
+            current = knob.write(want)
             out["written"] = True
             res = measure(di_path=di_path, perceived=perceived)
             if res.get("error"):
@@ -220,17 +287,21 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
             delta = _delta(res, target, metric)
             tp = res.get("true_peak_dbtp")
             step = {"n": n, "measured": _metric(res, metric), "delta_db": delta,
-                    "true_peak_dbtp": tp, "wrote_db": trim}
+                    "true_peak_dbtp": tp, "wrote_db": current}
             # Guard: never trim into the ceiling. Back off and stop.
             if tp is not None and tp > true_peak_ceiling and delta and delta > 0:
-                back = trim - (tp - true_peak_ceiling)
-                trim = set_trim_db(qc, row, col, back)
+                back = current - (tp - true_peak_ceiling)
+                current = knob.write(loudness.clamp_db(back, lo, hi))
                 step["limited_by"] = "true_peak"
-                step["backed_off_to_db"] = trim
+                step["backed_off_to_db"] = current
                 out["iterations"].append(step)
+                if on_step:
+                    on_step(step)
                 out["limited"] = True
                 break
             out["iterations"].append(step)
+            if on_step:
+                on_step(step)
             out["measurement"] = res
             if delta is not None and abs(delta) <= tolerance:
                 out["converged"] = True

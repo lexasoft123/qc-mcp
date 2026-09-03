@@ -195,6 +195,74 @@ export type LevelEvent =
   | { event: 'meter'; at: number; outputs: Record<string, MeterOutput> }
   | { event: 'stopped'; error: string | null }
   | { event: 'fatal'; error: string }
+  | { event: 'autolevel'; row: number; step: AutoStep }
+
+/** One measure->correct pass of the automatic loop. */
+export interface AutoStep {
+  n: number
+  /** LUFS, or relative sones when levelling by perceived loudness. */
+  measured: number | null
+  /** How far off target this reading was, in dB. */
+  delta_db: number | null
+  true_peak_dbtp: number | null
+  /** The trim written after this reading; null on the first, measure-only pass. */
+  wrote_db: number | null
+  limited_by?: 'true_peak'
+  backed_off_to_db?: number
+}
+
+/** What one capture measured. Everything is null when it could not be measured. */
+export interface Measurement {
+  duration_s: number
+  silent: boolean
+  sample_peak_dbfs: number | null
+  lufs_integrated?: number | null
+  true_peak_dbtp?: number | null
+  rms_dbfs?: number | null
+  zwicker_n5_rel?: number | null
+  /** Present when the capture cannot be trusted — silence, below the gate, too short. */
+  error?: string
+}
+
+export interface AutoResult {
+  target: number
+  metric: string
+  iterations: AutoStep[]
+  written: boolean
+  converged?: boolean
+  limited?: boolean
+  final_delta_db?: number | null
+  final_trim_db?: number | null
+  suggested_db?: number
+  trim_block?: { row: number; knob: string; column?: number; added?: boolean }
+  error?: string
+}
+
+/** The reference riff the measured half plays into every preset. */
+export interface SampleState {
+  state: 'idle' | 'armed' | 'recording' | 'done'
+  seconds_recorded: number
+  input_dbfs: number | null
+  threshold_dbfs: number
+  max_seconds: number
+  silence_seconds: number
+  error?: string | null
+  /** Set once the take is kept. */
+  path?: string
+  duration_s?: number
+  peak_dbfs?: number | null
+  lufs?: number | null
+}
+
+/** Whether the optional audio extra is installed, and what it can see. */
+export interface AudioState {
+  available: boolean
+  error?: string
+  hint?: string
+  quadCortex: { index: number; name: string; inputs: number; outputs: number } | null
+  /** Path of the stored reference riff, or null when none has been recorded. */
+  sample: string | null
+}
 
 export type LogDirection = 'tx' | 'rx' | 'sys' | 'err'
 
@@ -259,6 +327,18 @@ export interface Api {
     save(name?: string): Promise<{ name: string; position: number }>
     meter(on: boolean): Promise<boolean>
     onEvent(cb: (e: LevelEvent) => void): () => void
+
+    /** The measured half. Needs the optional audio extra; `audio()` says whether. */
+    audio(): Promise<AudioState>
+    sampleArm(o?: { thresholdDbfs?: number; maxSeconds?: number }): Promise<SampleState>
+    sampleStatus(): Promise<SampleState>
+    sampleStop(): Promise<SampleState>
+    sampleDiscard(): Promise<SampleState>
+    measure(row: number, perceived?: boolean): Promise<Measurement>
+    autolevel(
+      row: number,
+      o?: { target?: number; tolerance?: number; dryRun?: boolean }
+    ): Promise<AutoResult>
   }
 
   window: {

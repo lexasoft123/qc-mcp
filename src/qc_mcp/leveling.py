@@ -352,6 +352,91 @@ class Bench:
         emit({"event": "meter", "at": self._last_meter, "outputs": outs})
 
 
+# --------------------------------------------------- measured leveling ----
+# The bench trims by ear against the meters. These ops add the measured half:
+# a reference riff recorded once, then LUFS through the USB reamp path, and a
+# loop that trims until the preset lands on target. All of it needs the optional
+# audio extra, so every entry point degrades to a plain message instead of an
+# import error the app would have to special-case.
+def _audio_unavailable(exc):
+    return {"available": False, "error": str(exc),
+            "hint": "install the audio extra:  pip install -e '.[audio]'"}
+
+
+def _audio():
+    from . import audio_io, autolevel, loudness
+    return audio_io, autolevel, loudness
+
+
+def measure_ops(bench, emit):
+    """The measured-leveling half of the op table, or stubs when audio is absent."""
+    try:
+        audio_io, autolevel, loudness = _audio()
+    except Exception as exc:                       # noqa: BLE001 - reported, not raised
+        stub = lambda m: _audio_unavailable(exc)   # noqa: E731
+        return {k: stub for k in ("audio", "sample_arm", "sample_status",
+                                  "sample_stop", "sample_discard", "measure",
+                                  "autolevel")}
+
+    def audio(m):
+        try:
+            devs = audio_io.list_devices()
+        except Exception as exc:                   # noqa: BLE001
+            return _audio_unavailable(exc)
+        qc = [d for d in devs if d["is_quad_cortex"]]
+        import os
+        return {"available": True, "devices": devs, "quad_cortex": qc[0] if qc else None,
+                "sample": (audio_io.DEFAULT_SAMPLE_PATH
+                           if os.path.exists(audio_io.DEFAULT_SAMPLE_PATH) else None)}
+
+    def guard(fn):
+        def run(m):
+            try:
+                return fn(m)
+            except Exception as exc:               # noqa: BLE001
+                return {"error": f"{type(exc).__name__}: {exc}"}
+        return run
+
+    def do_measure(m):
+        row = int(m.get("row", 0))
+        with autolevel.reamp_routing(bench.qc, row=row):
+            return {"measurement": autolevel.measure(
+                di_path=m.get("di_path") or None,
+                perceived=bool(m.get("perceived")))}
+
+    def do_autolevel(m):
+        row = int(m.get("row", 0))
+        # The lane's own output volume is the right knob here: it is stored in the
+        # preset, it is what the bench's fader already shows, and it adds nothing
+        # to the grid. Scene work still needs the Gain block.
+        knob = (autolevel.LaneVolumeTrim(bench, row) if m.get("knob", "lane") == "lane"
+                else autolevel.GainBlockTrim(bench.qc, row))
+        return autolevel.level_current(
+            bench.qc,
+            target=float(m.get("target", autolevel.DEFAULT_TARGET_LUFS)),
+            metric=m.get("metric", "lufs"),
+            tolerance=float(m.get("tolerance", autolevel.DEFAULT_TOLERANCE_LU)),
+            max_iterations=int(m.get("max_iterations",
+                                     autolevel.DEFAULT_MAX_ITERATIONS)),
+            row=row, di_path=m.get("di_path") or None,
+            dry_run=bool(m.get("dry_run")), trim=knob,
+            on_step=lambda step: emit({"event": "autolevel", "row": row, "step": step}))
+
+    sampler = audio_io.sampler
+    return {
+        "audio": audio,
+        "sample_arm": guard(lambda m: sampler().arm(
+            threshold_dbfs=float(m.get("threshold_dbfs", -40.0)),
+            max_seconds=float(m.get("max_seconds", 30.0)),
+            silence_seconds=float(m.get("silence_seconds", 1.5)))),
+        "sample_status": guard(lambda m: sampler().status()),
+        "sample_stop": guard(lambda m: sampler().stop(path=m.get("path") or None)),
+        "sample_discard": guard(lambda m: sampler().discard()),
+        "measure": guard(do_measure),
+        "autolevel": guard(do_autolevel),
+    }
+
+
 def _snapshot_path():
     import os
     return os.environ.get("QC_CATALOG_JSON") or os.path.join(
@@ -421,6 +506,7 @@ def serve(socket_path):
         "save": lambda m: {"saved": bench.save(m.get("name", ""))},
         "meter": lambda m: {"metering": _set_metering(bench, qc, m.get("on", True))},
     }
+    ops.update(measure_ops(bench, emit))
 
     while True:
         # Block for a command, and pump once per idle tick. `get_nowait` here

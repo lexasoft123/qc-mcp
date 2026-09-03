@@ -191,6 +191,14 @@ function handlers(): void {
   ipcMain.handle('leveling:scene', (_e, index: number) => bench().scene(index))
   ipcMain.handle('leveling:save', (_e, name?: string) => bench().save(name))
   ipcMain.handle('leveling:meter', (_e, on: boolean) => bench().meter(on))
+  ipcMain.handle('leveling:audio', () => bench().audio())
+  ipcMain.handle('leveling:sampleArm', (_e, o) => bench().sampleArm(o ?? {}))
+  ipcMain.handle('leveling:sampleStatus', () => bench().sampleStatus())
+  ipcMain.handle('leveling:sampleStop', () => bench().sampleStop())
+  ipcMain.handle('leveling:sampleDiscard', () => bench().sampleDiscard())
+  ipcMain.handle('leveling:measure', (_e, row: number, perceived?: boolean) =>
+    bench().measure(row, perceived))
+  ipcMain.handle('leveling:autolevel', (_e, row: number, o) => bench().autolevel(row, o ?? {}))
 
   ipcMain.handle('window:isMaximized', () => Boolean(win?.isMaximized()))
   ipcMain.on('window:minimize', () => win?.minimize())

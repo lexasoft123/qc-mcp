@@ -1,5 +1,8 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import type { LevelEvent, Paths, PresetFolder, PresetState } from '../shared/types.js'
+import type {
+  AudioState, AutoResult, LevelEvent, Measurement, Paths, PresetFolder, PresetState,
+  SampleState
+} from '../shared/types.js'
 import { exists } from './util.js'
 
 /**
@@ -172,6 +175,61 @@ export class Leveling {
 
   async meter(on: boolean): Promise<boolean> {
     return (await this.call('meter', { on }, 8000)).metering as boolean
+  }
+
+  // ── the measured half ───────────────────────────────────────────────────
+  // These need the optional audio extra. The service answers with a plain
+  // `available: false` rather than failing, so the view can explain itself.
+
+  async audio(): Promise<AudioState> {
+    const r = await this.call('audio', {}, 10000)
+    return {
+      available: r.available === true,
+      error: r.error as string | undefined,
+      hint: r.hint as string | undefined,
+      quadCortex: (r.quad_cortex ?? null) as AudioState['quadCortex'],
+      sample: (r.sample ?? null) as string | null
+    }
+  }
+
+  async sampleArm(opts: { thresholdDbfs?: number; maxSeconds?: number } = {}) {
+    return (await this.call('sample_arm', {
+      threshold_dbfs: opts.thresholdDbfs ?? -40, max_seconds: opts.maxSeconds ?? 30
+    }, 10000)) as unknown as SampleState
+  }
+
+  async sampleStatus(): Promise<SampleState> {
+    return (await this.call('sample_status', {}, 8000)) as unknown as SampleState
+  }
+
+  async sampleStop(): Promise<SampleState> {
+    return (await this.call('sample_stop', {}, 20000)) as unknown as SampleState
+  }
+
+  async sampleDiscard(): Promise<SampleState> {
+    return (await this.call('sample_discard', {}, 8000)) as unknown as SampleState
+  }
+
+  /** Play the riff through one lane and measure what comes back. Writes nothing. */
+  async measure(row: number, perceived = false): Promise<Measurement> {
+    const r = await this.call('measure', { row, perceived }, 120000)
+    return (r.measurement ?? r) as unknown as Measurement
+  }
+
+  /**
+   * Measure, trim, verify — until the preset lands on target.
+   *
+   * Slow by nature: every iteration plays the whole riff. The service emits an
+   * `autolevel` event per pass so the view can follow rather than freeze, which
+   * is why the timeout here is generous.
+   */
+  async autolevel(row: number, opts: {
+    target?: number; metric?: string; tolerance?: number; dryRun?: boolean
+  } = {}): Promise<AutoResult> {
+    return (await this.call('autolevel', {
+      row, target: opts.target ?? -18, metric: opts.metric ?? 'lufs',
+      tolerance: opts.tolerance ?? 0.5, dry_run: opts.dryRun ?? false
+    }, 300000)) as unknown as AutoResult
   }
 }
 

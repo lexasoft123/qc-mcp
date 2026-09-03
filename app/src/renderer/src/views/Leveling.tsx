@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge, Button, StatusDot } from '@singz/ui'
-import type { BenchSlot, LevelEvent, MeterOutput, PresetState, Snapshot } from '@shared/types'
+import type {
+  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, Snapshot
+} from '@shared/types'
 import { slotId } from '../derive.js'
 import { act, say } from '../store.js'
 import { Knob } from '../components/Knob.js'
 import { Meter, loudest } from '../components/Meter.js'
 import { PresetPicker } from '../modals/PresetPicker.js'
+import { Measured } from '../components/Measured.js'
 
 const SCENES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 /** The QC grid is four rows, so every column reserves four lane slots and the
@@ -55,6 +58,10 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   /** Loudest dB seen per slot this session. Deliberately not persisted: it
    *  describes a performance, not the preset. */
   const [peaks, setPeaks] = useState<Record<string, number>>({})
+  /** The newest pass of a measured run, so the strip can be watched rather than
+   *  sat in front of: every pass replays the whole riff. */
+  const [autoStep, setAutoStep] = useState<AutoStep | null>(null)
+  const [target, setTarget] = useState(-18)
 
   const live = snap.daemon.state === 'running'
   const slot: BenchSlot | undefined = bench[focus]
@@ -84,6 +91,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     void window.patchbay.leveling.start()
     const off = window.patchbay.leveling.onEvent((e: LevelEvent) => {
       if (e.event === 'meter') setMeter(e.outputs)
+      else if (e.event === 'autolevel') setAutoStep(e.step)
       else if (e.error) setError(e.error)
     })
     void window.patchbay.leveling.meter(true).catch(() => undefined)
@@ -347,6 +355,21 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         </label>
         <Button size="sm" onClick={() => setPicking(true)}>Add preset…</Button>
       </div>
+
+      <Measured
+        live={live}
+        row={lanes[0]?.row ?? 0}
+        presetName={preset ? slot?.name ?? null : null}
+        target={target}
+        onTarget={setTarget}
+        step={autoStep}
+        onTrimmed={() => {
+          // The run moved the fader on the device; re-read so the bench agrees.
+          setAutoStep(null)
+          void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
+          mark(true)
+        }}
+      />
 
       {error && (
         <div className="strip bad lvl-err">

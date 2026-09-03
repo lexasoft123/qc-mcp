@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  Api, CheckId, LevelEvent, LogLine, Mode, Prefs, PresetFolder, PresetState, Progress, Snapshot
+  Api, AudioState, AutoResult, CheckId, LevelEvent, LogLine, Measurement, Mode, Prefs,
+  PresetFolder, PresetState, Progress, SampleState, Snapshot
 } from '../shared/types.js'
 
 /** Subscribe to a main-process push; returns the unsubscribe. */
@@ -55,6 +56,17 @@ const api: Api = {
     save: (name?: string) =>
       ipcRenderer.invoke('leveling:save', name) as Promise<{ name: string; position: number }>,
     meter: (on: boolean) => ipcRenderer.invoke('leveling:meter', on) as Promise<boolean>,
+    audio: () => ipcRenderer.invoke('leveling:audio') as Promise<AudioState>,
+    sampleArm: (o?: { thresholdDbfs?: number; maxSeconds?: number }) =>
+      ipcRenderer.invoke('leveling:sampleArm', o) as Promise<SampleState>,
+    sampleStatus: () => ipcRenderer.invoke('leveling:sampleStatus') as Promise<SampleState>,
+    sampleStop: () => ipcRenderer.invoke('leveling:sampleStop') as Promise<SampleState>,
+    sampleDiscard: () =>
+      ipcRenderer.invoke('leveling:sampleDiscard') as Promise<SampleState>,
+    measure: (row: number, perceived?: boolean) =>
+      ipcRenderer.invoke('leveling:measure', row, perceived) as Promise<Measurement>,
+    autolevel: (row: number, o?: { target?: number; tolerance?: number; dryRun?: boolean }) =>
+      ipcRenderer.invoke('leveling:autolevel', row, o) as Promise<AutoResult>,
     onEvent: (cb) => on<LevelEvent>('leveling:event', cb)
   },
 

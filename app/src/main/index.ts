@@ -194,6 +194,7 @@ function handlers(): void {
   ipcMain.handle('leveling:audio', () => bench().audio())
   ipcMain.handle('leveling:sampleArm', (_e, o) => bench().sampleArm(o ?? {}))
   ipcMain.handle('leveling:sampleStatus', () => bench().sampleStatus())
+  ipcMain.handle('leveling:sampleInfo', () => bench().sampleInfo())
   ipcMain.handle('leveling:sampleStop', () => bench().sampleStop())
   ipcMain.handle('leveling:sampleDiscard', () => bench().sampleDiscard())
   ipcMain.handle('leveling:measure', (_e, perceived?: boolean) => bench().measure(perceived))

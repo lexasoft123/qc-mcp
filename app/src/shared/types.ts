@@ -247,6 +247,9 @@ export interface SampleState {
   max_seconds: number
   silence_seconds: number
   error?: string | null
+  /** Peak envelope of the take, 0..1 — what the waveform draws. The audio itself
+   *  runs to tens of megabytes and this crosses a socket on every poll. */
+  peaks?: number[]
   /** Set once the take is kept. */
   path?: string
   duration_s?: number
@@ -332,6 +335,7 @@ export interface Api {
     audio(): Promise<AudioState>
     sampleArm(o?: { thresholdDbfs?: number; maxSeconds?: number }): Promise<SampleState>
     sampleStatus(): Promise<SampleState>
+    sampleInfo(): Promise<SampleState>
     sampleStop(): Promise<SampleState>
     sampleDiscard(): Promise<SampleState>
     measure(perceived?: boolean): Promise<Measurement>

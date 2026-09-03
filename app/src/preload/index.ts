@@ -60,6 +60,7 @@ const api: Api = {
     sampleArm: (o?: { thresholdDbfs?: number; maxSeconds?: number }) =>
       ipcRenderer.invoke('leveling:sampleArm', o) as Promise<SampleState>,
     sampleStatus: () => ipcRenderer.invoke('leveling:sampleStatus') as Promise<SampleState>,
+    sampleInfo: () => ipcRenderer.invoke('leveling:sampleInfo') as Promise<SampleState>,
     sampleStop: () => ipcRenderer.invoke('leveling:sampleStop') as Promise<SampleState>,
     sampleDiscard: () =>
       ipcRenderer.invoke('leveling:sampleDiscard') as Promise<SampleState>,

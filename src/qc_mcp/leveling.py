@@ -375,8 +375,8 @@ def measure_ops(bench, emit):
     except Exception as exc:                       # noqa: BLE001 - reported, not raised
         stub = lambda m: _audio_unavailable(exc)   # noqa: E731
         return {k: stub for k in ("audio", "sample_arm", "sample_status",
-                                  "sample_stop", "sample_discard", "measure",
-                                  "autolevel")}
+                                  "sample_info", "sample_stop", "sample_discard",
+                                  "measure", "autolevel")}
 
     def audio(m):
         try:
@@ -436,7 +436,13 @@ def measure_ops(bench, emit):
             threshold_dbfs=float(m.get("threshold_dbfs", -40.0)),
             max_seconds=float(m.get("max_seconds", 30.0)),
             silence_seconds=float(m.get("silence_seconds", 1.5)))),
-        "sample_status": guard(lambda m: sampler().status()),
+        # A take recorded this session, or failing that whatever is on disk — so a
+        # relaunch shows the riff it already has instead of a blank waveform.
+        "sample_status": guard(lambda m: (
+            sampler().status() if sampler().state != sampler().IDLE
+            else (audio_io.sample_info() or sampler().status()))),
+        "sample_info": guard(lambda m: audio_io.sample_info(m.get("path") or None)
+                             or {"state": "idle", "error": "no reference riff yet"}),
         "sample_stop": guard(lambda m: sampler().stop(path=m.get("path") or None)),
         "sample_discard": guard(lambda m: sampler().discard()),
         "measure": guard(do_measure),

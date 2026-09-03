@@ -191,6 +191,9 @@ class Sampler:
     """
 
     IDLE, ARMED, RECORDING, DONE = "idle", "armed", "recording", "done"
+    #: buckets in the envelope handed to the UI — enough to draw, small enough to
+    #: send on every status poll
+    ENVELOPE = 240
 
     def __init__(self):
         self.state = self.IDLE
@@ -203,6 +206,8 @@ class Sampler:
         self.silence_seconds = 1.5
         self._silent_run = 0
         self._frames = 0
+        #: one peak per callback block, so the view can draw the take as it grows
+        self._env = []
         self.result = None
         self.error = None
 
@@ -224,6 +229,7 @@ class Sampler:
         self.max_seconds = float(max_seconds)
         self.silence_seconds = float(silence_seconds)
         self._blocks, self._frames, self._silent_run = [], 0, 0
+        self._env = []
         self._input_peak = self._armed_peak = 0.0
         self.result = self.error = None
         thresh = 10.0 ** (self.threshold_dbfs / 20.0)
@@ -237,10 +243,12 @@ class Sampler:
                 if peak > thresh:
                     self.state = self.RECORDING
                     self._blocks.append(indata.copy())
+                    self._env.append(peak)
                     self._frames += frames
                 return
             if self.state == self.RECORDING:
                 self._blocks.append(indata.copy())
+                self._env.append(peak)
                 self._frames += frames
                 self._armed_peak = max(self._armed_peak, peak)
                 self._silent_run = 0 if peak > thresh else self._silent_run + frames
@@ -284,7 +292,7 @@ class Sampler:
         save_wav(path, data, QC_RATE)
         info = loudness.analyze(data, QC_RATE)
         self.result = {
-            "state": self.state, "path": path,
+            "state": self.state, "path": path, "peaks": self.envelope(),
             "duration_s": round(data.shape[0] / float(QC_RATE), 3),
             "trimmed_lead_s": round(lead, 3), "trimmed_tail_s": round(tail, 3),
             "peak_dbfs": info.get("sample_peak_dbfs"),
@@ -306,6 +314,27 @@ class Sampler:
         self.result = self.error = None
         return {"state": self.state}
 
+    def envelope(self, buckets=None):
+        """The take as `buckets` peaks in 0..1 — what the view draws.
+
+        Computed from the per-block peaks the callback already keeps, not from the
+        audio: the audio runs to tens of megabytes and this crosses a JSON socket on
+        every status poll.
+        """
+        n = buckets or self.ENVELOPE
+        src = self._env
+        if not src:
+            return []
+        if len(src) <= n:
+            return [round(float(v), 4) for v in src]
+        step = len(src) / float(n)
+        out = []
+        for i in range(n):
+            lo = int(i * step)
+            hi = max(lo + 1, int((i + 1) * step))
+            out.append(round(float(max(src[lo:hi])), 4))
+        return out
+
     def status(self):
         np = _np()
         peak = self._input_peak
@@ -317,7 +346,43 @@ class Sampler:
             "max_seconds": self.max_seconds,
             "silence_seconds": self.silence_seconds,
             "error": self.error,
+            "peaks": self.envelope(),
         }
+
+
+def sample_info(path=None, buckets=None):
+    """Facts and a drawable envelope for a riff already on disk.
+
+    The sampler only knows about a take it recorded this session. Reopening the app
+    with a riff already saved would otherwise show "Ready" over a blank waveform and
+    zeroed facts, so the stored file has to be readable back.
+    """
+    from . import loudness
+    np = _np()
+    path = path or DEFAULT_SAMPLE_PATH
+    if not os.path.exists(path):
+        return None
+    data, rate = load_wav(path)
+    info = loudness.analyze(data, rate, trim=False)
+    n = buckets or Sampler.ENVELOPE
+    mono = np.abs(np.asarray(data, dtype="float64")).max(axis=1)
+    if mono.size >= n:
+        # trim to a whole number of buckets so reshape can do the work
+        usable = (mono.size // n) * n
+        env = mono[:usable].reshape(n, -1).max(axis=1)
+    else:
+        env = mono
+    return {
+        "state": "done", "path": path,
+        "seconds_recorded": round(data.shape[0] / float(rate), 2),
+        "duration_s": round(data.shape[0] / float(rate), 3),
+        "peak_dbfs": info.get("sample_peak_dbfs"),
+        "lufs": info.get("lufs_integrated"),
+        "true_peak_dbtp": info.get("true_peak_dbtp"),
+        "peaks": [round(float(v), 4) for v in env],
+        "input_dbfs": None, "threshold_dbfs": -40.0,
+        "max_seconds": 30.0, "silence_seconds": 1.5, "error": None,
+    }
 
 
 _sampler = None

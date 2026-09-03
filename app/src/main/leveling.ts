@@ -202,6 +202,11 @@ export class Leveling {
     return (await this.call('sample_status', {}, 8000)) as unknown as SampleState
   }
 
+  /** Facts and envelope for the riff on disk, whoever recorded it and whenever. */
+  async sampleInfo(): Promise<SampleState> {
+    return (await this.call('sample_info', {}, 20000)) as unknown as SampleState
+  }
+
   async sampleStop(): Promise<SampleState> {
     return (await this.call('sample_stop', {}, 20000)) as unknown as SampleState
   }

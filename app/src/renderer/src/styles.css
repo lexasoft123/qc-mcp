@@ -704,22 +704,127 @@ body.win .lvl-col.on { background: var(--sz-surface-raised); }
 
 /* ── the measured half of the bench ─────────────────────────────────────── */
 /* A strip above the faders: the numbers only mean anything next to the knobs
-   they explain. Laid out with gap so it survives wrapping on a narrow window. */
+   they explain. */
 .lvl-measured {
-  display: grid; gap: 6px;
-  padding: 10px 13px; margin-bottom: 12px; border-radius: 13px;
+  display: grid; gap: 11px;
+  padding: 13px 16px; margin-bottom: 12px; border-radius: 16px;
   border: 1px solid var(--sz-line); background: rgba(255, 240, 214, 0.025);
+  transition: border-color 0.25s, background 0.25s;
+}
+.lvl-measured.live {
+  border-color: rgba(255, 160, 40, 0.28);
+  background: color-mix(in srgb, var(--sz-accent-soft) 55%, transparent);
 }
 .lvl-measured.quiet { color: var(--sz-dim); font-size: 12px; }
-.lvl-measured-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.lvl-measured-row .eyebrow { flex: none; }
 
-/* The live input level while a take is armed: mono so it does not jitter the
-   row's width as the number changes. */
+.lvl-measured-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lvl-measured-head .eyebrow, .lvl-measured-head .badge { flex: none; }
+.lvl-measured-head .fine { min-width: 0; }
+
+/* pedal on the left, everything that changes on the right */
+.lvl-measured-body { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 22px;
+  align-items: center; }
+.lvl-measured-main { display: grid; gap: 10px; min-width: 0; }
+
+/* ---- the pedal ---- */
+.pedal { display: grid; justify-items: center; gap: 10px; }
+.pedalbtn {
+  position: relative; width: 132px; height: 132px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--sz-panel-deep);
+  border: 1px solid var(--sz-line-strong); transition: border-color 0.25s, box-shadow 0.25s;
+}
+.pedalbtn:hover { border-color: rgba(255, 160, 40, 0.45); }
+.pedalbtn .cap { display: grid; justify-items: center; gap: 6px; }
+.pedalbtn .lab {
+  font-size: 15px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.pedalbtn .sub {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--sz-faint);
+}
+.pedalbtn.idle .lab, .pedalbtn.done .lab { color: var(--sz-accent); }
+.pedalbtn.armed {
+  border-color: rgba(255, 160, 40, 0.6);
+  box-shadow: 0 0 0 6px rgba(255, 160, 40, 0.07);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.pedalbtn.armed .lab { color: var(--sz-accent); font-size: 13px; }
+.pedalbtn.recording { border-color: rgba(255, 160, 40, 0.5); animation: none; }
+/* a square, because that is what stop looks like on a transport */
+.pedalbtn .glyph {
+  width: 17px; height: 17px; border-radius: 3px; background: var(--sz-text); display: block;
+}
+.pedalbtn .ring { position: absolute; inset: -9px; }
+.pedalbtn .ring circle { fill: none; }
+.pedalbtn .ring-track { stroke: rgba(255, 240, 214, 0.07); }
+.pedalbtn .ring-live { stroke: var(--sz-accent); opacity: 0.9; transition: stroke-dashoffset 0.15s linear; }
+.pedal-cap { font-size: 10.5px; color: var(--sz-faint); text-align: center; line-height: 1.5; }
+
+/* a keycap, built from the chip treatment so it belongs to the kit */
+.kbd {
+  display: inline-grid; place-items: center; min-width: 26px; height: 20px; padding: 0 8px;
+  border-radius: 7px; border: 1px solid var(--sz-line-strong);
+  background: rgba(255, 240, 214, 0.04); font-family: var(--sz-font-mono);
+  font-size: 9.5px; font-weight: 700; color: var(--sz-dim); vertical-align: middle;
+}
+
+/* ---- input level, with the start threshold marked ---- */
+.inmeter { display: grid; gap: 5px; }
+.inmeter-bar {
+  position: relative; height: 10px; border-radius: 99px; overflow: hidden;
+  background: var(--sz-panel-deep); border: 1px solid var(--sz-line);
+}
+.inmeter-bar .fill {
+  position: absolute; inset: 0 auto 0 0; border-radius: 99px;
+  background: linear-gradient(90deg, var(--sz-accent-deep), #ffd489);
+  transition: width 0.1s linear;
+}
+/* dashed, so it reads as a threshold rather than as more signal */
+.inmeter-bar .thr {
+  position: absolute; top: -2px; bottom: -2px; width: 0;
+  border-left: 1px dashed rgba(255, 240, 214, 0.55);
+}
+.inmeter-scale {
+  display: flex; justify-content: space-between; font-family: var(--sz-font-mono);
+  font-size: 8.5px; color: var(--sz-faint); font-variation-settings: 'wdth' 87.5;
+}
+
+/* ---- the take ---- */
+.wave {
+  position: relative; border-radius: 12px; background: var(--sz-panel-deep);
+  border: 1px solid var(--sz-line); overflow: hidden; padding: 0 2px;
+}
+.wave svg { width: 100%; height: 100%; display: block; }
+.wave rect { fill: var(--sz-accent); }
+.wave .head {
+  position: absolute; top: 6px; bottom: 6px; right: 2px; width: 2px;
+  background: var(--sz-text); box-shadow: 0 0 8px rgba(255, 240, 214, 0.6);
+}
+.wave-empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 11px; color: var(--sz-faint);
+}
+
+/* ---- readouts ---- */
+.lvl-measured-nums { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.lvl-measured-nums .big {
+  font-family: var(--sz-font-mono); font-size: 26px; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums; color: var(--sz-text);
+}
+.lvl-measured-nums .big em { font-style: normal; font-size: 13px; color: var(--sz-dim); }
+.lvl-measured-nums .warn { color: var(--sz-accent); font-size: 11.5px; }
 .lvl-measured-in {
   font-family: var(--sz-font-mono); font-size: 10.5px; color: var(--sz-dim);
   font-variant-numeric: tabular-nums; font-variation-settings: 'wdth' 87.5;
 }
+.lvl-measured-facts { padding-top: 10px; }
+.lvl-measured-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* the head's controls move as one block, so a narrow window drops them to their
+   own line together instead of stranding the primary action */
+.lvl-measured-acts-head {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-left: auto;
+}
+.lvl-measured-empty { display: grid; gap: 8px; }
 
 .lvl-measured-target {
   display: flex; align-items: center; gap: 7px;
@@ -733,7 +838,6 @@ body.win .lvl-col.on { background: var(--sz-surface-raised); }
   border-radius: 7px; padding: 4px 7px;
 }
 
-/* One line of results, whichever action produced them. */
 .lvl-measured-out {
   font-family: var(--sz-font-mono); font-size: 11px; color: var(--sz-dim);
   font-variant-numeric: tabular-nums; font-variation-settings: 'wdth' 87.5;
@@ -751,4 +855,3 @@ body.win .lvl-col.on { background: var(--sz-surface-raised); }
   border: 1px solid var(--sz-danger-strong-line);
   background: var(--sz-danger-strong-wash);
 }
-.lvl-measured-err .pill, .lvl-measured-err button { margin-left: auto; }

@@ -24,12 +24,15 @@ const db = (v: number | null | undefined): string =>
 const hasSample = (a: AudioState | null): boolean => Boolean(a?.sample)
 
 export function Measured({
-  live, row, presetName, target, onTarget, step, onTrimmed
+  live, presetName, target, onTarget, step, onTrimmed
 }: {
-  /** The daemon is up and a preset is loaded — without both there is nothing to measure. */
+  /** The daemon is up. Without it there is nothing to talk to. */
   live: boolean
-  /** Lane to measure and trim. */
-  row: number
+  /**
+   * What is loaded on the device, for the label only — measuring does not need it
+   * to be on the bench. The lanes are the service's business: a preset's signal
+   * enters on one and leaves by another, and naming a row here would get it wrong.
+   */
   presetName: string | null
   target: number
   onTarget: (v: number) => void
@@ -97,7 +100,7 @@ export function Measured({
   const measure = async (): Promise<void> => {
     setBusy('measure'); setErr(null); setResult(null)
     try {
-      const m = await window.patchbay.leveling.measure(row)
+      const m = await window.patchbay.leveling.measure()
       setReading(m)
       if (m.error) setErr(m.error)
     } catch (e) { setErr((e as Error).message) } finally { setBusy(null) }
@@ -106,7 +109,7 @@ export function Measured({
   const run = async (dryRun: boolean): Promise<void> => {
     setBusy('auto'); setErr(null); setReading(null)
     try {
-      const r = await window.patchbay.leveling.autolevel(row, { target, dryRun })
+      const r = await window.patchbay.leveling.autolevel({ target, dryRun })
       setResult(r)
       if (r.error) setErr(r.error)
       if (r.written) onTrimmed()
@@ -184,15 +187,15 @@ export function Measured({
                 ))}
               </select>
             </label>
-            <Button size="sm" disabled={busy !== null || !presetName}
+            <Button size="sm" disabled={busy !== null}
                     onClick={() => void measure()}>
               {busy === 'measure' ? 'Measuring…' : 'Measure'}
             </Button>
-            <Button size="sm" disabled={busy !== null || !presetName}
+            <Button size="sm" disabled={busy !== null}
                     onClick={() => void run(true)}>
               Suggest
             </Button>
-            <Button size="sm" variant="primary" disabled={busy !== null || !presetName}
+            <Button size="sm" variant="primary" disabled={busy !== null}
                     onClick={() => void run(false)}>
               {running ? 'Levelling…' : 'Level to target'}
             </Button>

@@ -398,8 +398,10 @@ def measure_ops(bench, emit):
         return run
 
     def do_measure(m):
-        row = int(m.get("row", 0))
-        with autolevel.reamp_routing(bench.qc, row=row):
+        # The signal enters on one lane and leaves on another; feeding and tapping
+        # the same row would cut the chain and measure a dead end.
+        in_row, out_row = autolevel.measurement_rows(bench.qc)
+        with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row):
             return {"measurement": autolevel.measure(
                 di_path=m.get("di_path") or None,
                 perceived=bool(m.get("perceived")))}
@@ -408,8 +410,8 @@ def measure_ops(bench, emit):
         # Trim the lane the sound leaves by, not row 0: a preset that enters on one
         # lane and exits on another would otherwise have its head trimmed while its
         # tail is what gets measured.
-        _in_row, tail = autolevel.measurement_rows(bench.qc)
-        row = int(m.get("row", tail))
+        in_row, tail = autolevel.measurement_rows(bench.qc)
+        row = int(m["row"]) if m.get("row") is not None else tail
         # The lane's own output volume is the right knob here: it is stored in the
         # preset, it is what the bench's fader already shows, and it adds nothing
         # to the grid. Scene work still needs the Gain block.
@@ -422,7 +424,8 @@ def measure_ops(bench, emit):
             tolerance=float(m.get("tolerance", autolevel.DEFAULT_TOLERANCE_LU)),
             max_iterations=int(m.get("max_iterations",
                                      autolevel.DEFAULT_MAX_ITERATIONS)),
-            row=row, di_path=m.get("di_path") or None,
+            row=row, in_row=in_row, out_row=tail,
+            di_path=m.get("di_path") or None,
             dry_run=bool(m.get("dry_run")), trim=knob,
             on_step=lambda step: emit({"event": "autolevel", "row": row, "step": step}))
 

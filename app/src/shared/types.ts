@@ -334,11 +334,8 @@ export interface Api {
     sampleStatus(): Promise<SampleState>
     sampleStop(): Promise<SampleState>
     sampleDiscard(): Promise<SampleState>
-    measure(row: number, perceived?: boolean): Promise<Measurement>
-    autolevel(
-      row: number,
-      o?: { target?: number; tolerance?: number; dryRun?: boolean }
-    ): Promise<AutoResult>
+    measure(perceived?: boolean): Promise<Measurement>
+    autolevel(o?: { target?: number; tolerance?: number; dryRun?: boolean }): Promise<AutoResult>
   }
 
   window: {

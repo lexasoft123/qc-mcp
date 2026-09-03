@@ -358,8 +358,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
 
       <Measured
         live={live}
-        row={lanes[0]?.row ?? 0}
-        presetName={preset ? slot?.name ?? null : null}
+        presetName={preset?.name ?? slot?.name ?? null}
         target={target}
         onTarget={setTarget}
         step={autoStep}

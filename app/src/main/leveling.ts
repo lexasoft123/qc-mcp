@@ -210,9 +210,14 @@ export class Leveling {
     return (await this.call('sample_discard', {}, 8000)) as unknown as SampleState
   }
 
-  /** Play the riff through one lane and measure what comes back. Writes nothing. */
-  async measure(row: number, perceived = false): Promise<Measurement> {
-    const r = await this.call('measure', { row, perceived }, 120000)
+  /**
+   * Play the riff through the preset and measure what comes back. Writes nothing.
+   *
+   * No row: the service finds the lane the signal enters on and the one it leaves
+   * by, which are routinely different. Naming a row here would only get that wrong.
+   */
+  async measure(perceived = false): Promise<Measurement> {
+    const r = await this.call('measure', { perceived }, 120000)
     return (r.measurement ?? r) as unknown as Measurement
   }
 
@@ -223,11 +228,11 @@ export class Leveling {
    * `autolevel` event per pass so the view can follow rather than freeze, which
    * is why the timeout here is generous.
    */
-  async autolevel(row: number, opts: {
+  async autolevel(opts: {
     target?: number; metric?: string; tolerance?: number; dryRun?: boolean
   } = {}): Promise<AutoResult> {
     return (await this.call('autolevel', {
-      row, target: opts.target ?? -18, metric: opts.metric ?? 'lufs',
+      target: opts.target ?? -18, metric: opts.metric ?? 'lufs',
       tolerance: opts.tolerance ?? 0.5, dry_run: opts.dryRun ?? false
     }, 300000)) as unknown as AutoResult
   }

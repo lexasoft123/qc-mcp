@@ -63,10 +63,10 @@ const api: Api = {
     sampleStop: () => ipcRenderer.invoke('leveling:sampleStop') as Promise<SampleState>,
     sampleDiscard: () =>
       ipcRenderer.invoke('leveling:sampleDiscard') as Promise<SampleState>,
-    measure: (row: number, perceived?: boolean) =>
-      ipcRenderer.invoke('leveling:measure', row, perceived) as Promise<Measurement>,
-    autolevel: (row: number, o?: { target?: number; tolerance?: number; dryRun?: boolean }) =>
-      ipcRenderer.invoke('leveling:autolevel', row, o) as Promise<AutoResult>,
+    measure: (perceived?: boolean) =>
+      ipcRenderer.invoke('leveling:measure', perceived) as Promise<Measurement>,
+    autolevel: (o?: { target?: number; tolerance?: number; dryRun?: boolean }) =>
+      ipcRenderer.invoke('leveling:autolevel', o) as Promise<AutoResult>,
     onEvent: (cb) => on<LevelEvent>('leveling:event', cb)
   },
 

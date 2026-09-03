@@ -196,9 +196,8 @@ function handlers(): void {
   ipcMain.handle('leveling:sampleStatus', () => bench().sampleStatus())
   ipcMain.handle('leveling:sampleStop', () => bench().sampleStop())
   ipcMain.handle('leveling:sampleDiscard', () => bench().sampleDiscard())
-  ipcMain.handle('leveling:measure', (_e, row: number, perceived?: boolean) =>
-    bench().measure(row, perceived))
-  ipcMain.handle('leveling:autolevel', (_e, row: number, o) => bench().autolevel(row, o ?? {}))
+  ipcMain.handle('leveling:measure', (_e, perceived?: boolean) => bench().measure(perceived))
+  ipcMain.handle('leveling:autolevel', (_e, o) => bench().autolevel(o ?? {}))
 
   ipcMain.handle('window:isMaximized', () => Boolean(win?.isMaximized()))
   ipcMain.on('window:minimize', () => win?.minimize())

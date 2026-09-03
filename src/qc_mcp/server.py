@@ -586,7 +586,7 @@ def compare_presets(reference_position: int = -1, positions: list = None,
 
     `reference_position=-1` uses the current preset as the reference. Writes nothing."""
     try:
-        from . import leveling, loudness as L, audio_io  # noqa: F401
+        from . import autolevel as leveling, loudness as L, audio_io  # noqa: F401
     except Exception as e:
         return _audio_err(e)
     qc = _conn()
@@ -653,7 +653,7 @@ def suggest_levels(positions: list = None, target_lufs: float = -18.0,
 
     `positions` defaults to the current preset only. Record a reference riff first."""
     try:
-        from . import leveling
+        from . import autolevel as leveling
     except Exception as e:
         return _audio_err(e)
     qc = _conn()
@@ -699,7 +699,7 @@ def level_preset(target_lufs: float = -18.0, metric: str = "lufs",
     Leaves the preset DIRTY unless save=True. Returns every iteration so you can see the
     convergence. The reamp routing is restored even if the run fails."""
     try:
-        from . import leveling
+        from . import autolevel as leveling
     except Exception as e:
         return _audio_err(e)
     qc = _conn()
@@ -730,7 +730,7 @@ def level_scenes(target_lufs: float = -18.0, scenes: list = None,
     Per-scene values require the parameter to be assigned to scenes first; that is done
     for you. Returns to scene 0 when finished."""
     try:
-        from . import leveling
+        from . import autolevel as leveling
     except Exception as e:
         return _audio_err(e)
     qc = _conn()
@@ -761,7 +761,7 @@ def level_setlist(positions: list, setlist_key: str = "", target_lufs: float = -
 
     Measure first with suggest_levels to see the corrections before anything is written."""
     try:
-        from . import leveling
+        from . import autolevel as leveling
     except Exception as e:
         return _audio_err(e)
     qc = _conn()

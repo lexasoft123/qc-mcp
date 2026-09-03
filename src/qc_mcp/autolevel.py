@@ -1,4 +1,9 @@
-"""The closed leveling loop: measure a preset, trim it, verify, move on.
+"""The closed AUTOMATIC leveling loop: measure a preset, trim it, verify, move on.
+
+Distinct from `leveling.py`, which is the Bench — the manual, by-ear service the
+Patchbay Leveling view attaches to over a socket. The Bench trims Lane Output Control
+VOLUME and streams meters; this module measures real loudness over the USB audio path
+and closes the loop without a human in it. They are meant to be used together.
 
 Device work goes through `transport.QuadCortex`; audio through `audio_io`; maths through
 `loudness`. Nothing here talks to CoreAudio or protobuf directly.

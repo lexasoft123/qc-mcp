@@ -3,14 +3,14 @@
 A fake QuadCortex records every routing/param write; `leveling.measure` is replaced by a
 scripted sequence, so convergence, clamping, the true-peak guard and — most importantly —
 routing restoration can all be proven without hardware.
-Run: .venv/bin/python tests/test_leveling.py
+Run: .venv/bin/python tests/test_autolevel.py
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from qc_mcp import leveling  # noqa: E402
+from qc_mcp import autolevel as leveling  # noqa: E402
 
 
 class _Model:

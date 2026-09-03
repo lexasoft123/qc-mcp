@@ -3,13 +3,17 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-build/
-dist/
+# root-anchored: setuptools' build/ and dist/ live at the repo root, and an
+# unanchored rule also swallowed app/build/, where the app icons live
+/build/
+/dist/
 
 # Interceptor build artifacts — do NOT commit a copy of Cortex Control
-interceptor/CortexControl-instrumented.app/
+# no trailing slash: a dev setup may symlink this rather than build it here
+interceptor/CortexControl-instrumented.app
 interceptor/interpose.dylib
 interceptor/ent.plist
+interceptor/entitlements.plist
 
 # Captured HID traffic + decoded messages — may contain your session id, cloud
 # auth token, and preset data. Never commit these.
@@ -18,6 +22,7 @@ interceptor/hid_log.txt
 interceptor/msgs/
 interceptor/target_preset.json
 interceptor/catalog.json
+interceptor/archive/
 /tmp/
 
 # macOS
@@ -26,3 +31,26 @@ interceptor/catalog.json
 # scratch
 proto/_recovered.txt
 proto/last.tmp
+
+# launcher app
+app/node_modules/
+app/out/
+app/dist/
+app/*.tsbuildinfo
+
+app/dist/
+
+# fetched by app/scripts/fetch-uv.mjs, not committed (~40 MB each)
+app/resources/uv/
+
+# icon previews rendered by build/icon/render.cjs; the shipped icons
+# (app/build/icon.icns|.ico|.png) ARE committed
+app/build/icon/patchbay-*.png
+app/build/icon/Patchbay.iconset/
+app/build/icon/ico/
+
+# Belt and braces: this repo keeps no secret store of its own (Apple
+# credentials come from SingZ's — see docs/MACOS-SIGNING.md), but a stray
+# .keys/ must never be committable. Also in .git/info/exclude, which covers
+# every worktree at once.
+.keys/

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Applied to everything in the bundle that is not the app itself: the
+	     Electron helper apps (same V8, same reason), and the vendored `uv`
+	     binary in Contents/Resources/uv. See entitlements.mac.plist for what
+	     this set deliberately leaves out and why. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

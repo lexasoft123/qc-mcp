@@ -74,6 +74,20 @@ FX, and the settings — then map each module to the QC catalog (§3) and cross-
   loud the amps run (headroom).
 
 ## 3. Map real gear → QC catalog models
+- **First check whether the artist's own plugin devices are on the unit.** CorOS 4.1
+  put the X-updated Archetype device sets in the QC's own catalog — **John Mayer**
+  (Smooth Operator, Signature 83, Headroom Hero, Three-In-One + Halfman OD,
+  Justa Boost, Tealbreaker, Dream Delay…), **Petrucci**, **Rabea**, **Misha
+  Mansoor**, **Tim Henson** — each with matching cabs, drives, comps and effects.
+  When the artist you're researching is one of those five, use their real devices
+  instead of substituting, and skip most of §3's guesswork. `find_devices` on the
+  artist's name lists them. They still need that plugin's licence: if a block goes
+  silent or won't load, that's the licence, not the routing.
+- **A device preset may already be the tone.** CorOS 4.1 ships ~2750 factory
+  device presets (`list_device_presets("<model>")`); names like "Crunch" or
+  "Bass Dark Drive" are dialled-in starting points. `load_device_preset(row, col,
+  "<name>")` sets every knob at once — a fast first pass before fine-tuning, and a
+  good way to hear what the model's designers intended.
 - `find_devices(query=..., category=...)` searches by name **and** by the emulated gear —
   every catalog model's `based_on` cites the real brand (e.g. "Based on Klon® Centaur®").
   Match on that. Categories: `Guitar Amplifier`, `Cabsim Guitar (M)`/`(ST)`, `Guitar

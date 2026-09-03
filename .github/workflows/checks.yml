@@ -1,0 +1,95 @@
+name: Checks
+
+# Nothing ran on a push or a pull request before this file: the offline suite
+# existed and was green, but only ever because someone typed the command. The
+# daemon landed with 38 tests that a machine had never executed on a ref.
+#
+# paths-ignore rather than paths, deliberately: an allow-list silently stops
+# covering a source directory the day someone adds one, which is the failure
+# this workflow exists to prevent. Ignore only what cannot affect a test.
+on:
+  workflow_dispatch:
+  # Listed twice rather than shared through a YAML anchor: the Actions parser
+  # does not resolve anchors, and a workflow that silently fails to parse is
+  # worse than a duplicated list.
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'design/**'
+      - '.claude/**'
+  push:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'design/**'
+      - '.claude/**'
+
+concurrency:
+  group: checks-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # macOS and Windows only, matching the platforms the package declares in
+  # pyproject.toml. There is no Linux backend: bridge mode rides a DYLD
+  # interposer and direct mode is IOKit or hid.dll.
+  python:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # No extras: [gui] is the macOS-only pyobjc harness and nothing here
+      # drives a GUI. The suite needs the package importable, nothing more.
+      - run: pip install -e .
+
+      # Every test file is its own __main__ that prints "N/N passed" and exits
+      # non-zero on failure, so the loop is the runner. bash so one step serves
+      # both runners (git bash ships on the Windows image).
+      - name: Offline suite
+        shell: bash
+        run: |
+          fail=0
+          for t in tests/test_*.py; do
+            printf '%-34s ' "$t"
+            if python "$t" > /tmp/out 2>&1; then tail -1 /tmp/out; else fail=1; echo FAIL; cat /tmp/out; fi
+          done
+          exit $fail
+
+  app:
+    name: Patchbay (typecheck + build)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      # electron-vite BUILDS the bundles; it never launches Electron, so the
+      # ~100 MB binary is dead weight in this job. The packaging workflow does
+      # download it, because electron-builder needs the real thing.
+      - name: Install
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - run: npm run typecheck
+      - run: npm run build

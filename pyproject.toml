@@ -1,21 +1,26 @@
 [project]
 name = "qc-mcp"
-version = "0.1.0"
+version = "0.1.2"
 description = "MCP server to read and control a Neural DSP Quad Cortex over its reverse-engineered USB-HID protocol"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 keywords = ["quad-cortex", "neural-dsp", "mcp", "guitar", "usb-hid", "reverse-engineering"]
+classifiers = [
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+]
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.2",
     "protobuf>=5.0",
 ]
 
 [project.optional-dependencies]
 # only needed for the reverse-engineering tools in tools/
 re = ["capstone>=5.0", "pyusb>=1.2", "python-rtmidi>=1.5"]
-# only needed for the GUI verification harness in tools/gui/ (screenshots/clicks)
-gui = ["pyobjc>=10"]
+# only needed for the GUI verification harness in tools/gui/ (macOS-only:
+# it drives Cortex Control via screencapture + the accessibility API)
+gui = ["pyobjc>=10; sys_platform == 'darwin'"]
 # only needed for loudness metering + preset leveling (qc_mcp/loudness.py, audio_io.py).
 # All ship as prebuilt wheels on macOS arm64 / CPython 3.14 — no compiler, and PortAudio
 # is bundled inside the sounddevice wheel, so Homebrew is not needed either.
@@ -49,4 +54,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-qc_mcp = ["qc_descriptors.pb", "ModelRepo.xml"]
+qc_mcp = ["descriptors/*.pb", "qc_descriptors.pb", "ModelRepo.xml"]

@@ -1,0 +1,147 @@
+<meta charset="utf-8"><title>Patchbay icon</title>
+<body style="margin:0;background:#0d0c0a">
+<script>
+/* Patchbay's icon: a signal chain across the Quad Cortex Grid, spiking.
+ *
+ * The Grid is the device's whole interface — four rows of block slots — and it
+ * is exactly what qc-mcp edits, so the icon is drawn in the device's own
+ * vocabulary. The chain's shape is an abstraction of the spike on Neural DSP's
+ * mark: a flat stub, one column up to a peak, one column down to a valley, a
+ * flat stub out. Abstracted into Grid cells on purpose — a literal trace of
+ * their logo on a third-party app would read as endorsement.
+ *
+ * Palette is the app's own: ground #12100d, panel #1b1814, accent #ffa028.
+ * Rejected along the way: a patch cable between two jacks (read as a magnifier
+ * when one-ended, as a face when two), a lone socket (a camera lens), a
+ * waveform (Cortex Control's own icon is a white spike, so it read as a
+ * knockoff), a knob (a speedometer), and the bare device (a calculator).
+ *
+ *   npm run icons     # -> build/icon.icns, build/icon.ico, build/icon.png
+ */
+const AMBER='#ffa028', HOT='#ffe0b0', DEEP='#a8500f';
+
+/** macOS-style superellipse: squarer than a rounded rect, no corner pinch. */
+function squircle(ctx,x,y,size,n=5){
+  const r=size/2,cx=x+r,cy=y+r; ctx.beginPath();
+  for(let i=0;i<=720;i++){
+    const t=i*Math.PI/360,c=Math.cos(t),s=Math.sin(t);
+    const px=cx+r*Math.sign(c)*Math.pow(Math.abs(c),2/n);
+    const py=cy+r*Math.sign(s)*Math.pow(Math.abs(s),2/n);
+    i?ctx.lineTo(px,py):ctx.moveTo(px,py);
+  }
+  ctx.closePath();
+}
+
+/** Deep tungsten tile. Kept genuinely dark so the amber is the only light. */
+function tile(ctx,S){
+  const pad=S*0.094, size=S-pad*2;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,.5)'; ctx.shadowBlur=S*0.045; ctx.shadowOffsetY=S*0.022;
+  squircle(ctx,pad,pad,size); ctx.fillStyle='#0f0d0b'; ctx.fill();
+  ctx.restore();
+  squircle(ctx,pad,pad,size); ctx.save(); ctx.clip();
+  const g=ctx.createLinearGradient(pad,pad,pad,pad+size);
+  g.addColorStop(0,'#241e18'); g.addColorStop(.42,'#15120f'); g.addColorStop(1,'#0b0a08');
+  ctx.fillStyle=g; ctx.fillRect(pad,pad,size,size);
+  ctx.restore();
+  return {pad,size};
+}
+
+/** The glass: a caustic, two speculars, an inner shadow, a fresnel rim. */
+function glass(ctx,S,pad,size){
+  squircle(ctx,pad,pad,size); ctx.save(); ctx.clip();
+  let g=ctx.createRadialGradient(pad+size*.72,pad+size*.80,0,pad+size*.72,pad+size*.80,size*.46);
+  g.addColorStop(0,'rgba(255,170,70,.13)'); g.addColorStop(1,'rgba(255,170,70,0)');
+  ctx.fillStyle=g; ctx.fillRect(pad,pad,size,size);
+  // cool against the warm content — this contrast is what reads as glass
+  g=ctx.createLinearGradient(pad,pad,pad+size*.62,pad+size*.88);
+  g.addColorStop(0,'rgba(226,238,255,.20)'); g.addColorStop(.42,'rgba(226,238,255,.05)');
+  g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(pad,pad,size,size);
+  ctx.filter='blur('+(size*0.010)+'px)';
+  g=ctx.createLinearGradient(pad,pad,pad,pad+size*.13);
+  g.addColorStop(0,'rgba(255,255,255,.42)'); g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=g; ctx.fillRect(pad,pad,size,size*.15);
+  ctx.filter='none';
+  ctx.save(); ctx.filter='blur('+(size*0.03)+'px)';
+  ctx.strokeStyle='rgba(0,0,0,.5)'; ctx.lineWidth=size*0.055;
+  squircle(ctx,pad-size*0.02,pad-size*0.045,size*1.04); ctx.stroke(); ctx.restore();
+  g=ctx.createRadialGradient(pad+size/2,pad+size*.44,size*.24,pad+size/2,pad+size/2,size*.80);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.5)');
+  ctx.fillStyle=g; ctx.fillRect(pad,pad,size,size);
+  ctx.restore();
+  ctx.save(); squircle(ctx,pad,pad,size); ctx.lineWidth=Math.max(1,size*0.0085);
+  g=ctx.createLinearGradient(pad,pad,pad+size,pad+size);
+  g.addColorStop(0,'rgba(255,255,255,.55)'); g.addColorStop(.38,'rgba(255,255,255,.08)');
+  g.addColorStop(.72,'rgba(255,170,80,.10)'); g.addColorStop(1,'rgba(255,190,110,.34)');
+  ctx.strokeStyle=g; ctx.stroke(); ctx.restore();
+}
+
+/** Every lit form is drawn three times: a blurred bloom escaping through the
+ *  glass, the solid form, then a sheen offset toward the light. */
+function lit(ctx,z,draw,o){
+  o=o||{};
+  const w=(o.w||0.085)*z, mode=o.fill?'fill':'stroke';
+  const run=function(){ ctx.beginPath(); draw(ctx); mode==='fill'?ctx.fill():ctx.stroke(); };
+  ctx.save(); ctx.lineCap=o.cap||'round'; ctx.lineJoin='round';
+  ctx.filter='blur('+(z*0.030)+'px)';
+  ctx.strokeStyle='rgba(255,150,35,.50)'; ctx.fillStyle='rgba(255,150,35,.50)';
+  ctx.lineWidth=w*1.75; run();
+  ctx.filter='none';
+  const g=ctx.createLinearGradient(0,z*0.20,0,z*0.88);
+  g.addColorStop(0,HOT); g.addColorStop(.34,AMBER); g.addColorStop(1,DEEP);
+  ctx.strokeStyle=g; ctx.fillStyle=g; ctx.lineWidth=w; run();
+  ctx.filter='blur('+(w*0.17)+'px)';
+  ctx.strokeStyle='rgba(255,244,222,.30)'; ctx.fillStyle='rgba(255,244,222,.26)';
+  ctx.lineWidth=w*0.30; ctx.translate(-w*0.11,-w*0.12); run();
+  ctx.restore();
+}
+
+/** An empty slot on the Grid. */
+function slot(ctx,x,y,w,h,r){
+  ctx.fillStyle='rgba(255,178,90,.055)';
+  ctx.beginPath(); ctx.roundRect(x,y,w,h,r); ctx.fill();
+  ctx.strokeStyle='rgba(255,178,90,.20)'; ctx.lineWidth=w*0.085;
+  ctx.beginPath(); ctx.roundRect(x,y,w,h,r); ctx.stroke();
+}
+
+/** [column, row] of the chain on a 4-row grid. Steep on purpose: a gradual
+ *  descent turns the spike into a mountain chart. */
+const SPIKE = [[0,2],[1,2],[2,0],[3,3],[4,2],[5,2]];
+const COLS = 6, ROWS = 4;
+
+function chain(ctx,p,z,o){
+  o=o||{};
+  const gw=z*0.74, gap=z*0.028;
+  const w=(gw-gap*(COLS-1))/COLS, h=w, gh=h*ROWS+gap*(ROWS-1);
+  const x0=p+(z-gw)/2, y0=p+(z-gh)/2, r=w*0.26;
+  const X=function(c){return x0+c*(w+gap);}, Y=function(rw){return y0+rw*(h+gap);};
+  if(!o.bare){
+    for(let rw=0;rw<ROWS;rw++) for(let c=0;c<COLS;c++) slot(ctx,X(c),Y(rw),w,h,r);
+  }
+  lit(ctx,z,function(cx){
+    SPIKE.forEach(function(b,i){
+      const px=X(b[0])+w/2, py=Y(b[1])+h/2;
+      i?cx.lineTo(px,py):cx.moveTo(px,py);
+    });
+  },{w:o.bare?0.115:0.052});
+  if(!o.bare){
+    lit(ctx,z,function(cx){
+      SPIKE.forEach(function(b){ cx.roundRect(X(b[0]),Y(b[1]),w,h,r); });
+    },{fill:true});
+  }
+}
+
+const VARIANTS = {
+  /** The icon. */
+  grid:function(ctx,S){ const t=tile(ctx,S); chain(ctx,t.pad,t.size,{}); glass(ctx,S,t.pad,t.size); },
+  /** 16 and 32 px: the slot field can only turn to mush there, so the chain
+   *  carries alone, fattened. Same shape, same light — the same app. */
+  small:function(ctx,S){ const t=tile(ctx,S); chain(ctx,t.pad,t.size,{bare:true}); glass(ctx,S,t.pad,t.size); }
+};
+
+window.VARIANTS=VARIANTS;
+function render(k,S){const c=document.createElement('canvas');c.width=c.height=S;
+  VARIANTS[k](c.getContext('2d'),S);return c;}
+window.exportIcon=function(k,S){return render(k,S).toDataURL('image/png');};
+</script>

@@ -32,14 +32,18 @@ if command -v claude >/dev/null 2>&1; then
   done
   claude mcp add --scope "$SCOPE" quad-cortex -- "$BIN"
   claude mcp list 2>/dev/null | grep -i quad-cortex || true
+  REGISTERED=1
 else
   echo "claude CLI not found — register manually once it's installed:"
   echo "  claude mcp add --scope user quad-cortex -- \"$BIN\""
+  REGISTERED=
 fi
 
 cat <<EOF
 
-Done. 'quad-cortex' is registered at $SCOPE scope$([ "$SCOPE" = user ] && echo " — available in every folder").
+Done. $([ -n "${REGISTERED:-}" ] \
+  && echo "'quad-cortex' is registered at $SCOPE scope$([ "$SCOPE" = user ] && echo " — available in every folder")." \
+  || echo "Package installed; run the registration line above once the claude CLI is present.")
 Note: the repo's skills + CLAUDE.md knowledge still load only for sessions
 opened INSIDE this repo; from other folders you get device control alone.
 Next: ./interceptor/build.sh (once, needs Cortex Control installed), then just

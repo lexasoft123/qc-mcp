@@ -1,0 +1,1816 @@
+<title>Quad Cortex Patchbay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=Martian+Mono:wdth,wght@75..112.5,100..800&display=swap">
+
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   Quad Cortex Patchbay — night-studio, straight off @singz/ui.
+   Every colour below is a --sz-* token copied verbatim from
+   singz-ui/src/tokens/tokens.ts. Class names (.pill .dot .chip .mode-seg
+   .badge .modal-card .titlebar) are the kit's public CSS contract, so this
+   prototype maps 1:1 onto <Button>, <StatusDot>, <Chip>, <Modal>.
+
+   Committed single-theme: night-studio is a dark studio surface by design.
+   Every colour is painted explicitly so the page holds on any host ground.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* surfaces */
+  --sz-bg: #12100d;
+  --sz-panel: #1b1814;
+  --sz-panel-deep: #0f0d0a;
+  --sz-surface-raised: #1e1a15;
+  /* translucent material */
+  --sz-glass-fill: rgba(24, 20, 17, 0.55);
+  --sz-glass-line: rgba(255, 240, 220, 0.05);
+  --sz-glass-rim: rgba(255, 240, 220, 0.14);
+  --sz-control-fill: rgba(24, 20, 17, 0.46);
+  --sz-control-line: rgba(255, 240, 220, 0.10);
+  --sz-footer-fill: rgba(12, 10, 8, 0.96);
+  /* hairlines */
+  --sz-line: rgba(255, 240, 214, 0.08);
+  --sz-line-strong: rgba(255, 240, 214, 0.2);
+  /* foreground */
+  --sz-text: #f4efe6;
+  --sz-dim: #9b917e;
+  --sz-faint: #6b6355;
+  /* brand */
+  --sz-accent: #ffa028;
+  --sz-accent-deep: #ff8a1f;
+  --sz-accent-soft: rgba(255, 160, 40, 0.13);
+  --sz-accent-ink: #241705;
+  /* status */
+  --sz-danger: #ff7a5c;
+  --sz-success: #58d68a;
+  --sz-danger-strong: #ff8a7a;
+  --sz-danger-strong-line: rgba(255, 138, 122, 0.4);
+  --sz-danger-strong-wash: rgba(255, 138, 122, 0.12);
+  --sz-danger-surface: #2b1c13;
+  --sz-danger-surface-text: #ffb9a6;
+  --sz-danger-surface-line: rgba(255, 122, 92, 0.45);
+  /* type */
+  --sz-font-display: 'Bricolage Grotesque', system-ui, sans-serif;
+  --sz-font-mono: 'Martian Mono', ui-monospace, 'SF Mono', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--sz-bg);
+  color: var(--sz-text);
+  font-family: var(--sz-font-display);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* tungsten air + film grain — the app's ambient ground */
+body::before {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(900px 620px at 16% -12%, rgba(255, 160, 40, 0.09), transparent 60%),
+    radial-gradient(760px 540px at 96% 112%, rgba(69, 214, 181, 0.05), transparent 60%);
+}
+body::after {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 200;
+  opacity: 0.05; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+::selection { background: rgba(255, 160, 40, 0.35); }
+
+button, input { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid rgba(255, 160, 40, 0.7); outline-offset: 2px; border-radius: 8px;
+}
+
+/* ───────────────────────────────────── the stage (product shot) ───── */
+
+.stage {
+  position: relative; z-index: 1;
+  min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px;
+  padding: 28px 20px 34px;
+}
+
+/* The desktop window. In the real Electron shell this is `.app` under a
+   frameless BrowserWindow; here it is a floating card so the artifact reads
+   as the desktop app it is. */
+.win {
+  width: min(980px, 100%);
+  height: min(716px, calc(100vh - 108px));
+  min-height: 560px;
+  position: relative;
+  display: flex; flex-direction: column;
+  background: var(--sz-bg);
+  border: 1px solid rgba(255, 240, 214, 0.14);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 40px 90px rgba(0, 0, 0, 0.66),
+    0 6px 20px rgba(0, 0, 0, 0.5);
+  transform: translateZ(0);
+}
+
+.stage-bar {
+  width: min(980px, 100%);
+  display: flex; align-items: center; gap: 10px; justify-content: flex-end;
+}
+.stage-bar .eyebrow { margin: 0; }
+
+.stage-note {
+  color: var(--sz-faint); font-size: 11.5px; letter-spacing: 0.03em;
+  text-align: center; max-width: 640px; line-height: 1.6;
+}
+.stage-note b { color: var(--sz-dim); font-weight: 600; }
+
+/* ─────────────────────────── Windows: no backdrop blur ───── */
+
+/*
+ * Not a cosmetic switch. A Windows iGPU pays a full-window re-raster for every
+ * backdrop-filter — measured in the field on an HD 4600 driving a 3200x1800
+ * panel — which is why @singz/ui's chrome.css already drops the blur from the
+ * modal scrim on `body.win`. The whole app follows the same rule here: the
+ * surfaces keep their translucency (plain alpha compositing is free) and lose
+ * only the filter, with the fills nudged more opaque to hold their weight.
+ */
+.platform-win .device,
+.platform-win .mod,
+.platform-win .step,
+.platform-win .setup-foot,
+.platform-win .logs,
+.platform-win .node .glyph { backdrop-filter: none; }
+
+.platform-win .modal-scrim { backdrop-filter: none; background: rgba(8, 6, 3, 0.82); }
+
+.platform-win .device { background: linear-gradient(180deg, rgba(255, 240, 220, 0.05), rgba(255, 240, 220, 0) 46%), color-mix(in srgb, var(--sz-panel) 94%, transparent); }
+.platform-win .mod { background: linear-gradient(180deg, rgba(255, 240, 220, 0.042), rgba(255, 240, 220, 0) 40%), color-mix(in srgb, var(--sz-panel) 92%, transparent); }
+.platform-win .step { background: color-mix(in srgb, var(--sz-panel) 86%, transparent); }
+.platform-win .node .glyph { background: color-mix(in srgb, var(--sz-panel) 94%, transparent); }
+.platform-win .setup-foot { background: var(--sz-bg); }
+
+/* the drifting specular costs the same re-raster — off on Windows */
+.platform-win .device::after { display: none; }
+
+/* ─────────────────────────── Windows: frameless chrome ───── */
+
+.platform-win .lights { display: none; }
+.platform-win .titlebar { padding-right: 150px; }
+
+/* The kit ships this as position:fixed and tells hosts to put a
+   transform on the box that should contain it — .win already has one. */
+.win-controls { position: absolute; top: 0; right: 0; height: 52px; display: flex; z-index: 1000; }
+.platform-mac .win-controls { display: none; }
+.win-controls button {
+  width: 46px; height: 100%; display: grid; place-items: center;
+  color: var(--sz-dim); border-radius: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.win-controls button:hover { background: rgba(255, 240, 214, 0.07); color: var(--sz-text); }
+.win-controls button.close:hover { background: #c42b1c; color: #fff; }
+
+/* getComputedStyle('.app').borderRadius is a literal "12px"/"0px" in the kit's
+   Windows smoke test — kept as literals, not a calc(). */
+.platform-win { border-radius: 12px; }
+.platform-win.maximized { border-radius: 0; border-color: transparent; }
+
+/* ───────────────────────────────────── titlebar ───── */
+
+.titlebar {
+  height: 52px; flex: none;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 14px 0 14px;
+  border-bottom: 1px solid var(--sz-line);
+  background: linear-gradient(180deg, rgba(255, 240, 220, 0.035), rgba(255, 240, 220, 0));
+}
+
+.lights { display: flex; gap: 8px; flex: none; margin-right: 4px; }
+.lights i {
+  width: 12px; height: 12px; border-radius: 50%; display: block;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.35) inset;
+}
+.lights i:nth-child(1) { background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+
+.logo {
+  font-weight: 800; font-size: 16px; letter-spacing: 0.01em;
+  font-variation-settings: 'wdth' 88;
+  flex: none; white-space: nowrap;
+}
+.logo span { color: var(--sz-accent); font-style: italic; margin-left: 1px; }
+
+.tb-spacer { flex: 1 1 auto; }
+
+.tb-status {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--sz-dim); white-space: nowrap;
+}
+.tb-status .lbl { font-variant-numeric: tabular-nums; }
+
+/* ───────────────────────────────────── kit primitives ───── */
+
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: block; }
+.dot.ok { background: var(--sz-success); box-shadow: 0 0 8px rgba(88, 214, 138, 0.7); }
+.dot.idle { background: var(--sz-faint); }
+.dot.warn { background: var(--sz-accent); box-shadow: 0 0 8px rgba(255, 160, 40, 0.7); animation: pulse 1.6s ease-in-out infinite; }
+.dot.bad { background: var(--sz-danger); box-shadow: 0 0 8px rgba(255, 122, 92, 0.6); }
+@keyframes pulse { 50% { opacity: 0.45; } }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 16px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+  transition: transform 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.2s;
+}
+.pill.small { padding: 6px 12px; font-size: 12px; }
+/* .pill sets display, which outranks the UA [hidden] rule — restore it */
+.pill[hidden] { display: none; }
+.pill.gear { padding: 6px 8px; }
+.pill svg { display: block; }
+.pill.ghost { border: 1px solid var(--sz-line); color: var(--sz-text); }
+.pill.ghost:hover:not(:disabled) { border-color: var(--sz-line-strong); transform: translateY(-1px); }
+.pill.primary {
+  background: linear-gradient(180deg, #ffbe58, var(--sz-accent-deep));
+  color: var(--sz-accent-ink);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 6px 22px rgba(255, 150, 40, 0.28);
+}
+.pill.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 8px 28px rgba(255, 150, 40, 0.4);
+}
+.pill.danger { color: var(--sz-danger-strong); border-color: var(--sz-danger-strong-line); }
+.pill.danger:hover:not(:disabled) { background: var(--sz-danger-strong-wash); border-color: var(--sz-danger-strong); }
+/* the kit paints nothing for a disabled ghost — the host dims it (conventions.md) */
+.pill:disabled { opacity: 0.45; transform: none; cursor: default; box-shadow: none; }
+
+.mode-seg { display: inline-flex; border: 1px solid var(--sz-line); border-radius: 999px; overflow: hidden; flex: none; }
+.mode-seg button { padding: 5px 14px; font-size: 12px; font-weight: 600; color: var(--sz-dim); transition: background 0.15s, color 0.15s; }
+.mode-seg button:hover:not(.on) { color: var(--sz-text); }
+.mode-seg button.on { background: var(--sz-accent-soft); color: var(--sz-accent); }
+
+.badge {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--sz-dim); border: 1px solid var(--sz-line-strong); border-radius: 99px;
+  padding: 2px 7px; white-space: nowrap; flex: none;
+}
+.badge.live { color: var(--sz-success); border-color: rgba(88, 214, 138, 0.42); }
+.badge.attn { color: var(--sz-accent); border-color: rgba(255, 160, 40, 0.45); }
+.badge.off { color: var(--sz-faint); border-color: var(--sz-line); }
+
+.linkish { flex: none; color: var(--sz-accent); font-size: 12px; font-weight: 600; padding: 2px 4px; border-radius: 6px; }
+.linkish:hover { background: var(--sz-accent-soft); }
+
+.chip-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 8px; border-radius: 7px;
+  border: 1px solid var(--sz-control-line); background: var(--sz-control-fill);
+  font-size: 11px; color: var(--sz-dim); white-space: nowrap;
+}
+.chip-tag code { font-family: var(--sz-font-mono); font-size: 10px; color: var(--sz-faint); }
+
+/* host-level type helper, same role as SingZ's .fine */
+.fine { font-size: 11.5px; color: var(--sz-dim); line-height: 1.55; }
+.fine code, .mono {
+  font-family: var(--sz-font-mono); font-size: 10.5px; letter-spacing: -0.01em;
+  color: var(--sz-dim); font-variation-settings: 'wdth' 87.5;
+}
+
+/* ───────────────────────────────────── view plumbing ───── */
+
+.view { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 20px 22px 24px; display: none; }
+.view.on { display: block; }
+.view::-webkit-scrollbar { width: 10px; }
+.view::-webkit-scrollbar-thumb { background: rgba(255, 240, 214, 0.1); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+
+.eyebrow {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--sz-faint); margin-bottom: 10px;
+}
+
+/* ───────────────────────────────────── device strip (the hero) ───── */
+
+.device {
+  position: relative; overflow: hidden;
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 26px;
+  padding: 16px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--sz-glass-line); border-top-color: var(--sz-glass-rim);
+  background:
+    linear-gradient(180deg, rgba(255, 240, 220, 0.05), rgba(255, 240, 220, 0) 46%),
+    color-mix(in srgb, var(--sz-panel) 74%, transparent);
+  backdrop-filter: blur(24px) saturate(1.18);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
+  margin-bottom: 16px;
+}
+/* the liquid tell: one slow specular drift, nothing else */
+.device::after {
+  content: ''; position: absolute; inset: -40% -60%; pointer-events: none;
+  background: linear-gradient(74deg, transparent 40%, rgba(255, 200, 130, 0.07) 50%, transparent 60%);
+  animation: sheen 15s linear infinite;
+}
+.device.dark::after { display: none; }
+@keyframes sheen { from { transform: translateX(-38%); } to { transform: translateX(38%); } }
+
+.device-id { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.qc-mark {
+  width: 42px; height: 42px; border-radius: 12px; flex: none;
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 800; letter-spacing: 0.04em;
+  color: var(--sz-accent-ink);
+  background: linear-gradient(180deg, #ffbe58, var(--sz-accent-deep));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 6px 18px rgba(255, 150, 40, 0.3);
+}
+.qc-mark.off {
+  background: var(--sz-control-fill); color: var(--sz-faint);
+  border: 1px solid var(--sz-control-line); box-shadow: none;
+}
+.device h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.005em; font-variation-settings: 'wdth' 92; }
+.device .sub { display: flex; align-items: center; gap: 8px; margin-top: 3px; flex-wrap: wrap; }
+
+.device-now { display: grid; gap: 7px; justify-items: end; text-align: right; min-width: 168px; }
+.now-preset { font-size: 13px; font-weight: 600; }
+.now-preset em { color: var(--sz-accent); font-style: normal; }
+.cpu { display: flex; align-items: center; gap: 9px; }
+.cpu .label { font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em; color: var(--sz-faint); }
+.cpu .track { width: 118px; height: 4px; border-radius: 99px; background: rgba(255, 240, 214, 0.09); overflow: hidden; }
+.cpu .fill {
+  display: block;
+  height: 100%; border-radius: 99px; width: 62%;
+  background: linear-gradient(90deg, var(--sz-accent-deep), #ffd489);
+  box-shadow: 0 0 12px rgba(255, 170, 60, 0.7);
+  transition: width 0.4s ease;
+}
+.cpu .val { font-family: var(--sz-font-mono); font-size: 11px; color: var(--sz-dim); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+
+/* ───────────────────────────────────── the rack ───── */
+
+.rack { display: grid; gap: 12px; }
+
+.mod {
+  border-radius: 20px;
+  border: 1px solid var(--sz-glass-line); border-top-color: var(--sz-glass-rim);
+  background:
+    linear-gradient(180deg, rgba(255, 240, 220, 0.042), rgba(255, 240, 220, 0) 40%),
+    color-mix(in srgb, var(--sz-panel) 70%, transparent);
+  backdrop-filter: blur(20px) saturate(1.12);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.36);
+  transition: box-shadow 0.3s, border-color 0.3s;
+}
+.mod.live {
+  border-top-color: rgba(255, 160, 40, 0.3);
+  box-shadow: 0 0 0 1px rgba(255, 160, 40, 0.1), 0 12px 34px rgba(0, 0, 0, 0.4);
+}
+
+.mod-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px;
+}
+.mod-head h2 { font-size: 13.5px; font-weight: 700; letter-spacing: 0.005em; white-space: nowrap; }
+.mod-head .grow { flex: 1 1 auto; }
+.mod-head .acts { display: flex; align-items: center; gap: 8px; }
+
+.mod-body { padding: 0 16px 15px; display: grid; gap: 13px; }
+
+.facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr));
+  gap: 12px 18px;
+  padding-top: 12px; border-top: 1px solid var(--sz-line);
+}
+.fact dt {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--sz-faint); margin-bottom: 4px;
+}
+.fact dd {
+  font-family: var(--sz-font-mono); font-size: 10.5px; line-height: 1.5;
+  color: var(--sz-text); font-variation-settings: 'wdth' 87.5;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.fact dd.muted { color: var(--sz-dim); }
+.fact dd.off { color: var(--sz-faint); }
+
+.tags { display: flex; flex-wrap: wrap; gap: 7px; }
+
+/* a warning strip inside a module — states the cost, offers the fix */
+.strip {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 13px; border-radius: 13px;
+  border: 1px solid rgba(255, 160, 40, 0.28);
+  background: var(--sz-accent-soft);
+  font-size: 12px; line-height: 1.5;
+}
+.strip.bad { border-color: var(--sz-danger-strong-line); background: var(--sz-danger-strong-wash); }
+.strip .grow { flex: 1 1 auto; }
+.strip .pill { white-space: nowrap; }
+.strip svg { flex: none; color: var(--sz-accent); }
+.strip.bad svg { color: var(--sz-danger-strong); }
+
+/* client registration list */
+.clients { display: grid; gap: 1px; border-top: 1px solid var(--sz-line); padding-top: 11px; }
+.client-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.client-row .name { font-size: 12.5px; font-weight: 600; flex: none; min-width: 108px; }
+.client-row .path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.client-row .state { font-size: 10.5px; color: var(--sz-faint); letter-spacing: 0.02em; flex: none; }
+.client-row .state.on { color: var(--sz-success); }
+
+/* throughput sparkline */
+.meter { display: flex; align-items: center; gap: 12px; }
+.meter canvas { display: block; width: 100%; height: 34px; }
+.meter .box { flex: 1 1 auto; min-width: 0; }
+.meter .read { flex: none; text-align: right; }
+.meter .read .n { font-family: var(--sz-font-mono); font-size: 13px; color: var(--sz-text); font-variant-numeric: tabular-nums; }
+.meter .read .u { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; color: var(--sz-faint); text-transform: uppercase; }
+
+/* ───────────────────────────────────── home · quick start ───── */
+
+#viewHome { display: none; }
+#viewHome.on { display: flex; }
+.home {
+  flex: 1 1 auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 10px 0;
+}
+
+/* The signal path: clients → Patchbay → Quad Cortex. Each segment lights only
+   when that hop is actually live, so a beginner can see where it stopped. */
+.flow { display: flex; align-items: flex-start; justify-content: center; margin-bottom: 30px; }
+
+.node { width: 118px; display: grid; justify-items: center; gap: 9px; }
+.node .glyph {
+  width: 62px; height: 62px; border-radius: 20px; display: grid; place-items: center;
+  border: 1px solid var(--sz-glass-line); border-top-color: var(--sz-glass-rim);
+  background: color-mix(in srgb, var(--sz-panel) 74%, transparent);
+  backdrop-filter: blur(18px) saturate(1.12);
+  color: var(--sz-faint);
+  transition: color 0.35s, border-color 0.35s, box-shadow 0.35s, background 0.35s;
+}
+/* Live, but quiet — the cables carry the energy and only the destination
+   takes a solid fill, so the primary button stays the boldest thing here. */
+.node.on .glyph { color: var(--sz-accent); border-color: rgba(255, 160, 40, 0.32); background: var(--sz-accent-soft); }
+.node.filled .glyph {
+  color: var(--sz-accent-ink); border-color: transparent;
+  background: linear-gradient(180deg, #ffbe58, var(--sz-accent-deep));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 8px 26px rgba(255, 150, 40, 0.34);
+}
+.node.bad .glyph { color: var(--sz-danger-strong); border-color: var(--sz-danger-strong-line); background: var(--sz-danger-strong-wash); }
+.node .cap { font-size: 11.5px; font-weight: 650; }
+.node .sub { font-size: 10px; color: var(--sz-faint); letter-spacing: 0.02em; }
+button.glyph { cursor: pointer; }
+
+.link { flex: none; width: 54px; height: 62px; display: grid; place-items: center; }
+.link i { display: block; width: 100%; height: 2px; border-radius: 2px; background: rgba(255, 240, 214, 0.1); transition: background 0.35s, box-shadow 0.35s; }
+.link.lit i {
+  background-image: repeating-linear-gradient(90deg, var(--sz-accent-deep) 0 8px, #ffd489 8px 16px);
+  background-size: 16px 100%;
+  box-shadow: 0 0 10px rgba(255, 170, 60, 0.55);
+  animation: flow 1s linear infinite;
+}
+@keyframes flow { to { background-position: 16px 0; } }
+
+.home h1 { font-size: 25px; font-weight: 700; letter-spacing: -0.005em; font-variation-settings: 'wdth' 92; text-wrap: balance; }
+.home .lede { margin-top: 9px; max-width: 46ch; font-size: 13px; line-height: 1.62; color: var(--sz-dim); text-wrap: pretty; }
+.home-actions { display: flex; align-items: center; justify-content: center; gap: 11px; margin-top: 24px; flex-wrap: wrap; }
+.pill.big { padding: 13px 28px; font-size: 15px; }
+.home-note { margin-top: 20px; color: var(--sz-faint); font-size: 11px; }
+.home-warn { margin-top: 22px; width: min(470px, 100%); text-align: left; }
+.home-warn:empty { margin-top: 0; }
+
+.home-prog { margin-top: 26px; width: min(330px, 100%); }
+.home-prog .track { display: block; height: 3px; border-radius: 99px; background: rgba(255, 240, 214, 0.09); overflow: hidden; }
+.home-prog .fill { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--sz-accent-deep), #ffd489); box-shadow: 0 0 10px rgba(255, 170, 60, 0.6); transition: width 0.35s ease; }
+.home-prog .lbl { margin-top: 10px; font-size: 11.5px; color: var(--sz-dim); }
+.home-prog[hidden] { display: none; }
+
+/* ───────────────────────────────────── setup view ───── */
+
+.setup-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 18px; }
+.setup-head b { color: var(--sz-dim); }
+.setup-head h1 { font-size: 20px; font-weight: 700; font-variation-settings: 'wdth' 92; text-wrap: balance; }
+.setup-head p { max-width: 46ch; margin-top: 5px; }
+.setup-head .grow { flex: 1 1 auto; }
+
+.steps { display: grid; gap: 8px; counter-reset: step; }
+
+.step {
+  display: grid; grid-template-columns: 26px 1fr auto; align-items: start; gap: 13px;
+  padding: 12px 15px; border-radius: 15px;
+  border: 1px solid var(--sz-glass-line); border-top-color: var(--sz-glass-rim);
+  background: color-mix(in srgb, var(--sz-panel) 62%, transparent);
+  backdrop-filter: blur(16px);
+  transition: border-color 0.25s, background 0.25s, opacity 0.25s;
+}
+.step.pending { opacity: 0.55; }
+.step.busy { border-color: rgba(255, 160, 40, 0.34); background: color-mix(in srgb, var(--sz-panel) 78%, transparent); }
+.step.fail { border-color: var(--sz-danger-strong-line); }
+
+.step .num {
+  width: 26px; height: 26px; border-radius: 9px; display: grid; place-items: center;
+  font-family: var(--sz-font-mono); font-size: 10px; font-weight: 700;
+  border: 1px solid var(--sz-control-line); background: var(--sz-control-fill); color: var(--sz-faint);
+  transition: all 0.25s;
+}
+.step.done .num { border-color: rgba(88, 214, 138, 0.4); color: var(--sz-success); background: rgba(88, 214, 138, 0.1); }
+.step.busy .num { border-color: rgba(255, 160, 40, 0.5); color: var(--sz-accent); background: var(--sz-accent-soft); }
+.step.fail .num { border-color: var(--sz-danger-strong-line); color: var(--sz-danger-strong); background: var(--sz-danger-strong-wash); }
+
+.step .txt { min-width: 0; }
+.step .txt h3 { font-size: 12.5px; font-weight: 650; margin-bottom: 3px; }
+.step .txt p { font-size: 11px; color: var(--sz-dim); line-height: 1.5; overflow-wrap: anywhere; }
+.step .txt p code { font-family: var(--sz-font-mono); font-size: 10px; color: var(--sz-faint); font-variation-settings: 'wdth' 87.5; }
+.step .right { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+
+.setup-foot {
+  position: sticky; bottom: -24px; z-index: 2;
+  margin: 16px -22px -24px; padding: 14px 22px 18px;
+  border-top: 1px solid var(--sz-line);
+  background: color-mix(in srgb, var(--sz-bg) 90%, transparent);
+  backdrop-filter: blur(14px);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.setup-foot .grow { flex: 1 1 auto; }
+
+/* ───────────────────────────────────── logs view ───── */
+
+.log-bar { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; flex-wrap: wrap; }
+.log-bar .grow { flex: 1 1 auto; }
+
+.logs {
+  border-radius: 15px; border: 1px solid var(--sz-glass-line); border-top-color: var(--sz-glass-rim);
+  background: color-mix(in srgb, var(--sz-panel-deep) 82%, transparent);
+  backdrop-filter: blur(14px);
+  padding: 12px 4px 12px 14px;
+  height: 100%; min-height: 320px; overflow-y: auto;
+  font-family: var(--sz-font-mono); font-size: 10.5px; line-height: 1.85;
+  font-variation-settings: 'wdth' 87.5;
+}
+.logs::-webkit-scrollbar { width: 10px; }
+.logs::-webkit-scrollbar-thumb { background: rgba(255, 240, 214, 0.1); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+.log-line { display: grid; grid-template-columns: 94px 22px 1fr; gap: 8px; color: var(--sz-dim); }
+.log-line .t { color: var(--sz-faint); font-variant-numeric: tabular-nums; }
+.log-line .d { font-weight: 700; letter-spacing: 0.06em; }
+.log-line.tx .d { color: var(--sz-accent); }
+.log-line.rx .d { color: #7fc7f0; }
+.log-line.sys .d { color: var(--sz-faint); }
+.log-line.err { color: var(--sz-danger-surface-text); }
+.log-line.err .d { color: var(--sz-danger); }
+.log-line em { color: var(--sz-text); font-style: normal; }
+.log-empty { color: var(--sz-faint); padding: 8px 0; }
+
+/* ───────────────────────────────────── footer rail ───── */
+
+.rail {
+  flex: none; height: 42px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 14px;
+  border-top: 1px solid var(--sz-line);
+  background: var(--sz-footer-fill);
+  font-size: 11px; color: var(--sz-faint);
+}
+.rail .grow { flex: 1 1 auto; }
+.rail .sess { display: flex; align-items: center; gap: 7px; color: var(--sz-dim); min-width: 0; }
+.rail .sess span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail .ver { font-family: var(--sz-font-mono); font-size: 10px; }
+
+/* ───────────────────────────────────── overlays ───── */
+
+/* .modal-scrim / .modal-card are the kit's; position is absolute (not fixed)
+   only because this prototype lives inside a windowed stage. */
+.modal-scrim {
+  position: absolute; inset: 0; z-index: 70;
+  background: rgba(8, 6, 3, 0.62); backdrop-filter: blur(8px);
+  display: grid; place-items: center; padding: 24px;
+  animation: fade 0.18s;
+}
+.modal-scrim[hidden] { display: none; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } }
+
+.modal-card {
+  width: min(520px, 100%); max-height: 100%; overflow-y: auto;
+  background: var(--sz-surface-raised);
+  border: 1px solid var(--sz-line-strong);
+  border-radius: 18px; padding: 24px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  animation: rise 0.25s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.modal-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; font-variation-settings: 'wdth' 92; }
+.modal-card > p.fine { margin-bottom: 16px; max-width: 52ch; }
+.modal-actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; align-items: center; }
+.modal-actions .grow { flex: 1 1 auto; }
+
+/* toggle row inside the clients modal */
+.tog-list { display: grid; gap: 2px; }
+.tog {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 11px; border-radius: 12px; border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.tog:hover { background: rgba(255, 240, 214, 0.035); }
+.tog[aria-pressed="true"] { border-color: rgba(255, 160, 40, 0.24); background: var(--sz-accent-soft); }
+.tog[disabled] { opacity: 0.42; cursor: default; }
+.tog .box {
+  width: 17px; height: 17px; border-radius: 5px; flex: none;
+  border: 1px solid var(--sz-line-strong); display: grid; place-items: center;
+  transition: all 0.15s;
+}
+.tog[aria-pressed="true"] .box { background: var(--sz-accent); border-color: var(--sz-accent); }
+.tog .box svg { opacity: 0; color: var(--sz-accent-ink); }
+.tog[aria-pressed="true"] .box svg { opacity: 1; }
+.tog .meta { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; }
+.tog .meta .n { display: block; font-size: 12.5px; font-weight: 600; }
+.tog .meta .p { display: block; font-family: var(--sz-font-mono); font-size: 9.5px; color: var(--sz-faint); overflow-wrap: anywhere; font-variation-settings: 'wdth' 87.5; }
+
+/* preferences sheet — same .tog rows as the clients sheet, grouped */
+.prefs-card { width: min(560px, 100%); }
+.pref-group + .pref-group { margin-top: 16px; padding-top: 15px; border-top: 1px solid var(--sz-line); }
+.pref-group > .eyebrow { margin-bottom: 5px; padding-left: 11px; }
+.pref-row { display: flex; align-items: center; gap: 14px; padding: 9px 11px; }
+.pref-row .meta { flex: 1 1 auto; min-width: 0; }
+.pref-row .n { font-size: 12.5px; font-weight: 600; }
+.pref-row .d { font-size: 10.5px; color: var(--sz-faint); margin-top: 3px; line-height: 1.55; overflow-wrap: anywhere; }
+.pref-row .d code { font-family: var(--sz-font-mono); font-size: 9.5px; font-variation-settings: 'wdth' 87.5; }
+.tog .meta .d { display: block; font-size: 10.5px; color: var(--sz-faint); line-height: 1.55; }
+/* In the clients sheet the amber fill means "installed here" — a real choice.
+   A preference is just on or off, so only the box carries the state. */
+#prefsModal .tog[aria-pressed="true"] { background: transparent; border-color: transparent; }
+#prefsModal .tog:hover { background: rgba(255, 240, 214, 0.035); }
+
+.snippet {
+  margin-top: 14px; padding: 11px 13px; border-radius: 12px;
+  background: var(--sz-panel-deep); border: 1px solid var(--sz-line);
+  font-family: var(--sz-font-mono); font-size: 9.5px; line-height: 1.7; color: var(--sz-dim);
+  white-space: pre; overflow-x: auto; font-variation-settings: 'wdth' 87.5;
+}
+.snippet b { color: var(--sz-accent); font-weight: 400; }
+
+/* build progress inside the rebuild modal */
+.build-list { display: grid; gap: 7px; margin-top: 4px; }
+.build-row { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--sz-faint); transition: color 0.2s; }
+.build-row.done { color: var(--sz-dim); }
+.build-row.busy { color: var(--sz-text); }
+.build-row .mk { width: 14px; text-align: center; font-family: var(--sz-font-mono); font-size: 10px; }
+.build-row.done .mk { color: var(--sz-success); }
+.build-row.busy .mk { color: var(--sz-accent); }
+
+.toast {
+  position: absolute; bottom: 58px; left: 50%; transform: translateX(-50%);
+  z-index: 80; max-width: 72%;
+  background: var(--sz-surface-raised); border: 1px solid var(--sz-line-strong);
+  color: var(--sz-text); padding: 10px 17px; border-radius: 12px;
+  font-size: 12.5px; line-height: 1.5;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  animation: toast-in 0.25s cubic-bezier(0.2, 0.7, 0.2, 1);
+  display: flex; align-items: center; gap: 9px;
+}
+.toast[hidden] { display: none; }
+.toast.bad { background: var(--sz-danger-surface); border-color: var(--sz-danger-surface-line); color: var(--sz-danger-surface-text); }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px); } }
+
+/* ───────────────────────────────────── responsive + motion ───── */
+
+@media (max-width: 720px) {
+  .stage { padding: 12px 10px 20px; }
+  .win { height: auto; min-height: 0; max-height: none; border-radius: 12px; }
+  .view { max-height: none; }
+  .titlebar { gap: 9px; padding: 0 10px; }
+  .lights { display: none; }
+  .tb-status .lbl { display: none; }
+  .node { width: 92px; }
+  .node .glyph { width: 54px; height: 54px; border-radius: 17px; }
+  .link { width: 26px; height: 54px; }
+  .home h1 { font-size: 21px; }
+  .device { grid-template-columns: 1fr; gap: 14px; }
+  .device-now { justify-items: start; text-align: left; }
+  .mod-head { flex-wrap: wrap; }
+  .log-line { grid-template-columns: 76px 20px 1fr; gap: 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  .device::after { display: none; }
+  .link.lit i { background-image: none; background: linear-gradient(90deg, var(--sz-accent-deep), #ffd489); }
+}
+</style>
+
+<div class="stage">
+  <div class="stage-bar">
+    <span class="eyebrow">Preview on</span>
+    <div class="mode-seg" id="osSeg" aria-label="Preview platform">
+      <button data-os="mac" class="on">macOS</button>
+      <button data-os="win">Windows</button>
+    </div>
+  </div>
+
+  <div class="win platform-mac" id="win">
+
+    <!-- ═══════════ titlebar ═══════════ -->
+    <div class="titlebar">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="logo">Patch<span>bay</span></div>
+
+      <div class="mode-seg" role="tablist" aria-label="View">
+        <button role="tab" class="on" data-view="home">Home</button>
+        <button role="tab" data-view="console">Console</button>
+        <button role="tab" data-view="setup">Setup</button>
+        <button role="tab" data-view="logs">Logs</button>
+      </div>
+
+      <div class="tb-spacer"></div>
+
+      <div class="tb-status">
+        <span class="dot ok" id="tbDot"></span>
+        <span class="lbl" id="tbLabel">bridge session · 2 clients</span>
+      </div>
+      <div class="win-controls">
+        <button title="Minimize" aria-label="Minimize"><svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1"><path d="M0 5h10"/></svg></button>
+        <button title="Maximize" aria-label="Maximize" id="btnMax"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="9" height="9"/></svg></button>
+        <button class="close" title="Close" aria-label="Close"><svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1"><path d="M0 0l10 10M10 0L0 10"/></svg></button>
+      </div>
+      <button class="pill ghost small gear" id="btnGear" title="Preferences" aria-label="Preferences">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+
+    <!-- ═══════════ home · quick start ═══════════ -->
+    <div class="view on" id="viewHome">
+      <div class="home">
+        <div class="flow">
+          <div class="node" id="nClients">
+            <span class="glyph"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+            <span class="cap">Claude</span>
+            <span class="sub">2 clients</span>
+          </div>
+          <span class="link" id="link1"><i></i></span>
+          <div class="node" id="nDaemon">
+            <span class="glyph"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M6 9v4a5 5 0 0 0 5 5h4"/></svg></span>
+            <span class="cap">Patchbay</span>
+            <span class="sub">running</span>
+          </div>
+          <span class="link" id="link2"><i></i></span>
+          <div class="node" id="nDevice">
+            <button class="glyph" id="btnUnplug" title="Prototype: click to simulate unplugging the device" aria-label="Simulate unplugging the Quad Cortex"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><circle cx="6.5" cy="12" r="1.4"/><circle cx="10.5" cy="12" r="1.4"/><circle cx="14.5" cy="12" r="1.4"/><circle cx="18.5" cy="12" r="1.4"/></svg></button>
+            <span class="cap">Quad Cortex</span>
+            <span class="sub">connected</span>
+          </div>
+        </div>
+
+        <h1 id="homeTitle">Ready when you are</h1>
+        <p class="lede" id="homeLede"></p>
+
+        <div class="home-prog" id="homeProg" hidden>
+          <span class="track"><span class="fill" id="progFill" style="width:0%"></span></span>
+          <div class="lbl" id="progLabel"></div>
+        </div>
+
+        <div class="home-actions" id="homeActions">
+          <button class="pill primary big" id="btnGo">Connect</button>
+          <button class="pill ghost" id="btnGo2" hidden></button>
+        </div>
+
+        <div class="home-warn" id="homeWarn"></div>
+        <p class="home-note" id="homeNote"></p>
+      </div>
+    </div>
+
+    <!-- ═══════════ console ═══════════ -->
+    <div class="view" id="viewConsole">
+
+      <section class="device" id="deviceStrip">
+        <div class="device-id">
+          <div class="qc-mark" id="qcMark">QC</div>
+          <div>
+            <h1>Quad Cortex</h1>
+            <div class="sub">
+              <span class="fine mono" id="devPort">USB · serial QC-4711A · Cortex OS 3.2.0</span>
+              <span class="badge live" id="devBadge">connected</span>
+            </div>
+          </div>
+        </div>
+        <div class="device-now" id="deviceNow">
+          <div class="now-preset">Shadows AC15 <em>· Scene C</em></div>
+          <div class="cpu">
+            <span class="label">DSP</span>
+            <span class="track"><span class="fill" id="cpuFill"></span></span>
+            <span class="val" id="cpuVal">62%</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="rack">
+
+        <!-- ── module 1: MCP registration ── -->
+        <article class="mod" id="modReg">
+          <div class="mod-head">
+            <span class="dot ok" id="regDot"></span>
+            <h2>MCP registration</h2>
+            <span class="badge" id="regBadge">2 clients</span>
+            <span class="grow"></span>
+            <div class="acts">
+              <button class="pill ghost small" id="btnClients">Manage clients…</button>
+            </div>
+          </div>
+          <div class="mod-body">
+            <div class="clients" id="clientList"></div>
+            <p class="fine">Every client points at the same binary — <code id="regBin"></code>. Move the repo and Patchbay rewrites all of them.</p>
+          </div>
+        </article>
+
+        <!-- ── module 2: the daemon ── -->
+        <article class="mod live" id="modDaemon">
+          <div class="mod-head">
+            <span class="dot ok" id="dmnDot"></span>
+            <h2>qc-mcp daemon</h2>
+            <span class="badge live" id="dmnBadge">running</span>
+            <span class="grow"></span>
+            <div class="acts">
+              <div class="mode-seg" id="modeSeg" aria-label="Connection mode">
+                <button data-mode="auto">Auto</button>
+                <button data-mode="bridge" class="on">Bridge</button>
+                <button data-mode="direct">Direct</button>
+              </div>
+              <button class="pill primary" id="btnDaemon">Stop</button>
+            </div>
+          </div>
+          <div class="mod-body">
+            <div id="dmnWarn"></div>
+            <div class="meter" id="dmnMeter">
+              <div class="box"><canvas id="spark" width="600" height="68" aria-hidden="true"></canvas></div>
+              <div class="read">
+                <div class="n" id="rateVal">148</div>
+                <div class="u">reports/s</div>
+              </div>
+            </div>
+            <dl class="facts" id="dmnFacts"></dl>
+          </div>
+        </article>
+
+        <!-- ── module 3: instrumented Cortex Control ── -->
+        <article class="mod" id="modApp">
+          <div class="mod-head">
+            <span class="dot ok" id="appDot"></span>
+            <h2>Cortex Control <span class="badge attn" id="appBadge" style="margin-left:2px">instrumented</span></h2>
+            <span class="grow"></span>
+            <div class="acts">
+              <button class="pill ghost small" id="btnRebuild">Rebuild…</button>
+              <button class="pill ghost small" id="btnApp">Quit app</button>
+            </div>
+          </div>
+          <div class="mod-body">
+            <div id="appWarn"></div>
+            <div class="tags" id="appTags"></div>
+            <dl class="facts" id="appFacts"></dl>
+          </div>
+        </article>
+
+      </div>
+    </div>
+
+    <!-- ═══════════ setup ═══════════ -->
+    <div class="view" id="viewSetup">
+      <div class="setup-head">
+        <div>
+          <h1>Set up once, then forget it</h1>
+          <p class="fine" id="setupLede"></p>
+        </div>
+        <span class="grow"></span>
+      </div>
+      <div class="steps" id="stepList"></div>
+      <div class="setup-foot">
+        <button class="pill primary" id="btnSetup">Run setup</button>
+        <button class="pill ghost" id="btnRecheck">Re-check</button>
+        <span class="grow"></span>
+        <span class="fine" id="setupNote">Takes about 40 seconds. Nothing here needs your password.</span>
+      </div>
+    </div>
+
+    <!-- ═══════════ logs ═══════════ -->
+    <div class="view" id="viewLogs">
+      <div class="log-bar">
+        <div class="mode-seg" id="logSeg" aria-label="Log filter">
+          <button data-f="all" class="on">All</button>
+          <button data-f="tx">Sent</button>
+          <button data-f="rx">Received</button>
+          <button data-f="err">Errors</button>
+        </div>
+        <span class="grow"></span>
+        <span class="fine mono" id="logPath"></span>
+        <button class="pill ghost small" id="btnReveal">Reveal in Finder</button>
+      </div>
+      <div class="logs" id="logBox"></div>
+    </div>
+
+    <!-- ═══════════ footer rail ═══════════ -->
+    <div class="rail">
+      <div class="sess">
+        <span class="dot ok" id="railDot"></span>
+        <span id="railText">Sharing Cortex Control's session · FIFOs healthy</span>
+      </div>
+      <span class="grow"></span>
+      <button class="linkish" id="btnReset">Reset demo</button>
+      <span class="ver">Patchbay 0.1.0</span>
+    </div>
+
+    <!-- ═══════════ modal: clients ═══════════ -->
+    <div class="modal-scrim" id="clientsModal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="clientsTitle">
+        <h2 id="clientsTitle">Where should qc-mcp be installed?</h2>
+        <p class="fine">Patchbay writes the server entry into each client's own config file and leaves the rest of that file alone. Turn one off and the entry is removed.</p>
+        <div class="tog-list" id="togList"></div>
+        <div class="snippet" id="snippet"></div>
+        <div class="modal-actions">
+          <button class="pill primary" id="btnClientsApply">Apply</button>
+          <button class="pill ghost" data-close="clientsModal">Cancel</button>
+          <span class="grow"></span>
+          <span class="fine" id="clientsCount"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ modal: rebuild ═══════════ -->
+    <div class="modal-scrim" id="rebuildModal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="rebuildTitle">
+        <h2 id="rebuildTitle">Rebuild the instrumented copy</h2>
+        <p class="fine">Cortex Control updated to 2.3.2 — the instrumented copy is still 2.3.1. Rebuilding copies the new app, re-signs it ad-hoc without the hardened runtime, and verifies injection is allowed. The running app will quit first.</p>
+        <div class="build-list" id="buildList"></div>
+        <div class="modal-actions">
+          <button class="pill primary" id="btnRebuildGo">Rebuild and relaunch</button>
+          <button class="pill ghost" data-close="rebuildModal">Not now</button>
+          <span class="grow"></span>
+          <span class="fine" id="rebuildNote">About 25 seconds.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ modal: preferences ═══════════ -->
+    <div class="modal-scrim" id="prefsModal" hidden>
+      <div class="modal-card prefs-card" role="dialog" aria-modal="true" aria-labelledby="prefsTitle">
+        <h2 id="prefsTitle">Preferences</h2>
+
+        <div class="pref-group">
+          <div class="eyebrow">Startup</div>
+          <div class="tog-list" id="prefStartup"></div>
+        </div>
+
+        <div class="pref-group">
+          <div class="eyebrow">Connection</div>
+          <div class="pref-row">
+            <div class="meta">
+              <div class="n">Connection mode</div>
+              <div class="d" id="prefModeDesc"></div>
+            </div>
+            <div class="mode-seg" id="prefModeSeg" aria-label="Connection mode">
+              <button data-mode="auto">Auto</button>
+              <button data-mode="bridge">Bridge</button>
+              <button data-mode="direct">Direct</button>
+            </div>
+          </div>
+          <div class="tog-list" id="prefConn"></div>
+        </div>
+
+        <div class="pref-group">
+          <div class="eyebrow">Diagnostics</div>
+          <div class="tog-list" id="prefDiag"></div>
+          <div class="pref-row">
+            <div class="meta"><div class="n">Frame log</div><div class="d"><code id="prefLogPath"></code></div></div>
+            <button class="pill ghost small" id="btnClearLog">Clear</button>
+          </div>
+        </div>
+
+        <div class="pref-group">
+          <div class="eyebrow">Locations</div>
+          <div class="pref-row">
+            <div class="meta"><div class="n">qc-mcp</div><div class="d"><code id="prefRepoPath"></code></div></div>
+            <button class="pill ghost small" data-choose="the qc-mcp folder">Change…</button>
+          </div>
+          <div class="pref-row">
+            <div class="meta"><div class="n">Cortex Control</div><div class="d"><code id="prefAppPath"></code></div></div>
+            <button class="pill ghost small" data-choose="Cortex Control">Change…</button>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="pill primary" data-close="prefsModal">Done</button>
+          <span class="grow"></span>
+          <button class="pill ghost small danger" id="btnUninstall">Remove from all clients</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+  </div>
+
+  <p class="stage-note">
+    Interactive prototype · every control works. Switch <b>macOS / Windows</b> above — Windows has no
+    interposer, so two setup steps and a whole console module disappear. Press <b>Reset demo</b> to start
+    from a bare machine, then <b>Set up and connect</b>; click the Quad Cortex on Home to unplug it.
+  </p>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ── state ───────────────────────────────────────────────────────────
+  const CLIENTS = [
+    { id: 'code',    name: 'Claude Code',    found: true,
+      path: { mac: '~/.claude.json  (user scope)', win: '%USERPROFILE%\\.claude.json  (user scope)' } },
+    { id: 'desktop', name: 'Claude Desktop', found: true,
+      path: { mac: '~/Library/Application Support/Claude/claude_desktop_config.json',
+              win: '%APPDATA%\\Claude\\claude_desktop_config.json' } },
+    { id: 'cursor',  name: 'Cursor',         found: true,
+      path: { mac: '~/.cursor/mcp.json', win: '%USERPROFILE%\\.cursor\\mcp.json' } },
+    { id: 'vscode',  name: 'VS Code',        found: true,
+      path: { mac: '~/Library/Application Support/Code/User/mcp.json', win: '%APPDATA%\\Code\\User\\mcp.json' } },
+    { id: 'zed',     name: 'Zed',            found: false,
+      path: { mac: '~/.config/zed/settings.json', win: '%APPDATA%\\Zed\\settings.json' } }
+  ];
+  const cpath = c => c.path[S.os];
+
+  /*
+   * Everything that differs between the two builds, in one table.
+   *
+   * The load-bearing difference is `instrumented`. macOS has to inject a DYLD
+   * interposer into a re-signed copy of Cortex Control, because IOKit hands the
+   * HID device to exactly one owner. Windows needs none of that: the HID stack
+   * copies every input report to every open handle and accepts output reports
+   * from a second one, so the daemon just opens its own non-exclusive handle
+   * beside the stock app. Half of the setup checklist and a whole module of the
+   * console exist only to serve the macOS constraint.
+   */
+  const OS = {
+    mac: {
+      label: 'macOS', instrumented: true,
+      bin: '~/Dev/qc-mcp/.venv/bin/qc-mcp',
+      repo: '~/Dev/qc-mcp',
+      socketLabel: 'socket',
+      socket: '~/Library/Application Support/qc-mcp/daemon.sock',
+      appPath: '/Applications/Neural DSP/Cortex Control.app',
+      bridgeSession: 'bridge · /tmp/qc_inject ⇄ /tmp/qc_in',
+      directSession: 'direct · IOHIDDevice seized',
+      logPath: 'interceptor/hid_log.txt',
+      loginPhrase: 'when I log in',
+      reveal: 'Reveal in Finder',
+      revealed: 'Revealed the frame log in Finder',
+      picker: 'Finder would open to choose '
+    },
+    win: {
+      label: 'Windows', instrumented: false,
+      bin: '%USERPROFILE%\\Dev\\qc-mcp\\.venv\\Scripts\\qc-mcp.exe',
+      repo: '%USERPROFILE%\\Dev\\qc-mcp',
+      socketLabel: 'named pipe',
+      socket: '\\\\.\\pipe\\qc-mcp',
+      appPath: 'C:\\Program Files\\Neural DSP\\Cortex Control\\Cortex Control.exe',
+      bridgeSession: 'bridge · second HID handle, non-exclusive',
+      directSession: 'direct · exclusive HID handle',
+      logPath: '%LOCALAPPDATA%\\qc-mcp\\hid_log.txt',
+      loginPhrase: 'when I sign in',
+      reveal: 'Show in Explorer',
+      revealed: 'Opened the frame log in Explorer',
+      picker: 'Explorer would open to choose '
+    }
+  };
+  const os = () => OS[S.os];
+  const isMac = () => S.os === 'mac';
+  /* the daemon can actually reach the device: direct always, bridge on Windows
+     with or without the app, bridge on macOS only while the app holds a session */
+  const isLinked = () => S.daemon === 'running' && S.device
+    && (S.mode === 'direct' || !isMac() || S.app === 'running');
+
+  const S = {
+    view: 'home',
+    os: 'mac',
+    device: true,
+    busy: false,
+    prog: 0,
+    busyLede: '',
+    setupDone: true,
+    daemon: 'running',        // stopped | starting | running
+    mode: 'bridge',           // auto | bridge | direct
+    app: 'running',           // missing | built | running
+    needsRebuild: true,
+    reg: { code: true, desktop: true, cursor: false, vscode: false, zed: false },
+    draft: null,
+    uptime: 1147,             // seconds
+    rate: 148,
+    logFilter: 'all',
+    logSize: 4.2,
+    prefs: {
+      login: true,
+      autoconnect: true,
+      quitApp: false,
+      verbose: true,
+      autoRebuild: false
+    }
+  };
+
+  const fmtUp = s => {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return (h ? h + 'h ' : '') + m + 'm ' + String(sec).padStart(2, '0') + 's';
+  };
+  const regCount = () => CLIENTS.filter(c => S.reg[c.id]).length;
+  // A step with no `fix` (Python, the installed app, the device itself) is
+  // something Patchbay checks but cannot install, so it never joins the queue.
+  const setupPending = () => STEPS.some((st, i) => st.fix && stepState[i] !== 'done');
+
+  // ── toast ───────────────────────────────────────────────────────────
+  const toastEl = $('#toast');
+  let toastT;
+  function toast(msg, bad) {
+    toastEl.className = 'toast' + (bad ? ' bad' : '');
+    toastEl.innerHTML = '<span class="dot ' + (bad ? 'bad' : 'ok') + '"></span><span></span>';
+    $('span:last-child', toastEl).textContent = msg;
+    toastEl.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(() => { toastEl.hidden = true; }, 3400);
+  }
+
+  // ── render: console ─────────────────────────────────────────────────
+  function renderDevice() {
+    const online = S.device && (S.daemon === 'running' || S.app === 'running');
+    $('#qcMark').className = 'qc-mark' + (online ? '' : ' off');
+    $('#deviceStrip').classList.toggle('dark', !online);
+    $('#devBadge').className = 'badge ' + (online ? 'live' : 'off');
+    $('#devBadge').textContent = !S.device ? 'not found' : online ? 'connected' : 'no session';
+    $('#devPort').textContent = !S.device
+      ? 'no Quad Cortex on USB — check the cable'
+      : online
+        ? 'USB · serial QC-4711A · Cortex OS 3.2.0'
+        : 'USB · serial QC-4711A · nothing is holding the device';
+    $('#deviceNow').style.opacity = online ? '1' : '0.4';
+  }
+
+  function renderReg() {
+    const n = regCount();
+    $('#regDot').className = 'dot ' + (n ? 'ok' : 'idle');
+    $('#regBadge').textContent = n ? n + (n === 1 ? ' client' : ' clients') : 'not installed';
+    $('#regBadge').className = 'badge' + (n ? '' : ' off');
+    $('#clientList').innerHTML = CLIENTS.filter(c => c.found).map(c => {
+      const on = S.reg[c.id];
+      return '<div class="client-row">'
+        + '<span class="dot ' + (on ? 'ok' : 'idle') + '"></span>'
+        + '<span class="name">' + c.name + '</span>'
+        + '<span class="path mono">' + cpath(c) + '</span>'
+        + '<span class="state' + (on ? ' on' : '') + '">' + (on ? 'installed' : 'not installed') + '</span>'
+        + '</div>';
+    }).join('');
+    $('#regBin').textContent = os().bin;
+  }
+
+  function renderDaemon() {
+    const st = S.daemon;
+    const dot = st === 'running' ? 'ok' : st === 'starting' ? 'warn' : 'idle';
+    $('#dmnDot').className = 'dot ' + dot;
+    $('#dmnBadge').textContent = st;
+    $('#dmnBadge').className = 'badge ' + (st === 'running' ? 'live' : st === 'starting' ? 'attn' : 'off');
+    $('#modDaemon').classList.toggle('live', st === 'running');
+
+    const b = $('#btnDaemon');
+    b.textContent = st === 'running' ? 'Stop' : st === 'starting' ? 'Starting…' : 'Start daemon';
+    b.className = 'pill ' + (st === 'running' ? 'ghost small danger' : 'primary');
+    if (st === 'running') b.classList.add('small');
+    b.disabled = st === 'starting';
+
+    $$('#modeSeg button').forEach(x => x.classList.toggle('on', x.dataset.mode === S.mode));
+
+    // Direct mode seizes the HID interface — it cannot coexist with the app.
+    const clash = S.mode === 'direct' && S.app === 'running';
+    $('#dmnWarn').innerHTML = clash
+      ? '<div class="strip bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>'
+        + '<span class="grow">Direct mode needs the device to itself. Cortex Control is holding it — quit the app, or switch back to Bridge.</span>'
+        + '<button class="pill danger small" id="btnQuitForDirect">Quit app</button></div>'
+      : (!isMac() && st === 'running' && S.app === 'running')
+        // the caution connect() returns on Windows: two independent writers
+        ? '<div class="strip"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\"><path d=\"M12 9v4M12 17h.01\"/><path d=\"M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z\"/></svg><span class="grow">Cortex Control and the daemon are independent writers on one handle. Reads and single-value edits are atomic, so this is safe for ordinary use — switch to <b>Direct</b> for write-heavy work.</span></div>'
+      : '';
+    if (clash) $('#btnQuitForDirect').addEventListener('click', () => setApp('built', 'Cortex Control quit. Direct mode has the device.'));
+
+    const live = st === 'running';
+    $('#dmnMeter').style.opacity = live ? '1' : '0.32';
+    $('#rateVal').textContent = live ? S.rate : '—';
+
+    const attached = CLIENTS.filter(c => S.reg[c.id]).map(c => c.name).join(', ') || 'none';
+    const facts = [
+      ['status', live ? 'pid 41827 · up ' + fmtUp(S.uptime) : 'not running', live ? '' : 'off'],
+      [os().socketLabel, os().socket, live ? 'muted' : 'off'],
+      ['session', live ? (S.mode === 'direct' ? os().directSession : os().bridgeSession) : '—', live ? '' : 'off'],
+      ['attached clients', live ? attached : '—', live ? 'muted' : 'off']
+    ];
+    $('#dmnFacts').innerHTML = facts.map(f =>
+      '<div class="fact"><dt>' + f[0] + '</dt><dd class="' + f[2] + '">' + f[1] + '</dd></div>').join('');
+  }
+
+  function renderApp() {
+    const st = S.app;
+    const live = st === 'running';
+    const mac = isMac();
+
+    $('#appDot').className = 'dot ' + (live ? 'ok' : st === 'built' ? 'idle' : 'bad');
+    $('#modApp').classList.toggle('live', live);
+    // the instrumented copy, and everything that maintains it, is macOS-only
+    $('#appBadge').hidden = !mac;
+    $('#btnRebuild').hidden = !mac;
+    $('#btnRebuild').disabled = st === 'missing';
+
+    const b = $('#btnApp');
+    b.textContent = live ? 'Quit app' : st === 'built' ? 'Launch' : 'Build first';
+    b.disabled = st === 'missing';
+
+    $('#appWarn').innerHTML = (mac && st === 'missing')
+      ? '<div class="strip bad"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\"><path d=\"M12 9v4M12 17h.01\"/><path d=\"M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z\"/></svg><span class="grow">No instrumented copy yet. Run setup to build one.</span></div>'
+      : (mac && S.needsRebuild)
+        ? '<div class="strip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg><span class="grow">Cortex Control updated to <b>2.3.2</b>. The instrumented copy is 2.3.1 — rebuild to stay in sync.</span></div>'
+        : '';
+
+    const tags = mac
+      ? [['hardened runtime', 'off', true],
+         ['library validation', 'disabled', true],
+         ['dylib', 'ad-hoc signed', true],
+         ['/tmp/qc_inject', live ? 'open' : 'closed', live],
+         ['/tmp/qc_in', live ? 'open' : 'closed', live]]
+      : [['HID handle', 'non-exclusive', true],
+         ['input reports', 'copied to both', true],
+         ['writes', 'independent', true],
+         ['app', live ? 'running' : 'closed', live]];
+    $('#appTags').innerHTML = tags.map(t =>
+      '<span class="chip-tag"><span class="dot ' + (t[2] ? 'ok' : 'idle') + '"></span>' + t[0] + ' <code>' + t[1] + '</code></span>').join('');
+
+    const facts = mac
+      ? [['source app', os().appPath + ' · 2.3.2', 'muted'],
+         ['instrumented copy', st === 'missing' ? 'not built' : 'interceptor/CortexControl-instrumented.app · 2.3.1', st === 'missing' ? 'off' : 'muted'],
+         ['interposer', 'interceptor/interpose.dylib · arm64 · built 3 days ago', 'muted'],
+         ['process', live ? 'pid 41902 · QC_VERBOSE=1' : 'not running', live ? '' : 'off']]
+      : [['installed', os().appPath + ' · 2.3.2', 'muted'],
+         ['needed for', 'nothing — the daemon reaches the device on its own', 'muted'],
+         ['process', live ? 'pid 9184' : 'not running', live ? '' : 'off']];
+    $('#appFacts').innerHTML = facts.map(f =>
+      '<div class="fact"><dt>' + f[0] + '</dt><dd class="' + f[2] + '">' + f[1] + '</dd></div>').join('');
+  }
+
+  function renderRail() {
+    const live = S.daemon === 'running';
+    const appUp = S.app === 'running';
+    const clash = live && S.mode === 'direct' && appUp;
+    $('#railDot').className = 'dot ' + (!S.device ? 'bad' : !live ? 'idle' : clash ? 'bad' : isLinked() ? 'ok' : 'warn');
+    $('#railText').textContent = !S.device
+      ? 'No Quad Cortex found on USB'
+      : !live
+      ? 'Daemon stopped — no MCP client can reach the device'
+      : clash
+        ? 'Direct mode blocked — Cortex Control is still holding the device'
+      : S.mode === 'direct'
+        ? (isMac() ? 'Direct session — the daemon holds the USB interface'
+                   : 'Direct session — exclusive HID handle')
+      : isMac()
+        ? (appUp ? "Sharing Cortex Control's session · FIFOs healthy"
+                 : 'Waiting for Cortex Control — bridge mode needs the instrumented app')
+        : (appUp ? 'Sharing the device with Cortex Control · second HID handle'
+                 : 'Daemon has the device · Cortex Control is closed');
+
+    const n = regCount();
+    $('#tbDot').className = 'dot ' + (live ? 'ok' : 'idle');
+    $('#tbLabel').textContent = live
+      ? (S.mode === 'direct' ? 'direct session' : 'bridge session') + ' · ' + n + (n === 1 ? ' client' : ' clients')
+      : 'daemon stopped';
+  }
+
+  // ── render: home ────────────────────────────────────────────────────
+  function setNode(id, tone, sub) {
+    const el = $('#' + id);
+    el.className = 'node' + (tone ? ' ' + tone : '');
+    $('.sub', el).textContent = sub;
+  }
+
+  function renderHome() {
+    const pending = setupPending();
+    const live = S.daemon === 'running';
+    const appUp = S.app === 'running';
+    const linked = isLinked();
+    const n = regCount();
+
+    setNode('nClients', n && live ? 'on' : '', n ? n + (n === 1 ? ' client' : ' clients') : 'none yet');
+    setNode('nDaemon', live || S.daemon === 'starting' ? 'on' : '',
+      live ? 'running' : S.daemon === 'starting' ? 'starting…' : 'stopped');
+    setNode('nDevice', !S.device ? 'bad' : linked ? 'filled' : '',
+      !S.device ? 'not plugged in' : linked ? 'connected' : 'waiting');
+    $('#link1').classList.toggle('lit', live && n > 0);
+    $('#link2').classList.toggle('lit', linked);
+
+    const b1 = $('#btnGo'), b2 = $('#btnGo2');
+    let title, lede, label, act = 'connect', dis = false, second = null;
+
+    if (S.busy) {
+      title = 'Getting you connected';
+      lede = 'This part only happens once. Every step is listed under Setup if you want to watch.';
+      label = 'Working…'; dis = true;
+    } else if (!S.device) {
+      title = 'Plug in your Quad Cortex';
+      lede = 'Connect it to this Mac with a USB cable and Patchbay will pick it up. Nothing else to do.';
+      label = 'Connect'; dis = true;
+    } else if (pending) {
+      title = 'One-time setup';
+      lede = isMac()
+        ? 'Patchbay installs qc-mcp, builds its own copy of Cortex Control, and registers the server with Claude. About 40 seconds, and it never asks for your password.'
+        : 'Patchbay installs qc-mcp and registers the server with Claude. About 20 seconds — no copy to build on Windows, and it never asks for your password.';
+      label = 'Set up and connect';
+      second = ['See each step', 'setup'];
+    } else if (!live) {
+      title = 'Ready when you are';
+      lede = isMac()
+        ? 'One press starts the daemon and opens Cortex Control, so Claude can read and change presets on your Quad Cortex.'
+        : 'One press starts the daemon, and Claude can read and change presets on your Quad Cortex — with or without Cortex Control open.';
+      label = 'Connect';
+    } else if (!linked) {
+      // macOS only: bridge mode rides the app's session, so the app must be up
+      title = 'Almost there';
+      lede = "Bridge mode shares Cortex Control's session with Claude, so the app needs to be open too.";
+      label = 'Open Cortex Control';
+    } else {
+      title = "You're connected";
+      lede = 'Ask Claude for a tone and it will build it on the Quad Cortex. Right now: Shadows AC15, scene C.';
+      label = 'Disconnect'; act = 'disconnect';
+      second = ['Show Cortex Control', 'showapp'];
+    }
+
+    $('#homeTitle').textContent = title;
+    $('#homeLede').textContent = lede;
+    b1.textContent = label;
+    b1.disabled = dis;
+    b1.dataset.act = act;
+    b1.className = 'pill big ' + (act === 'disconnect' ? 'ghost danger' : 'primary');
+    if (second) { b2.hidden = false; b2.textContent = second[0]; b2.dataset.act = second[1]; }
+    else b2.hidden = true;
+
+    const pr = $('#homeProg');
+    pr.hidden = !S.busy;
+    if (S.busy) {
+      $('#progFill').style.width = Math.round(Math.min(1, S.prog) * 100) + '%';
+      $('#progLabel').textContent = S.busyLede;
+    }
+
+    // one thing at a time — the console is where everything is listed
+    $('#homeWarn').innerHTML = (!S.busy && !isMac() && linked && appUp)
+      ? '<div class="strip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span class="grow">Cortex Control is open too. Both are writing to the same device — fine for ordinary edits, but use <b>Direct</b> for heavy work.</span></div>'
+      : (!S.busy && isMac() && S.device && !pending && S.needsRebuild)
+      ? '<div class="strip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg><span class="grow">Cortex Control updated to <b>2.3.2</b>. Rebuilding its instrumented copy takes about 25 seconds.</span><button class="pill ghost small" id="btnHomeRebuild">Rebuild</button></div>'
+      : '';
+    const hr = $('#btnHomeRebuild');
+    if (hr) hr.addEventListener('click', () => $('#btnRebuild').click());
+
+    $('#homeNote').textContent = S.busy ? '' : 'Every one of these has a detailed view under Console.';
+  }
+
+  // ── the quick start: whatever is missing, in order ───────────────────
+  function quickStart() {
+    const plan = [];
+    if (setupPending()) plan.push('setup');
+    if (S.daemon !== 'running') plan.push('daemon');
+    // Windows bridge needs no app: the daemon opens its own handle
+    if (isMac() && S.mode !== 'direct' && S.app !== 'running') plan.push('app');
+    if (!plan.length) { toast('Already connected'); return; }
+
+    S.busy = true; S.prog = 0; S.busyLede = 'Checking what is missing'; render();
+    let i = 0;
+    const advance = () => {
+      if (i >= plan.length) {
+        S.busy = false; S.prog = 1; render();
+        toast('Connected — Claude can reach your Quad Cortex');
+        return;
+      }
+      const job = plan[i];
+      S.prog = (i + 0.15) / plan.length;
+      const finish = () => { i++; S.prog = i / plan.length; advance(); };
+      if (job === 'setup') {
+        S.progBase = i / plan.length; S.progShare = 1 / plan.length;
+        S.busyLede = 'Installing qc-mcp'; render();
+        runSetup(null, finish);
+      } else if (job === 'daemon') {
+        S.busyLede = 'Starting the daemon'; S.daemon = 'starting'; render();
+        setTimeout(() => { S.daemon = 'running'; S.uptime = 0; finish(); }, REDUCED ? 60 : 1000);
+      } else {
+        S.busyLede = 'Opening Cortex Control'; render();
+        setTimeout(() => { S.app = 'running'; finish(); }, REDUCED ? 60 : 1200);
+      }
+    };
+    advance();
+  }
+
+  $('#btnGo').addEventListener('click', () => {
+    if ($('#btnGo').dataset.act === 'disconnect') {
+      S.daemon = 'stopped';
+      if (S.app === 'running') S.app = 'built';
+      render();
+      toast('Disconnected. Your presets are untouched.');
+    } else quickStart();
+  });
+  $('#btnGo2').addEventListener('click', () => {
+    if ($('#btnGo2').dataset.act === 'setup') gotoView('setup');
+    else toast('Brought Cortex Control to the front');
+  });
+  // prototype affordance: pull the device out from under the app
+  $('#btnUnplug').addEventListener('click', () => {
+    S.device = !S.device;
+    stepState[stepIdx('device')] = S.device ? 'done' : 'fail';
+    render();
+    toast(S.device ? 'Quad Cortex detected on USB' : 'Quad Cortex unplugged — check the cable', !S.device);
+  });
+
+  function render() {
+    renderDevice(); renderReg(); renderDaemon(); renderApp(); renderRail(); renderSteps(); renderHome();
+  }
+
+  // ── sparkline ───────────────────────────────────────────────────────
+  const cvs = $('#spark'), ctx = cvs.getContext('2d');
+  let series = Array.from({ length: 72 }, (_, i) => 120 + Math.sin(i / 4) * 26 + Math.random() * 20);
+  function drawSpark() {
+    const w = cvs.width, h = cvs.height, n = series.length;
+    ctx.clearRect(0, 0, w, h);
+    const live = S.daemon === 'running';
+    const max = Math.max(200, ...series);
+    const pt = i => [ (i / (n - 1)) * (w - 6) + 3, h - 5 - (series[i] / max) * (h - 12) ];
+
+    // faint baseline grid — two rules, enough to read the scale against
+    ctx.strokeStyle = 'rgba(255,240,214,0.06)'; ctx.lineWidth = 1;
+    [0.34, 0.67].forEach(f => { ctx.beginPath(); ctx.moveTo(3, h * f); ctx.lineTo(w - 3, h * f); ctx.stroke(); });
+
+    ctx.beginPath(); ctx.moveTo(3, h - 4);
+    for (let i = 0; i < n; i++) { const p = pt(i); ctx.lineTo(p[0], p[1]); }
+    ctx.lineTo(w - 3, h - 4); ctx.closePath();
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, live ? 'rgba(255,160,40,0.26)' : 'rgba(155,145,126,0.10)');
+    g.addColorStop(1, 'rgba(255,160,40,0)');
+    ctx.fillStyle = g; ctx.fill();
+
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) { const p = pt(i); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }
+    ctx.strokeStyle = live ? '#ffa028' : 'rgba(155,145,126,0.5)';
+    ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+
+    const last = pt(n - 1);
+    ctx.beginPath(); ctx.arc(last[0], last[1], 3, 0, Math.PI * 2);
+    ctx.fillStyle = live ? '#ffd489' : 'rgba(155,145,126,0.6)'; ctx.fill();
+  }
+  function tick() {
+    if (S.daemon === 'running') {
+      S.uptime += 1;
+      S.rate = Math.max(40, Math.round(S.rate + (Math.random() - 0.5) * 26));
+      series = series.slice(1).concat(S.rate);
+      $('#rateVal').textContent = S.rate;
+      const up = $$('#dmnFacts .fact')[0];
+      if (up) $('dd', up).textContent = 'pid 41827 · up ' + fmtUp(S.uptime);
+    } else {
+      series = series.slice(1).concat(series[series.length - 1] * 0.72);
+    }
+    drawSpark();
+  }
+  drawSpark();
+  if (!REDUCED) setInterval(tick, 1000);
+
+  // ── setup steps ─────────────────────────────────────────────────────
+  const MAC_STEPS = [
+    { id: 'python',       t: 'Python 3.10 or newer',  d: '<code>/usr/bin/python3</code> · 3.12.7',                                   fix: null },
+    { id: 'venv',         t: 'Virtual environment',   d: 'creates <code>.venv</code> and installs <code>qc-mcp[gui]</code> editable', fix: 'Create' },
+    { id: 'clang',        t: 'Command line tools',    d: '<code>clang</code> — compiles the arm64 interposer',                        fix: 'Install' },
+    { id: 'app',          t: 'Cortex Control',        d: '<code>/Applications/Neural DSP/Cortex Control.app</code> · 2.3.2',          fix: null },
+    { id: 'instrumented', t: 'Instrumented copy',     d: 'copies the app, re-signs ad-hoc, verifies injection is allowed',            fix: 'Build' },
+    { id: 'register',     t: 'Register with clients', d: 'writes the server entry into each MCP client config',                       fix: 'Install' },
+    { id: 'device',       t: 'Quad Cortex on USB',    d: 'vendor 0x2f74 · serial QC-4711A',                                           fix: null }
+  ];
+  // No interposer on Windows, so no compiler and no instrumented copy to build.
+  const WIN_STEPS = [
+    { id: 'python',   t: 'Python 3.10 or newer',  d: '<code>py -3</code> · 3.12.7',                                              fix: null },
+    { id: 'venv',     t: 'Virtual environment',   d: 'creates <code>.venv</code> and installs <code>qc-mcp[gui]</code> editable', fix: 'Create' },
+    { id: 'app',      t: 'Cortex Control',        d: '<code>C:\\Program Files\\Neural DSP\\Cortex Control</code> · 2.3.2',   fix: null },
+    { id: 'register', t: 'Register with clients', d: 'writes the server entry into each MCP client config',                       fix: 'Install' },
+    { id: 'device',   t: 'Quad Cortex on USB',    d: 'vendor 0x2f74 · serial QC-4711A · shared handle',                           fix: null }
+  ];
+  let STEPS = MAC_STEPS;
+  let stepState = STEPS.map(() => 'done');
+  const stepIdx = id => STEPS.findIndex(x => x.id === id);
+  const stepIs = (id, v) => { const i = stepIdx(id); return i >= 0 && stepState[i] === v; };
+  const setStepsTodo = ids => { stepState = STEPS.map(st => (ids.indexOf(st.id) >= 0 ? 'todo' : 'done')); };
+
+  function renderSteps() {
+    $('#stepList').innerHTML = STEPS.map((s, i) => {
+      const st = stepState[i];
+      const mark = st === 'done' ? '✓' : st === 'busy' ? '·' : st === 'fail' ? '!' : (i + 1);
+      const badge = st === 'done' ? '<span class="badge live">ok</span>'
+        : st === 'busy' ? '<span class="badge attn">working…</span>'
+        : st === 'fail' ? '<span class="badge" style="color:var(--sz-danger-strong);border-color:var(--sz-danger-strong-line)">missing</span>'
+        : '<span class="badge off">waiting</span>';
+      const btn = (st === 'todo' || st === 'fail') && s.fix
+        ? '<button class="pill ghost small" data-step="' + i + '">' + s.fix + '</button>' : '';
+      return '<div class="step ' + st + '">'
+        + '<span class="num">' + mark + '</span>'
+        + '<span class="txt"><h3>' + s.t + '</h3><p>' + s.d + '</p></span>'
+        + '<span class="right">' + badge + btn + '</span>'
+        + '</div>';
+    }).join('');
+    $$('#stepList [data-step]').forEach(b => b.addEventListener('click', () => runSetup(+b.dataset.step)));
+
+    const COUNT = { 5: 'five', 7: 'seven' };
+    $('#setupLede').innerHTML = isMac()
+      ? 'Patchbay checks the ' + COUNT[STEPS.length] + ' things qc-mcp needs, and fixes the ones it can. The instrumented build re-signs a <b>local copy</b> of Cortex Control — your installed app is never touched.'
+      : 'Patchbay checks the ' + COUNT[STEPS.length] + ' things qc-mcp needs, and fixes the ones it can. Nothing is copied or re-signed here: the daemon shares the device by opening a <b>second HID handle</b> beside Cortex Control.';
+
+    const pending = setupPending();
+    $('#btnSetup').textContent = pending ? 'Run setup' : 'Everything is set up';
+    $('#btnSetup').disabled = !pending;
+    $('#setupNote').textContent = stepIs('device', 'fail')
+      ? 'Plug your Quad Cortex into USB to finish the last check.'
+      : pending
+        ? 'Takes about 40 seconds. Nothing here needs your password.'
+        : 'Last checked just now. Re-check after a Cortex Control update.';
+  }
+
+  let running = false;
+  function runSetup(only, done) {
+    if (running) { if (done) done(); return; }
+    running = true;
+    const queue = only == null
+      ? STEPS.map((_, i) => i).filter(i => stepState[i] !== 'done' && STEPS[i].fix)
+      : [only];
+    let k = 0;
+    const step = () => {
+      if (k >= queue.length) {
+        running = false;
+        S.setupDone = !setupPending();
+        if (!isMac() || stepIs('instrumented', 'done')) { S.app = S.app === 'missing' ? 'built' : S.app; S.needsRebuild = false; }
+        if (stepIs('register', 'done')) { S.reg.code = true; S.reg.desktop = true; }
+        render();
+        if (done) done();
+        else toast(only == null ? 'Setup complete — qc-mcp is ready' : 'Done');
+        return;
+      }
+      const i = queue[k++];
+      if (S.busy) { S.prog = S.progBase + ((k - 1) / queue.length) * S.progShare; S.busyLede = STEPS[i].t; renderHome(); }
+      stepState[i] = 'busy'; renderSteps();
+      setTimeout(() => { stepState[i] = 'done'; renderSteps(); step(); }, REDUCED ? 60 : 420 + Math.random() * 340);
+    };
+    step();
+  }
+  $('#btnSetup').addEventListener('click', () => runSetup());
+  $('#btnRecheck').addEventListener('click', () => { renderSteps(); toast('Re-checked — nothing changed'); });
+
+  // ── daemon + app controls ───────────────────────────────────────────
+  $('#btnDaemon').addEventListener('click', () => {
+    if (S.daemon === 'running') {
+      S.daemon = 'stopped'; render();
+      toast('Daemon stopped. MCP clients will reconnect when you start it again.');
+    } else {
+      S.daemon = 'starting'; render();
+      setTimeout(() => {
+        S.daemon = 'running'; S.uptime = 0; render();
+        toast('Daemon running · ' + (S.mode === 'direct' ? 'direct session' : 'bridge session'));
+      }, REDUCED ? 60 : 1100);
+    }
+  });
+
+  $$('#modeSeg button').forEach(b => b.addEventListener('click', () => {
+    S.mode = b.dataset.mode; render();
+    if (S.mode === 'direct' && S.app === 'running') toast('Direct mode needs the device to itself — quit Cortex Control.', true);
+  }));
+
+  function setApp(next, msg) { S.app = next; render(); if (msg) toast(msg); }
+  $('#btnApp').addEventListener('click', () => {
+    if (S.app === 'running') setApp('built', 'Cortex Control quit. Bridge FIFOs closed.');
+    else {
+      $('#btnApp').textContent = 'Launching…'; $('#btnApp').disabled = true;
+      setTimeout(() => setApp('running', 'Instrumented Cortex Control is up — bridge FIFOs open.'), REDUCED ? 60 : 1200);
+    }
+  });
+
+  // ── modal: clients ──────────────────────────────────────────────────
+  function openModal(id) { $('#' + id).hidden = false; }
+  function closeModal(id) { $('#' + id).hidden = true; }
+  $$('[data-close]').forEach(b => b.addEventListener('click', () => closeModal(b.dataset.close)));
+  $$('.modal-scrim').forEach(sc => sc.addEventListener('mousedown', e => { if (e.target === sc) sc.hidden = true; }));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') $$('.modal-scrim').forEach(s => s.hidden = true); });
+
+  const CHECK = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  function renderTogs() {
+    $('#togList').innerHTML = CLIENTS.map(c =>
+      '<button class="tog" data-c="' + c.id + '" aria-pressed="' + !!S.draft[c.id] + '"' + (c.found ? '' : ' disabled') + '>'
+      + '<span class="box">' + CHECK + '</span>'
+      + '<span class="meta"><span class="n">' + c.name + (c.found ? '' : ' — not installed') + '</span><span class="p">' + c.path + '</span></span>'
+      + '</button>').join('');
+    $$('#togList .tog').forEach(b => b.addEventListener('click', () => {
+      S.draft[b.dataset.c] = !S.draft[b.dataset.c]; renderTogs();
+    }));
+    const n = CLIENTS.filter(c => S.draft[c.id]).length;
+    $('#clientsCount').textContent = n + (n === 1 ? ' client' : ' clients') + ' selected';
+    $('#snippet').innerHTML =
+      '{\n  "mcpServers": {\n    <b>"quad-cortex"</b>: {\n      "command": "' + os().bin.replace(/\\/g, '\\\\') + '",\n      "args": ["--attach"]\n    }\n  }\n}';
+  }
+  $('#btnClients').addEventListener('click', () => { S.draft = Object.assign({}, S.reg); renderTogs(); openModal('clientsModal'); });
+  $('#btnClientsApply').addEventListener('click', () => {
+    const before = regCount();
+    S.reg = Object.assign({}, S.draft);
+    const after = regCount();
+    closeModal('clientsModal'); render();
+    toast(after === before ? 'No changes to apply'
+      : after > before ? 'Installed for ' + after + (after === 1 ? ' client' : ' clients')
+      : 'Removed — now installed for ' + after + (after === 1 ? ' client' : ' clients'));
+  });
+
+  // ── modal: preferences ──────────────────────────────────────────────
+  const PREFS = {
+    prefStartup: [
+      ['login', 'Start Patchbay when I log in', 'It waits out of the way and connects nothing until you ask.'],
+      ['autoconnect', 'Connect as soon as the Quad Cortex is plugged in', '']
+    ],
+    prefConn: [
+      ['quitApp', 'Quit Cortex Control when Patchbay quits', 'Leave this off if you also use the app on its own.']
+    ],
+    prefDiag: [
+      ['verbose', 'Write the frame log', 'Records every report to and from the device. The Logs screen reads it, and bug reports need it.'],
+      ['autoRebuild', 'Rebuild after a Cortex Control update', 'Runs the 25-second rebuild on its own, and quits the app first.']
+    ]
+  };
+
+  function renderPrefs() {
+    PREFS.prefStartup[0][1] = 'Start Patchbay ' + os().loginPhrase;
+    PREFS.prefStartup[1][2] = isMac()
+      ? 'Starts the daemon and opens Cortex Control for you.'
+      : 'Starts the daemon, so Claude can reach the device right away.';
+    $('#prefModeDesc').textContent = isMac()
+      ? "Auto shares Cortex Control's session when the app is open, and takes the device directly when it is not."
+      : 'Auto opens a shared handle beside Cortex Control, and takes the device exclusively when the app is closed.';
+    Object.keys(PREFS).forEach(id => {
+      // no instrumented copy on Windows, so nothing to rebuild after an update
+      const rows = id === 'prefDiag' && !isMac()
+        ? PREFS[id].filter(r => r[0] !== 'autoRebuild')
+        : PREFS[id];
+      $('#' + id).innerHTML = rows.map(r =>
+        '<button class="tog" data-pref="' + r[0] + '" aria-pressed="' + !!S.prefs[r[0]] + '">'
+        + '<span class="box">' + CHECK + '</span>'
+        + '<span class="meta"><span class="n">' + r[1] + '</span><span class="d">' + r[2] + '</span></span>'
+        + '</button>').join('');
+    });
+    $$('#prefsModal [data-pref]').forEach(b => b.addEventListener('click', () => {
+      S.prefs[b.dataset.pref] = !S.prefs[b.dataset.pref];
+      renderPrefs();
+      if (b.dataset.pref === 'verbose') renderLogs();
+    }));
+    $$('#prefModeSeg button').forEach(x => x.classList.toggle('on', x.dataset.mode === S.mode));
+    $('#prefLogPath').textContent = S.prefs.verbose
+      ? os().logPath + ' · ' + S.logSize.toFixed(1) + ' MB'
+      : 'not being written';
+    $('#prefRepoPath').textContent = os().repo;
+    $('#prefAppPath').textContent = os().appPath;
+  }
+
+  $('#btnGear').addEventListener('click', () => { renderPrefs(); openModal('prefsModal'); });
+  $$('#prefModeSeg button').forEach(b => b.addEventListener('click', () => {
+    S.mode = b.dataset.mode; render(); renderPrefs();
+    if (S.mode === 'direct' && S.app === 'running') toast('Direct mode needs the device to itself — quit Cortex Control.', true);
+  }));
+  $('#btnClearLog').addEventListener('click', () => {
+    S.logSize = 0; renderPrefs(); renderLogs(); toast('Frame log cleared');
+  });
+  $$('[data-choose]').forEach(b => b.addEventListener('click', () => toast(os().picker + b.dataset.choose)));
+  $('#btnUninstall').addEventListener('click', () => {
+    CLIENTS.forEach(c => { S.reg[c.id] = false; });
+    closeModal('prefsModal'); render();
+    toast('Removed qc-mcp from every client. Nothing else was deleted.');
+  });
+
+  // ── modal: rebuild ──────────────────────────────────────────────────
+  const BUILD = ['Compiling interpose.dylib (arm64)', 'Copying Cortex Control.app', 'Writing merged entitlements',
+                 'Re-signing ad-hoc, hardened runtime off', 'Verifying injection is permitted'];
+  function renderBuild(active) {
+    $('#buildList').innerHTML = BUILD.map((b, i) => {
+      const st = active == null ? '' : i < active ? 'done' : i === active ? 'busy' : '';
+      const mk = st === 'done' ? '✓' : st === 'busy' ? '›' : (i + 1);
+      return '<div class="build-row ' + st + '"><span class="mk">' + mk + '</span>' + b + '</div>';
+    }).join('');
+  }
+  $('#btnRebuild').addEventListener('click', () => { renderBuild(null); $('#btnRebuildGo').disabled = false; $('#btnRebuildGo').textContent = 'Rebuild and relaunch'; openModal('rebuildModal'); });
+  $('#btnRebuildGo').addEventListener('click', () => {
+    const btn = $('#btnRebuildGo'); btn.disabled = true; btn.textContent = 'Rebuilding…';
+    let i = 0;
+    const next = () => {
+      renderBuild(i);
+      if (i >= BUILD.length) {
+        S.needsRebuild = false; S.app = 'running'; closeModal('rebuildModal'); render();
+        toast('Rebuilt from 2.3.2 and relaunched');
+        return;
+      }
+      i++; setTimeout(next, REDUCED ? 50 : 620);
+    };
+    next();
+  });
+
+  // ── logs ────────────────────────────────────────────────────────────
+  const LOG = [
+    ['09:41:02.114', 'sys', 'sys',  { mac: 'daemon started · pid 41827 · socket daemon.sock',
+                                      win: 'daemon started · pid 41827 · pipe \\\\.\\pipe\\qc-mcp' }],
+    ['09:41:02.119', 'sys', 'sys',  { mac: 'bridge FIFOs found: /tmp/qc_inject, /tmp/qc_in',
+                                      win: 'opened a second HID handle · non-exclusive · vendor 0x2f74' }],
+    ['09:41:02.401', 'tx',  '→',    'cmd 3 <em>DeviceInfo</em> READ  request_id=90001'],
+    ['09:41:02.556', 'rx',  '←',    'cmd 3 DeviceInfo  gzip 412B → 1.8 KB  <em>Cortex OS 3.2.0</em>'],
+    ['09:41:03.902', 'tx',  '→',    'cmd 7 <em>Grid</em> READ  request_id=90002'],
+    ['09:41:04.318', 'rx',  '←',    'cmd 7 Grid  6 chunks · 21 blocks · split_points=2'],
+    ['09:41:04.320', 'sys', 'sys',  'preset resolved: <em>Shadows AC15</em> · scene C'],
+    ['09:41:11.044', 'rx',  '←',    'cmd 12 CPULoad  request_id=0 (stream) core0=58% core1=64%'],
+    ['09:41:12.070', 'rx',  '←',    'cmd 12 CPULoad  request_id=0 (stream) core0=59% core1=65%'],
+    ['09:42:38.771', 'tx',  '→',    'cmd 9 <em>Param</em> UPDATE  block=4 index=2 value=0.61'],
+    ['09:42:38.910', 'rx',  '←',    'cmd 9 Param  ack  request_id=90014'],
+    ['09:43:01.220', 'err', 'err',  { mac: 'inject FIFO write returned EPIPE — reopening',
+                                      win: 'WriteFile: <em>ERROR_GEN_FAILURE(31)</em> — benign on this device' }],
+    ['09:43:01.284', 'sys', 'sys',  { mac: 'inject FIFO reopened · 1 report replayed',
+                                      win: 'value read back matches what was written · write_errors=0' }],
+    ['09:43:44.002', 'tx',  '→',    'cmd 23 <em>SceneLabel</em> UPDATE  index=2 label="Lead"'],
+    ['09:43:44.150', 'rx',  '←',    'cmd 23 SceneLabel  ack'],
+    ['09:44:19.615', 'tx',  '→',    'cmd 4 <em>File</em> CREATE  folder=User/1 index=7 name="Shadows AC15"'],
+    ['09:44:20.884', 'rx',  '←',    'cmd 4 File  committed · position 1:7']
+  ];
+  function renderLogs() {
+    $('#btnReveal').textContent = os().reveal;
+    $('#logPath').textContent = S.prefs.verbose
+      ? os().logPath + ' · ' + S.logSize.toFixed(1) + ' MB'
+      : 'frame log is off';
+    $$('#logSeg button').forEach(b => { b.disabled = !S.prefs.verbose; });
+    $('#btnReveal').disabled = !S.prefs.verbose;
+    if (!S.prefs.verbose) {
+      $('#logBox').innerHTML = '<div class="log-empty">The frame log is off, so there is nothing to show. Turn on <b>Write the frame log</b> in Preferences and reconnect.</div>';
+      return;
+    }
+    if (S.logSize === 0) {
+      $('#logBox').innerHTML = '<div class="log-empty">Log cleared. New reports appear here as soon as the daemon talks to the device.</div>';
+      return;
+    }
+    const rows = LOG.filter(l => S.logFilter === 'all' || l[1] === S.logFilter);
+    $('#logBox').innerHTML = rows.length
+      ? rows.map(l => '<div class="log-line ' + l[1] + '"><span class="t">' + l[0] + '</span><span class="d">' + l[2]
+          + '</span><span>' + (typeof l[3] === 'string' ? l[3] : l[3][S.os]) + '</span></div>').join('')
+      : '<div class="log-empty">Nothing matches this filter.</div>';
+  }
+  $$('#logSeg button').forEach(b => b.addEventListener('click', () => {
+    S.logFilter = b.dataset.f;
+    $$('#logSeg button').forEach(x => x.classList.toggle('on', x === b));
+    renderLogs();
+  }));
+  $('#btnReveal').addEventListener('click', () => toast(os().revealed));
+
+  // ── view switching ──────────────────────────────────────────────────
+  function gotoView(name) {
+    S.view = name;
+    $$('.mode-seg [data-view]').forEach(x => {
+      const on = x.dataset.view === name;
+      x.classList.toggle('on', on); x.setAttribute('aria-selected', on);
+    });
+    $$('.view').forEach(v => v.classList.toggle('on', v.id === 'view' + name[0].toUpperCase() + name.slice(1)));
+  }
+  $$('.mode-seg [data-view]').forEach(b => b.addEventListener('click', () => gotoView(b.dataset.view)));
+
+  // ── platform (a prototype control; the real app just knows) ─────────
+  $$('#osSeg button').forEach(b => b.addEventListener('click', () => {
+    if (S.os === b.dataset.os) return;
+    S.os = b.dataset.os;
+    $$('#osSeg button').forEach(x => x.classList.toggle('on', x === b));
+    const w = $('#win');
+    w.classList.toggle('platform-win', !isMac());
+    w.classList.toggle('platform-mac', isMac());
+    w.classList.remove('maximized');
+    $('#btnMax').title = 'Maximize';
+    STEPS = isMac() ? MAC_STEPS : WIN_STEPS;
+    stepState = STEPS.map(st => st.id === 'device' ? (S.device ? 'done' : 'fail') : 'done');
+    // there is nothing to build on Windows, so the app is never "missing"
+    if (!isMac() && S.app === 'missing') S.app = 'built';
+    render(); renderLogs();
+    toast('Previewing the ' + os().label + ' build');
+  }));
+
+  $('#btnMax').addEventListener('click', () => {
+    const on = $('#win').classList.toggle('maximized');
+    // the kit's Windows smoke test asserts exactly this title flip
+    $('#btnMax').title = on ? 'Restore' : 'Maximize';
+  });
+  $$('.win-controls button')[0].addEventListener('click', () => toast('Minimized to the taskbar'));
+  $('.win-controls .close').addEventListener('click', () => toast('Closing hides the window — the daemon keeps running'));
+
+  // ── reset ───────────────────────────────────────────────────────────
+  $('#btnReset').addEventListener('click', () => {
+    Object.assign(S, { daemon: 'stopped', mode: 'bridge', app: isMac() ? 'missing' : 'built', needsRebuild: false,
+      device: true, busy: false, prog: 0,
+      reg: { code: false, desktop: false, cursor: false, vscode: false, zed: false }, uptime: 0, rate: 148,
+      logSize: 4.2, prefs: { login: true, autoconnect: true, quitApp: false, verbose: true, autoRebuild: false } });
+    renderLogs();
+    setStepsTodo(['venv', 'clang', 'instrumented', 'register']);
+    gotoView('home'); render();
+    toast('Reset to a fresh machine — press Set up and connect');
+  });
+
+  renderLogs();
+  render();
+})();
+</script>

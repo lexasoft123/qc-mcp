@@ -19,9 +19,14 @@ referencing their file key (hash) as a block model in the grid.
 FILE_TYPE = {0: "presets", 1: "irs", 2: "captures"}
 
 
-def _file_dict(f):
+def _file_dict(f, position):
+    """One catalog entry. `position` is the file's slot, taken from its place in
+    the folder's array — the whole-read indexing rule (PROTOCOL.md 5): in a READ
+    the array position IS the index and the `index` field itself is left 0. A
+    setlist is a fixed 256-slot table, empty slots included with a blank name, so
+    enumerating it gives the real recall position for every slot."""
     return {
-        "index": f.index,
+        "index": position,
         "name": f.name,
         "key": f.key,
         "cloud_id": getattr(f, "cloud_id", "") or "",
@@ -52,7 +57,7 @@ def structure_directory(file_msgs):
             "is_factory": fo.is_factory,
             "is_downloads": fo.is_downloads,
             "is_user_default": getattr(fo, "is_user_default", False),
-            "files": [_file_dict(f) for f in fo.files],
+            "files": [_file_dict(f, i) for i, f in enumerate(fo.files)],
         }
     # deterministic order: user folders first, then by name
     out = {}

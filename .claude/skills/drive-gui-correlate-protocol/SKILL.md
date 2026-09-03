@@ -84,3 +84,42 @@ downscales the png, multiply its coords by png_width / shown_width first.)
 Reference: `tools/gui/gui.py` (`bounds`/`home`/`shot`/`click`/`type`/`key`/`act`/
 `decode`) drives Cortex Control and decodes the interposer log via
 `qc_mcp.protocol.COMMANDS`. See PROTOCOL.md and `macos-dylib-interpose`.
+
+## Staying out of the user's way
+
+Driving a GUI normally means hijacking the screen — fronting the app over the
+user's windows, moving their cursor, stealing focus. Most of that is avoidable.
+Three channels, cheapest first; only the last one touches the screen at all.
+
+**1. The protocol.** If the goal is device state, skip the app entirely and read
+or write it over the bridge. Several ops (per-scene bypass, momentary flags,
+unassign) were reversed purely by sending variants and observing state — no GUI.
+Reach for the GUI only for ops that exist *only* in the app.
+
+**2. The accessibility tree** — `gui.py ax [query]`. JUCE publishes a real AX
+tree: labelled controls (`AXHelp` "Scene A: Undefined", "Save preset", "Next
+preset"), live values (`AXValue` On/Off, tempo, CPU), and exact screen frames.
+It needs **no capture, no focus, and no fronting**, works with the window buried
+or parked off-screen, and mirrors device state live — so it is usually a better
+verification channel than pixels, and it gives click targets by name instead of
+hand-read coordinates.
+
+**3. Window-id capture** — `gui.py shot`. `screencapture -l <winid>` renders that
+window alone straight from the window server: occluding windows don't appear,
+focus doesn't move, and it works when the window is behind everything or parked
+off every display. The `-R x,y,w,h` form people reach for first grabs a screen
+*region* instead, so whatever is on top lands in the image and swallows the
+click — that failure looks exactly like a broken permission.
+
+**Clicking is the exception.** JUCE ignores `AXUIElementPerformAction(kAXPress)`
+— it returns success and can even move the widget visually while the device
+never hears about it, desyncing the app from the hardware — and it ignores
+`CGEventPostToPid` too. It wants a real HID click with the app active. So
+`gui.py press "<name>"` finds the control via AX, activates the app, clicks its
+frame, then returns the cursor and focus to whatever had them. Under two seconds.
+
+**Practical pattern:** `park` the window off-screen and work over the protocol +
+`ax` + `shot`. When an app-only op must be captured, batch the clicks into one
+short session: `home`, mark the log, click, decode, `park` again. And when even
+that is unwelcome, capture *passively* — ask the user to perform the action once
+whenever convenient, then mine the interposer log for what it emitted.

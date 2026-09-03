@@ -1,0 +1,7 @@
+{
+  "_comment": "Display width in CSS px of each fragment in the poster. Kept beside the template so prep-fragments.sh and the CSS cannot drift: a fragment resized to anything other than the width it is displayed at gets resampled again by the renderer, which is what makes a poster look soft. Change one, change the other. These are app WINDOWS (1960x1432, ratio 1.369), not phones \u2014 the aspect still must not be altered, so set a width and let the height follow.",
+  "frag-home": 600,
+  "frag-console": 430,
+  "frag-logs": 400,
+  "zoom-device": 470
+}

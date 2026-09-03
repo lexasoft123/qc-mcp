@@ -79,6 +79,11 @@ def _cfnum(n):
 
 
 class IOHIDTransport:
+    #: IOHIDDeviceSetReport returns a benign 0xe0005000 on this device (the
+    #: official app ignores it too) and the data is still sent. Anything else is
+    #: a real failure — see transport.send().
+    BENIGN_WRITE_CODES = frozenset({0, 0xe0005000})
+
     def __init__(self, vid=0x152A, pid=0x880A, report_size=128, seize=False):
         self.vid, self.pid = vid, pid
         self.report_size = report_size

@@ -67,6 +67,22 @@ def _describe_bypass(b):
                      for cb in b.colBypass]}
 
 
+def _describe_stomps(bp):
+    """Footswitch->block bindings. CorOS 4.1 added a PRIMARY/SECONDARY `type`,
+    so one block can put its bypass on one switch and a second function (e.g.
+    Vintage Digital's freeze) on another."""
+    out = []
+    for a in getattr(bp, "stomp_mode_assignments", []):
+        entry = {"row": a.row, "column": a.column, "stomp_index": a.stomp_index}
+        try:
+            enum = a.DESCRIPTOR.fields_by_name["type"].enum_type
+            entry["type"] = enum.values_by_number[a.type].name
+        except Exception:
+            pass                      # 4.0: no type field, every binding is bypass
+        out.append(entry)
+    return out
+
+
 def describe(bp):
     return {
         "name": bp.name, "tempo": bp.tempo,
@@ -74,6 +90,7 @@ def describe(bp):
         "default_scene": bp.default_scene,
         "scene_labels": list(bp.scene_labels),
         "scene_colors": list(bp.scene_colors),
+        "stomp_assignments": _describe_stomps(bp),
         "chains": [_describe_chain(ch) for ch in bp.chains],
         "bypass": [_describe_bypass(b) for b in bp.bypass],
     }

@@ -890,17 +890,31 @@ def _slot_occupant(folder_key, index):
     return None
 
 
+def _bank_label(position: int, device_type: str | None = None) -> str:
+    """Human bank/slot label for a 0-based setlist position. The Quad Cortex Mini
+    (device_type 'ATMA') banks presets in 4s (slots A-D) to match its 4 footswitches,
+    so position 9 is 3B; the full Quad Cortex banks in 8s (A-H), making 9 = 2B. Recall
+    positions are the same 0-based index either way — only the displayed label differs."""
+    per_bank = 4 if (device_type or "").upper() == "ATMA" else 8
+    return f"{position // per_bank + 1}{'ABCDEFGH'[position % per_bank]}"
+
+
 @mcp.tool()
 def list_empty_slots(setlist_key: str = "/media/p4/Presets/My Presets",
                      limit: int = 8) -> dict:
     """Free ("Unsaved") preset positions in a setlist folder — the SAFE build targets
     (never build over a named preset). A setlist is a fixed 256-slot table; free slots
-    are listed with an EMPTY name. Positions map to banks: 0-7 = 1A-1H, 8-15 = 2A-2H, …
+    are listed with an EMPTY name. Positions map to banks per device: the full QC banks
+    in 8s (0-7 = 1A-1H, 8-15 = 2A-2H, …); the Quad Cortex Mini banks in 4s (0-3 = 1A-1D,
+    8-11 = 3A-3D, so position 9 = 3B). Recall positions are identical — only labels differ.
     Read-only. NOTE `source`: 'snapshot' can be stale — a slot saved since the snapshot
     may still show empty; verify the target with current_preset_position/read if unsure."""
     cur = None    # the slot the user has OPEN — if it's empty, it's the intended target
+    dev_type = None
     try:
-        p = _conn().get_setlist_position() or {}
+        conn = _conn()
+        dev_type = conn.device_type
+        p = conn.get_setlist_position() or {}
         if p.get("folder_key") == setlist_key and not p.get("is_factory"):
             cur = int(p.get("position"))
     except Exception:
@@ -913,7 +927,7 @@ def list_empty_slots(setlist_key: str = "/media/p4/Presets/My Presets",
             free = sorted({f["index"] for f in files if not f.get("name")} |
                           {i for i in range(256) if i not in present})
             def label(i):
-                return f"{i // 8 + 1}{'ABCDEFGH'[i % 8]}"
+                return _bank_label(i, dev_type)
             out = {"setlist": setlist_key, "source": _catalog_source}
             if cur is not None and cur in free:
                 free.remove(cur)

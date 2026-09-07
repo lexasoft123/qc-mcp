@@ -276,3 +276,41 @@ them: **`bypass`** (per-block bypass map), **`midi_messages`/`midi_messages_gene
   was captured; destructive, intentionally not exercised).
 - **Create/rename/delete** a preset file: `File` CREATE exists (`write_preset_file`);
   rename/delete not yet reversed (destructive — capture live when needed).
+- **Move** a preset between setlists: `MessageAction.MOVE`=4 exists, untested
+  (copy + delete covers it, see below).
+
+## File operations (captured from Cortex Control on Windows, 2026-09, QC Mini, CorOS 4.1.0)
+
+All `File`(4) messages. **Every field has explicit presence** — the app sends
+`type: 0` (0 = presets, 1 = IRs, 2 = captures) and `is_factory: false` on the
+wire, and a `File` CREATE without `type` was silently ignored, so always set
+`type` explicitly. Replies come as `File` UPDATEs carrying the affected folder
+record (plus `UndoRedo` / `RecentsFavorites` echoes). Verified = replayed from
+our own handle and confirmed by re-reading the directory.
+
+- **Create a setlist** (app's request; replay not yet verified — the device
+  **caps user setlists at 12**, and the test unit was full):
+  `File{CREATE, type:0, folder{key:"/media/p4/Presets/<name>", parent_key:"",
+  name:"<name>", is_factory:false, is_plugin:false}}` → reply: the same folder
+  record, no files. Saving into a non-existent folder key does NOT create it.
+- **Copy a preset** between setlists — verified, keeps author/author_id/tags/date:
+  `File{COPY, type:0, folder{key:<src setlist>, is_factory:false,
+  is_downloads:false, files{key:"<src setlist>/<name>.pb"}},
+  to_folder{key:<dst setlist>, files{index:<dst slot>}}}`.
+  Reply: `UndoRedo`, then the destination folder with the new file (index, name,
+  author…). Built a 30-preset setlist this way in ~20 s.
+- **Delete a preset** — verified: `File{DELETE, type:0, folder{key:<setlist>,
+  files{key:"<setlist>/<name>.pb"}}}` (the shape the device itself echoes).
+- **Rename** = re-save at the same index under the new name — verified:
+  `write_preset_file(setlist, <same index>, "<new name>")`; the device deletes
+  the old file and creates the new one, author preserved from the live preset.
+- **Save over an existing slot** with its own name overwrites it (the app's
+  Save) — verified; saving under a name that already exists in the folder at a
+  DIFFERENT index auto-suffixes (`<name>_1`, `_2`…).
+- **Author**: stored in the file and in the live preset (`author_name` /
+  `author_id`); a Grid UPDATE with those fields is a no-op and a `File` CREATE
+  ignores `preset_payload`. An **Unsaved slot's live preset carries the device
+  user as author**, so re-authoring = rebuild on an empty slot, then save over
+  the original (`tools/wip-reauthor/`, verified with a 0-difference
+  `describe()` diff on a preset with per-scene params/bypass, stomps, lane blocks).
+- **default_scene** = whichever scene is active when the save happens.

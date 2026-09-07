@@ -51,8 +51,11 @@ export function App(): React.JSX.Element {
           <StatusDot tone={live ? 'ok' : 'idle'} />
           <span>
             {live
-              ? `${sessionMode(snap)} session · ${n} ${n === 1 ? 'client' : 'clients'}`
-              : 'daemon stopped'}
+              ? `${sessionMode(snap)} · ${n} ${n === 1 ? 'client' : 'clients'}` +
+                (snap.cortex.running ? ' · CC open' : '')
+              : snap.daemon.state === 'starting'
+                ? 'connecting…'
+                : 'not connected'}
           </span>
         </div>
         <Button size="sm" icon title="Preferences" aria-label="Preferences" onClick={() => setPrefs(true)}>

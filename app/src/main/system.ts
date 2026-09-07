@@ -107,13 +107,16 @@ export async function cortexPid(repo: string): Promise<{ pid: number | null; ins
 export async function readCortex(paths: Paths): Promise<CortexInfo> {
   const version = await bundleVersion(paths.cortex)
   const instrumented = IS_MAC ? await readInstrumented(paths.repo) : null
-  const { pid } = await cortexPid(paths.repo)
+  const { pid, instrumented: runningInstrumented } = await cortexPid(paths.repo)
   return {
     installed: exists(paths.cortex),
     path: paths.cortex,
     version,
     running: pid !== null,
     pid,
+    // WHICH build is up, not just whether one is: bridge mode needs the
+    // instrumented copy, and "Cortex Control is open" is ambiguous between them.
+    runningInstrumented,
     instrumented,
     // a version drift means the injected copy is running last week's app
     needsRebuild: Boolean(

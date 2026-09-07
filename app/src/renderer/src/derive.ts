@@ -48,26 +48,62 @@ export function uptime(startedAt: number | null): string {
   return `${h ? `${h}h ` : ''}${m}m ${String(secs % 60).padStart(2, '0')}s`
 }
 
+/**
+ * The last line of a Python failure, without the traceback.
+ *
+ * The daemon's stderr arrives whole. Putting that in a one-line bar produced
+ * `...<2 lines>... "mode.") qc_mcp.backend.BridgeError: …` — the useful sentence
+ * buried behind the wreckage of the frames above it.
+ */
+export function cleanError(raw: string | null): string | null {
+  if (!raw) return null
+  const line = raw
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('File "') && !l.startsWith('Traceback')
+                     && !l.startsWith('~') && !l.startsWith('^'))
+    .pop()
+  if (!line) return null
+  // "qc_mcp.backend.BridgeError: Cortex Control is holding…" -> the sentence
+  const m = line.match(/^[\w.]*(?:Error|Exception):\s*(.+)$/)
+  return (m ? m[1] : line).trim()
+}
+
+/** Which Cortex Control is up, if any — the stock app or the instrumented copy. */
+export function cortexText(s: Snapshot): string {
+  if (!s.cortex.running) return 'Cortex Control closed'
+  return s.cortex.runningInstrumented
+    ? 'instrumented Cortex Control open'
+    : 'stock Cortex Control open'
+}
+
 export function railText(s: Snapshot): string {
   if (!s.device.present) return 'No Quad Cortex found on USB'
   if (s.daemon.state !== 'running') {
-    return s.daemon.error ?? 'Daemon stopped — no MCP client can reach the device'
+    const why = cleanError(s.daemon.error)
+    return why
+      ? `Not connected — ${why}`
+      : 'Daemon stopped — no MCP client can reach the device'
   }
   if (clash(s)) return 'Direct mode blocked — Cortex Control is still holding the device'
-  switch (sessionMode(s)) {
-    case 'direct':
-      return isMac(s)
-        ? 'Direct session — the daemon holds the USB interface'
-        : 'Direct session — exclusive HID handle'
-    case 'shared':
-      return s.cortex.running
-        ? 'Sharing the device with Cortex Control · second HID handle'
-        : 'Daemon has the device · Cortex Control is closed'
-    default:
-      return s.cortex.running
-        ? "Sharing Cortex Control's session · FIFOs healthy"
-        : 'Waiting for Cortex Control — bridge mode needs the instrumented app'
-  }
+  const who = s.daemon.external ? 'Adopted a daemon started outside Patchbay' : null
+  const body = ((): string => {
+    switch (sessionMode(s)) {
+      case 'direct':
+        return isMac(s)
+          ? 'Direct session — the daemon holds the USB interface'
+          : 'Direct session — exclusive HID handle'
+      case 'shared':
+        return s.cortex.running
+          ? 'Sharing the device with Cortex Control · second HID handle'
+          : 'Daemon has the device · Cortex Control is closed'
+      default:
+        return s.cortex.running
+          ? "Bridge session — sharing Cortex Control's own connection"
+          : 'Waiting for Cortex Control — bridge mode needs the instrumented app'
+    }
+  })()
+  return `${who ? who + ' · ' : ''}${body} · ${cortexText(s)}`
 }
 
 export const sessionFact = (s: Snapshot): string => {

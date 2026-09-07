@@ -34,6 +34,8 @@ function portFor(socketPath: string): number {
 
 export class Daemon {
   private child: ChildProcess | null = null
+  /** Running, but not ours: adopted rather than spawned. */
+  private external = false
   /** The endpoint the RUNNING process was spawned with. `paths` can change
    *  under us (the poll re-reads Preferences), and cleaning up the new path
    *  would leave the real socket behind for endpointUp() to believe in. */
@@ -61,6 +63,7 @@ export class Daemon {
       socket: this.paths.socket,
       mode: this.mode,
       session: this.session,
+      external: this.external,
       supported: this.supported,
       error: this.error,
       reportsPerSecond: 0,
@@ -86,8 +89,42 @@ export class Daemon {
     })
   }
 
+  /**
+   * Is something already serving on our socket?
+   *
+   * A daemon started by hand — or left behind by a previous run of this app — is
+   * a perfectly good daemon, and deleting its socket to start our own is both
+   * rude and confusing: the UI said "stopped" while the device was plainly in
+   * use. Connecting is the only honest test; the socket file existing is not.
+   */
+  private probe(timeoutMs = 700): Promise<boolean> {
+    if (!IS_MAC) return Promise.resolve(false)
+    return new Promise((resolve) => {
+      const sock = connect(this.paths.socket)
+      const done = (ok: boolean): void => {
+        sock.removeAllListeners()
+        sock.destroy()
+        resolve(ok)
+      }
+      sock.setTimeout(timeoutMs, () => done(false))
+      sock.once('connect', () => done(true))
+      sock.once('error', () => done(false))
+    })
+  }
+
+  /** Take over reporting for a daemon we did not spawn. */
+  private adopt(onChange: () => void): void {
+    this.state = 'running'
+    this.external = true
+    this.error = null
+    this.startedAt = this.startedAt ?? Date.now()
+    this.liveSocket = this.paths.socket
+    onChange()
+  }
+
   async start(onChange: () => void): Promise<void> {
     if (this.state !== 'stopped') return
+    if (await this.probe()) { this.adopt(onChange); return }
     if (!exists(this.paths.bin)) {
       this.error = `qc-mcp is not installed at ${this.paths.bin} — run setup first.`
       onChange()

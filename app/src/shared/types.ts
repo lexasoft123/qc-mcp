@@ -55,6 +55,8 @@ export interface CortexInfo {
   version: string | null
   running: boolean
   pid: number | null
+  /** The running app is the instrumented copy, not the stock one (macOS). */
+  runningInstrumented?: boolean
   /** macOS only */
   instrumented: InstrumentedInfo | null
   /** the source app moved past the instrumented copy (macOS only) */
@@ -69,6 +71,8 @@ export interface DaemonInfo {
   mode: Mode
   /** The mode the running daemon reported, or null before it has said. */
   session: SessionMode | null
+  /** Running, but started outside this app — adopted, not spawned. */
+  external?: boolean
   /** false once we have proven this qc-mcp build has no daemon entry point */
   supported: boolean
   error: string | null

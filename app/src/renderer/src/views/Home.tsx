@@ -1,10 +1,57 @@
 import { useState } from 'react'
-import { Button } from '@singz/ui'
-import type { Snapshot } from '@shared/types'
-import { isLinked, isMac, setupPending } from '../derive.js'
-import { publish, say, useProgress } from '../store.js'
+import { Button, SegmentedControl } from '@singz/ui'
+import type { Mode, Snapshot } from '@shared/types'
+import {
+  isLinked, isMac, modeGist, modePlan, sessionMode, sessionWords, setupPending
+} from '../derive.js'
+import { act, publish, say, useProgress } from '../store.js'
 import { SignalPath } from '../components/SignalPath.js'
 import { Strip } from '../components/Bits.js'
+
+const MODES: { value: Mode; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'bridge', label: 'Bridge' },
+  { value: 'direct', label: 'Direct' }
+]
+
+/**
+ * Which mode is selected, and what that means for the press about to happen.
+ *
+ * The mode lived only in Preferences, so the front page offered one button and
+ * no way to know whether it was about to seize the device or share the app's
+ * session. `auto` made that worse by naming a decision instead of a session.
+ * Both lines here are the same resolution the connect sequence performs.
+ */
+export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): React.JSX.Element {
+  const mode = snap.prefs.mode
+  const p = modePlan(snap)
+
+  return (
+    <div className={`home-mode${p.blocked ? ' warn' : ''}`}>
+      <div className="hm-pick">
+        <span className="eyebrow">Connection mode</span>
+        <SegmentedControl
+          options={MODES}
+          value={mode}
+          aria-label="Connection mode"
+          onChange={(m) => {
+            void act(() => window.patchbay.setMode(m))
+            if (m === 'direct' && snap.cortex.running) {
+              say('Direct mode needs the device to itself — quit Cortex Control.', true)
+            }
+          }}
+        />
+      </div>
+      <p className="hm-gist">{modeGist(snap, mode)}</p>
+      <p className="hm-plan">
+        {live
+          ? <><b>Open now:</b> {sessionWords(snap, sessionMode(snap))}
+              {snap.daemon.external ? ' · adopted from a daemon started outside Patchbay' : ''}</>
+          : <><b>{p.blocked ? 'Cannot connect:' : 'This press:'}</b> {p.blocked ?? p.plan}</>}
+      </p>
+    </div>
+  )
+}
 
 /**
  * The quick start: whatever is missing, in order. Each call returns the fresh
@@ -58,14 +105,14 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
     second = ['See each step', () => goto('setup')]
   } else if (snap.daemon.state !== 'running') {
     title = 'Ready when you are'
-    lede = mac
-      ? 'One press starts the daemon and opens Cortex Control, so Claude can read and change presets on your Quad Cortex.'
-      : 'One press starts the daemon, and Claude can read and change presets on your Quad Cortex — with or without Cortex Control open.'
+    // The how depends on the mode, and the mode block below says it — repeating
+    // a fixed sentence here is what made "Connect" ambiguous in the first place.
+    lede = 'One press starts the daemon, so Claude can read and change presets on your Quad Cortex.'
     label = 'Connect'
   } else if (!linked) {
     // macOS only: bridge mode rides the app's session, so the app must be up
     title = 'Almost there'
-    lede = "Bridge mode shares Cortex Control's session with Claude, so the app needs to be open too."
+    lede = "The daemon is up, but this is a bridge session — it rides Cortex Control's own connection, so the app has to be open too."
     label = 'Open Cortex Control'
   } else {
     title = "You're connected"
@@ -118,6 +165,10 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
           </Button>
           {second && <Button onClick={second[1]}>{second[0]}</Button>}
         </div>
+
+        {!busy && snap.device.present && !pending && (
+          <ModeChoice snap={snap} live={linked} />
+        )}
 
         <div className="home-warn">
           {!busy && !mac && linked && snap.cortex.running && (

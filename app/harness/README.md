@@ -9,10 +9,14 @@ npx vite build -c harness/vite.config.ts
 cd harness/dist && python3 -m http.server 8731
 ```
 
-Then `http://127.0.0.1:8731/?p=N` — one state per load. The components read the
-IPC bridge off `window.patchbay` inside an effect, and effects run after every
-render, so several panels on one page would all see whichever stub was
-installed last.
+Two pages:
 
-Today it covers `Measured`, the measured half of the Leveling bench: no riff,
-ready, mid-run, held by the true-peak guard, and audio extra absent.
+- `/?p=N` — `Measured`, the measured half of the Leveling bench: no riff, ready,
+  mid-run, held by the true-peak guard, and audio extra absent. **One state per
+  load.** The component reads the IPC bridge off `window.patchbay` inside an
+  effect, and effects run after every render, so several panels on one page
+  would all see whichever stub was installed last.
+- `/modes.html` — every sentence Home's mode block can produce, all on one page.
+  `ModeChoice` is pure (it reads the snapshot it is handed and nothing else), so
+  these can be stacked; `stub.ts` still has to install a bridge first, because
+  importing a view pulls in the store, which subscribes at import time.

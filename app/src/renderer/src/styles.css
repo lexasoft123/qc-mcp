@@ -265,6 +265,20 @@ body::after {
 .home-note { margin-top: 20px; color: var(--sz-faint); font-size: 11px; }
 .home-warn { margin-top: 22px; width: min(470px, 100%); text-align: left; }
 
+/* the mode block: what is selected, and what it will do with what is running */
+.home-mode {
+  margin-top: 26px; width: min(470px, 100%); text-align: left;
+  padding: 13px 15px 14px; border-radius: 12px;
+  background: var(--sz-panel); border: 1px solid rgba(255, 240, 214, 0.07);
+}
+.home-mode.warn { border-color: rgba(255, 122, 92, 0.4); }
+.hm-pick { display: flex; align-items: center; gap: 12px; }
+.hm-pick .eyebrow { flex: 1; }
+.hm-gist { margin-top: 10px; font-size: 12px; line-height: 1.55; color: var(--sz-dim); text-wrap: pretty; }
+.hm-plan { margin-top: 6px; font-size: 12px; line-height: 1.55; color: var(--sz-faint); text-wrap: pretty; }
+.hm-plan b { color: var(--sz-dim); font-weight: 600; }
+.home-mode.warn .hm-plan, .home-mode.warn .hm-plan b { color: var(--sz-danger); }
+
 .prog { margin-top: 26px; width: min(330px, 100%); }
 .prog .track { display: block; height: 3px; border-radius: 99px; background: rgba(255, 240, 214, 0.09); overflow: hidden; }
 .prog .fill {

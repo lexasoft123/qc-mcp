@@ -442,10 +442,22 @@ def serve(socket_path: str, mode: str = "auto") -> int:
                 "Windows")
 
     if not bridge and not share and _cortex_running() and sys.platform != "win32":
-        raise BridgeError(
-            "Cortex Control is holding the device, so it cannot be seized. Quit "
-            "it, or launch the instrumented build and start the daemon in bridge "
-            "mode.")
+        # `auto` used to stop here and tell the user to go and launch the bridge
+        # themselves — a dead end asking a human to do the one thing the code was
+        # about to refuse to do. If the instrumented build is there, start it.
+        if mode == "auto" and bridge_supported():
+            from .server import _launch_bridge
+            err = _launch_bridge()
+            if err:
+                raise BridgeError(
+                    "Cortex Control is holding the device and the bridge could not "
+                    "be started: %s. Quit Cortex Control to use direct mode." % err)
+            bridge = True
+        else:
+            raise BridgeError(
+                "Cortex Control is holding the device, so it cannot be seized. Quit "
+                "it, or launch the instrumented build and start the daemon in bridge "
+                "mode.")
 
     qc = QuadCortex(bridge=bridge, share=share).open(handshake=True)
     daemon = Daemon(qc, socket_path, mode="bridge" if bridge else "shared" if share else "direct")

@@ -205,9 +205,29 @@ def _launch_bridge(timeout_s=45):
     while time.time() < deadline:
         if _bridge_running():
             time.sleep(12)  # boot storm: the app pulls the whole catalog on start —
-            return None     # join after it settles or our first reads time out
+            # …and "the app is alive" is not the same as "the FIFO will open".
+            # Returning on the process check alone hands the caller a bridge that
+            # then fails with "could not open inject FIFO", which reads like a
+            # missing app rather than a race. Prove it before saying yes.
+            if _bridge_openable(deadline):
+                return None
+            continue
         time.sleep(1)
     return f"bridge did not come up within {timeout_s}s (device plugged in?)"
+
+
+def _bridge_openable(deadline, path="/tmp/qc_inject"):
+    """Can the inject FIFO actually be opened? Retries until `deadline`."""
+    import time
+    while time.time() < deadline:
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError:
+            time.sleep(0.5)           # ENXIO: nobody is reading it yet
+            continue
+        os.close(fd)
+        return True
+    return False
 
 
 def _fields(msg):

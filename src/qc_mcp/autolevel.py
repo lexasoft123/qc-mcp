@@ -27,8 +27,15 @@ which assigns it to scenes first and confirms each scene switch before writing.
 from __future__ import annotations
 
 import contextlib
+import time
 
 from . import loudness
+
+#: The device does not apply a routing change instantly. Playing into it too soon
+#: captures part of the OLD routing — silence, since the tap is not live yet — which
+#: drags the integrated loudness down and makes the first measurement of a session
+#: disagree with every later one. Observed as a 2.6 dB discrepancy on real hardware.
+ROUTING_SETTLE_S = 0.35
 
 GAIN_HASH = 16005          # "Gain" utility block
 GAIN_LEVEL = 0             # param index of LEVEL, -60..+12 dB, JUCE skew 3.8018
@@ -112,8 +119,19 @@ def reamp_routing(qc, row=0, in_port=IN_PORT_USB_5_6, out_port=OUT_PORT_USB_5_6,
             qc.set_routing(ir, in_portid=in_port)
         if tap:
             qc.set_routing(orow, out_portid=out_port)
+        # Let it take, then confirm by reading back rather than trusting the write.
+        time.sleep(ROUTING_SETTLE_S)
+        applied_in, _ = _lane_ports(qc, ir)
+        _, applied_out = _lane_ports(qc, orow)
+        if (feed and applied_in != in_port) or (tap and applied_out != out_port):
+            time.sleep(ROUTING_SETTLE_S)
+            applied_in, _ = _lane_ports(qc, ir)
+            _, applied_out = _lane_ports(qc, orow)
         yield {"in_row": ir, "out_row": orow,
-               "original_in": orig_in, "original_out": orig_out}
+               "original_in": orig_in, "original_out": orig_out,
+               "applied_in": applied_in, "applied_out": applied_out,
+               "routing_ok": ((not feed or applied_in == in_port)
+                              and (not tap or applied_out == out_port))}
     finally:
         if restore:
             try:

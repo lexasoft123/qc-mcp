@@ -131,7 +131,15 @@ export async function refresh(deep = false): Promise<Snapshot> {
   const [present, proc] = await Promise.all([readDevice(false), cortexPid(paths.repo)])
   const python = slow.python
   const clang = slow.clang
-  const cortex = { ...slow.cortex, running: proc.pid !== null, pid: proc.pid }
+  // runningInstrumented is LIVE, not slow: it flips the moment run-bridge.sh
+  // swaps the stock app for the instrumented one, and leaving it on the deep
+  // probe's stale value made the whole interface describe the wrong build.
+  const cortex = {
+    ...slow.cortex,
+    running: proc.pid !== null,
+    pid: proc.pid,
+    runningInstrumented: proc.instrumented
+  }
   const device = { ...slow.device, present: present.present }
   const targets = clients.list()
   daemon.setClients(targets.filter((c) => c.installed).map((c) => c.name))

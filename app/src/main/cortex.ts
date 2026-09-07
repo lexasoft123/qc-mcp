@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import type { Paths } from '../shared/types.js'
 import { BRIDGE_FIFOS, IS_MAC, bridgeScript, instrumentedApp } from './paths.js'
 import { cortexPid } from './system.js'
-import { exists, run, sleep } from './util.js'
+import { exists, ps, run, sleep } from './util.js'
 
 /**
  * Launch Cortex Control.
@@ -26,6 +26,20 @@ export async function launch(paths: Paths): Promise<string | null> {
   }
   if (!exists(paths.cortex)) return 'Cortex Control is not installed.'
   spawn(paths.cortex, [], { detached: true, stdio: 'ignore' }).unref()
+  return null
+}
+
+/**
+ * Launch the STOCK app, deliberately.
+ *
+ * Windows has no other kind, and on macOS this is the fallback when no
+ * instrumented copy has been built — bridge mode will not work against it, and
+ * the plan says so before getting here rather than discovering it later.
+ */
+export async function launchStock(paths: Paths): Promise<string | null> {
+  if (!exists(paths.cortex)) return 'Cortex Control is not installed.'
+  if (IS_MAC) spawn('open', ['-a', paths.cortex], { detached: true, stdio: 'ignore' }).unref()
+  else spawn(paths.cortex, [], { detached: true, stdio: 'ignore' }).unref()
   return null
 }
 
@@ -69,7 +83,26 @@ export async function quit(): Promise<void> {
   await run('taskkill', ['/IM', 'Cortex Control.exe'], { timeout: 10000 })
 }
 
-/** Bring the running app forward without touching its session. */
-export async function focus(paths: Paths): Promise<void> {
-  if (IS_MAC) await run('open', ['-a', paths.cortex], { timeout: 5000 })
+/**
+ * Bring the running app forward — BY PID, never by bundle path.
+ *
+ * `open -a "/Applications/.../Cortex Control.app"` was launching a SECOND,
+ * stock instance whenever the instrumented copy was the one up: two apps, two
+ * device handles, and a bridge session that then died under the daemon. Ask the
+ * window server to raise the process that is actually running instead.
+ */
+export async function focus(pid: number | null): Promise<void> {
+  if (pid === null) return
+  if (IS_MAC) {
+    await run('osascript', ['-e',
+      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`
+    ], { timeout: 5000 })
+    return
+  }
+  await ps(`(Get-Process -Id ${pid} -ErrorAction SilentlyContinue) | ForEach-Object {` +
+           ` Add-Type -AssemblyName Microsoft.VisualBasic;` +
+           ` [Microsoft.VisualBasic.Interaction]::AppActivate($_.Id) }`)
 }
+
+/** Is a Cortex Control up, and which build? Re-exported so the plan has one source. */
+export { cortexPid } from './system.js'

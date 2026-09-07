@@ -42,7 +42,7 @@ function snap(over: {
       pid: null, startedAt: null, socket: '', mode: o.mode, supported: true,
       error: null, reportsPerSecond: 0, clients: []
     },
-    prefs: { mode: o.mode },
+    prefs: { mode: o.mode, quitApp: false },
     checks: [], clients: [{ id: 'claude', installed: true, stale: false, found: true, name: 'Claude', path: '' }],
     paths: {}
   } as unknown as Snapshot

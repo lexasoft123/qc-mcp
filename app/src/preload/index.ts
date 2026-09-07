@@ -21,6 +21,11 @@ const api: Api = {
 
   setClients: (ids: string[]) => ipcRenderer.invoke('clients:set', ids) as Promise<Snapshot>,
 
+  // One press, one plan. The renderer no longer sequences launch-then-start
+  // itself — that sequence lives in shared/session.ts, where the tests read it.
+  connect: () => ipcRenderer.invoke('session:connect') as Promise<Snapshot>,
+  disconnect: () => ipcRenderer.invoke('session:disconnect') as Promise<Snapshot>,
+
   daemonStart: () => ipcRenderer.invoke('daemon:start') as Promise<Snapshot>,
   daemonStop: () => ipcRenderer.invoke('daemon:stop') as Promise<Snapshot>,
   setMode: (mode: Mode) => ipcRenderer.invoke('daemon:mode', mode) as Promise<Snapshot>,

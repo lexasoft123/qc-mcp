@@ -2,7 +2,7 @@
   "name": "patchbay",
   "version": "0.1.2",
   "private": true,
-  "description": "Launcher for qc-mcp — installs the MCP, runs the daemon, opens Cortex Control",
+  "description": "Launcher for qc-mcp \u2014 installs the MCP, runs the daemon, opens Cortex Control",
   "author": "lexasoft <lexasoft@gmail.com>",
   "license": "MIT",
   "main": "./out/main/index.js",
@@ -10,12 +10,13 @@
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
     "dist": "npm run fetch:uv && npm run build && electron-builder",
     "dist:mac": "npm run fetch:uv && npm run build && electron-builder --mac dmg:arm64 && electron-builder --mac dmg:x64",
     "dist:win": "npm run fetch:uv && npm run build && electron-builder --win",
     "fetch:uv": "node scripts/fetch-uv.mjs",
-    "icons": "electron build/icon/build-icons.cjs"
+    "icons": "electron build/icon/build-icons.cjs",
+    "test": "node --test \"test/**/*.test.ts\""
   },
   "devDependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.5",

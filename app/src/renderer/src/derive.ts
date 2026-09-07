@@ -1,4 +1,6 @@
 import type { ClientTarget, Mode, SessionMode, Snapshot } from '@shared/types'
+import type { Facts } from '@shared/session'
+import { planFor, planWords, resolveSession } from '@shared/session'
 
 export const isMac = (s: Snapshot): boolean => s.platform === 'mac'
 
@@ -28,6 +30,31 @@ export const isLinked = (s: Snapshot): boolean =>
   s.device.present &&
   (sessionMode(s) !== 'bridge' || s.cortex.running)
 
+/**
+ * What a mode will actually DO, given what is running this second.
+ *
+ * This is not a second opinion — it calls the same planFor() the main process
+ * executes, so an interface that promises a shared session and a main process
+ * that seizes the device cannot happen. `auto` is the reason it exists: it
+ * names a decision rather than a session, and the decision is made from state
+ * the user can see but was never told was being read.
+ */
+export function modeFacts(s: Snapshot): Facts {
+  return {
+    platform: s.platform,
+    devicePresent: s.device.present,
+    cortexInstalled: s.cortex.installed,
+    cortexRunning: s.cortex.running,
+    cortexInstrumented: Boolean(s.cortex.runningInstrumented),
+    instrumentedBuilt: Boolean(s.cortex.instrumented?.built),
+    // The renderer cannot stat the FIFOs; the instrumented app being up is the
+    // half of the test it can see, and main re-checks the other half.
+    bridgeReady: isMac(s) ? Boolean(s.cortex.runningInstrumented) : s.cortex.running,
+    daemonRunning: s.daemon.state === 'running',
+    daemonSession: s.daemon.session
+  }
+}
+
 export interface ModePlan {
   mode: Mode
   /** The session this mode opens, resolved against the snapshot. */
@@ -38,89 +65,14 @@ export interface ModePlan {
   blocked: string | null
 }
 
-/**
- * What a mode will actually DO, given what is running this second.
- *
- * `auto` is the reason this exists. It names a decision rather than a session,
- * and the decision is made from state the user can see but was never told was
- * being read — so the front page said "Connect" and left them to guess whether
- * that meant seizing the device or sharing the app's. This resolves it the same
- * way the two places that make the call do: Home's connect() sequence, and
- * daemon.serve() (qc_mcp/daemon.py).
- */
 export function modePlan(s: Snapshot, mode: Mode = s.prefs.mode): ModePlan {
-  const mac = isMac(s)
-  const appUp = s.cortex.running
-  // macOS bridges through the instrumented copy only; Windows just needs the app.
-  const bridgeUp = mac ? Boolean(s.cortex.runningInstrumented) : appUp
-  const buildable = !mac || Boolean(s.cortex.instrumented?.built)
-
-  if (mode === 'direct') {
-    return {
-      mode,
-      will: 'direct',
-      plan: appUp
-        ? 'Cortex Control is holding the device, so nothing can be opened until it closes.'
-        : 'The daemon opens the Quad Cortex on its own.',
-      blocked: appUp ? 'Quit Cortex Control, or switch to Bridge.' : null
-    }
-  }
-
-  if (mode === 'bridge') {
-    if (bridgeUp) {
-      return {
-        mode,
-        will: mac ? 'bridge' : 'shared',
-        plan: mac
-          ? 'Joins the instrumented Cortex Control that is already open.'
-          : 'Opens a second handle beside the Cortex Control already open.',
-        blocked: null
-      }
-    }
-    return {
-      mode,
-      will: mac ? 'bridge' : 'shared',
-      plan: mac
-        ? 'Opens the instrumented Cortex Control first, then joins it — about twenty seconds.'
-        : 'Needs Cortex Control open: the second handle is opened beside it.',
-      blocked: mac
-        ? (buildable ? null : 'The instrumented copy has not been built yet — see Setup.')
-        : (appUp ? null : 'Open Cortex Control first.')
-    }
-  }
-
-  // auto
-  if (bridgeUp) {
-    return {
-      mode,
-      will: mac ? 'bridge' : 'shared',
-      plan: mac
-        ? "Cortex Control is open, so Patchbay shares its session rather than seizing the device."
-        : 'Cortex Control is open, so Patchbay opens a second handle beside it.',
-      blocked: null
-    }
-  }
-  if (appUp) {
-    return {
-      mode,
-      will: mac ? 'bridge' : 'shared',
-      plan: mac
-        ? 'Cortex Control is holding the device, so Patchbay swaps in its instrumented copy and shares that — about twenty seconds.'
-        : 'Cortex Control is open, so Patchbay opens a second handle beside it.',
-      blocked: mac && !buildable
-        ? 'The instrumented copy has not been built yet — see Setup.'
-        : null
-    }
-  }
+  const f = modeFacts(s)
+  const p = planFor('connect', mode, f, s.prefs.quitApp)
   return {
     mode,
-    will: mac ? 'bridge' : 'direct',
-    plan: mac
-      ? 'Nothing is holding the device, so Patchbay opens Cortex Control and shares its session.'
-      : 'Nothing is holding the device, so the daemon opens it directly.',
-    blocked: mac && !buildable
-      ? 'The instrumented copy has not been built yet — see Setup.'
-      : null
+    will: p.session ?? resolveSession(mode, f),
+    plan: planWords('connect', mode, f, p),
+    blocked: p.blocked
   }
 }
 

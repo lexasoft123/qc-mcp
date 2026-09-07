@@ -1,10 +1,12 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
-import type { CheckId, Mode, Prefs, Progress } from '../shared/types.js'
+import type { CheckId, Mode, Prefs, Progress, Snapshot } from '../shared/types.js'
+import type { Goal } from '../shared/session.js'
 import * as clients from './clients.js'
 import * as cortex from './cortex.js'
 import * as install from './install.js'
 import * as logs from './logs.js'
+import * as session from './session.js'
 import * as state from './state.js'
 import { Leveling } from './leveling.js'
 import { IS_MAC } from './paths.js'
@@ -111,45 +113,61 @@ function handlers(): void {
     return state.push(true)
   })
 
-  ipcMain.handle('daemon:start', async () => {
-    await state.getDaemon().start(() => void state.push())
+  // ── connect / disconnect / mode ───────────────────────────────────────
+  //
+  // Every one of these is the same call: decide a plan from what is true, run
+  // it, report. They used to be six handlers that each did a piece — start the
+  // daemon, launch the app, write a preference — and pressing them in an order
+  // nobody had thought about left the app describing a session it did not have.
+  const pursue = async (goal: Goal, mode?: Mode): Promise<Snapshot> => {
+    const out = await session.pursue(goal, mode, (label) =>
+      emit('progress', { label, done: 0, total: 0 }))
+    emit('progress', {
+      label: out.error ?? 'Done', done: 1, total: 1, finished: true,
+      error: out.error ?? undefined
+    })
     return state.push()
-  })
+  }
+
+  ipcMain.handle('session:connect', () => pursue('connect'))
+  ipcMain.handle('session:disconnect', () => pursue('disconnect'))
+  ipcMain.handle('session:plan', (_e, goal: Goal, mode?: Mode) => session.preview(goal, mode))
+
+  ipcMain.handle('daemon:start', () => pursue('connect'))
   ipcMain.handle('daemon:stop', async () => {
     // the bench is an attached client of that session — it cannot outlive it
     leveling?.stop()
-    state.getDaemon().stop()
-    return state.push()
-  })
-  ipcMain.handle('daemon:mode', async (_e, mode: Mode) => {
-    state.updatePrefs({ mode })
-    return state.push()
+    return pursue('disconnect')
   })
 
-  ipcMain.handle('cortex:launch', async () => {
-    const paths = state.getPaths()
-    const err = await cortex.launch(paths)
-    if (err) emit('progress', { label: err, done: 0, total: 0, finished: true, error: err })
-    // Wait for the bridge rather than just for the process: whoever starts the
-    // daemon next needs it actually open, or auto silently picks direct.
-    if (!err && IS_MAC && state.getPrefs().mode !== 'direct') {
-      emit('progress', { label: 'Opening Cortex Control', done: 0, total: 0 })
-      const ok = await cortex.waitForBridge(paths.repo)
-      emit('progress', {
-        label: ok ? 'Cortex Control is up' : 'Cortex Control did not open in time; using direct mode',
-        done: 0, total: 0, finished: true
-      })
-    }
-    return state.push(true)
+  /**
+   * Switching mode is a re-connect, not a preference write.
+   *
+   * Setting `prefs.mode` alone left a live bridge session running under a
+   * selector that said Direct. If nothing is connected the preference is all
+   * there is to change; if something is, the session is rebuilt to match.
+   */
+  ipcMain.handle('daemon:mode', async (_e, mode: Mode) => {
+    state.updatePrefs({ mode })
+    const snap = await state.push()
+    if (snap.daemon.state !== 'running') return snap
+    return pursue('connect', mode)
   })
+
+  ipcMain.handle('cortex:launch', () => pursue('show-app'))
+  ipcMain.handle('cortex:focus', () => pursue('show-app'))
   ipcMain.handle('cortex:quit', async () => {
+    // Quitting the app under a bridge session kills the session's transport and
+    // leaves a daemon holding a dead FIFO. Take the session down first.
+    const snap = state.current() ?? (await state.refresh())
+    if (snap.daemon.state === 'running' && snap.daemon.session === 'bridge') {
+      leveling?.stop()
+      await session.pursue('disconnect', undefined, () => {})
+    }
     await cortex.quit()
     return state.push()
   })
-  ipcMain.handle('cortex:focus', async () => {
-    await cortex.focus(state.getPaths())
-    return state.push()
-  })
+
   ipcMain.handle('cortex:rebuild', async () => {
     await cortex.quit()
     const err = await install.buildInstrumented(state.getPaths(), (p) => emit('progress', p))
@@ -163,8 +181,15 @@ function handlers(): void {
 
   ipcMain.handle('prefs:get', () => state.getPrefs())
   ipcMain.handle('prefs:set', async (_e, patch: Partial<Prefs>) => {
+    const before = state.getPrefs().mode
     state.updatePrefs(patch)
-    return state.push()
+    const snap = await state.push()
+    // Preferences can change the mode too, and it has to mean the same thing
+    // there as it does on Home — a live session follows the selector.
+    if (patch.mode && patch.mode !== before && snap.daemon.state === 'running') {
+      return pursue('connect', patch.mode)
+    }
+    return snap
   })
 
   ipcMain.handle('path:choose', async (_e, what: 'repo' | 'cortex') => {

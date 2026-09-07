@@ -345,6 +345,9 @@ export interface Api {
 
   setClients(ids: string[]): Promise<Snapshot>
 
+  /** Decide a plan from what is true, run it. The one entry point for the button. */
+  connect(): Promise<Snapshot>
+  disconnect(): Promise<Snapshot>
   daemonStart(): Promise<Snapshot>
   daemonStop(): Promise<Snapshot>
   setMode(mode: Mode): Promise<Snapshot>

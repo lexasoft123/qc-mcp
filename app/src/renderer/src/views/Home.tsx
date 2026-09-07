@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@singz/ui'
 import type { Mode, Snapshot } from '@shared/types'
 import {
-  isLinked, isMac, modePlan, sessionMode, sessionWords, setupPending
+  cleanError, isLinked, isMac, modePlan, sessionMode, sessionWords, setupPending
 } from '../derive.js'
 import { act, publish, say, useProgress } from '../store.js'
 import { SignalPath } from '../components/SignalPath.js'
@@ -79,21 +79,22 @@ export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): R
 }
 
 /**
- * The quick start: whatever is missing, in order. Each call returns the fresh
- * snapshot, so the sequence never decides a step from stale state.
+ * One press, one plan.
+ *
+ * This used to be a sequence written here — run setup, maybe launch Cortex
+ * Control, maybe start the daemon — decided from a snapshot the renderer read
+ * itself. It disagreed with the daemon's own `auto` branch (it opened Cortex
+ * Control unasked, so auto never once chose direct), and it could not see a
+ * mode switch that needed the live session torn down first. Main plans it now,
+ * from shared/session.ts, which is the same function the tiles below describe.
  */
 async function connect(): Promise<void> {
   let s = await window.patchbay.snapshot()
   if (setupPending(s)) s = await window.patchbay.runSetup()
-  // Cortex Control FIRST on macOS. The daemon picks bridge vs direct ONCE, at
-  // startup, from whether the instrumented app is already up — so starting it
-  // first silently produced direct mode every time, seizing the device and
-  // leaving the interposer unused. cortexLaunch waits for the bridge to open.
-  if (isMac(s) && s.prefs.mode !== 'direct' && !s.cortex.running) s = await window.patchbay.cortexLaunch()
-  if (s.daemon.state !== 'running') s = await window.patchbay.daemonStart()
+  s = await window.patchbay.connect()
   publish(s)
   if (s.daemon.state === 'running') say('Connected — Claude can reach your Quad Cortex')
-  else if (s.daemon.error) say(s.daemon.error, true)
+  else if (s.daemon.error) say(cleanError(s.daemon.error) ?? s.daemon.error, true)
 }
 
 export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void }): React.JSX.Element {
@@ -148,15 +149,16 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
   }
 
   const press = async (): Promise<void> => {
-    if (action === 'disconnect') {
-      let s = await window.patchbay.daemonStop()
-      if (s.cortex.running && snap.prefs.quitApp) s = await window.patchbay.cortexQuit()
-      publish(s)
-      say('Disconnected. Your presets are untouched.')
-      return
-    }
     setBusy(true)
-    try { await connect() } finally { setBusy(false) }
+    try {
+      if (action === 'disconnect') {
+        // quitApp is part of the plan now, so this is one call, not two.
+        publish(await window.patchbay.disconnect())
+        say('Disconnected. Your presets are untouched.')
+        return
+      }
+      await connect()
+    } finally { setBusy(false) }
   }
 
   return (

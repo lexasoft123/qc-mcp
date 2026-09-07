@@ -32,6 +32,18 @@ function portFor(socketPath: string): number {
   }
 }
 
+/** SIGTERM every `qc-mcp --daemon` on this machine — the adopted-daemon case,
+ *  where there is no child handle to kill. */
+async function killStrayDaemons(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const cmd = IS_MAC
+      ? spawn('pkill', ['-f', 'qc-mcp --daemon'], { stdio: 'ignore' })
+      : spawn('taskkill', ['/IM', 'qc-mcp.exe', '/F'], { stdio: 'ignore' })
+    cmd.on('exit', () => resolve())
+    cmd.on('error', () => resolve())
+  })
+}
+
 export class Daemon {
   private child: ChildProcess | null = null
   /** Running, but not ours: adopted rather than spawned. */
@@ -48,6 +60,10 @@ export class Daemon {
   private session: SessionMode | null = null
   private state: DaemonInfo['state'] = 'stopped'
   private clientNames: string[] = []
+  /** One start at a time. Two overlapping presses used to have the second
+   *  return instantly on `state !== 'stopped'`, so its caller reported a
+   *  finished connect over a start that was still in flight. */
+  private starting: Promise<void> | null = null
 
   constructor(private paths: Paths) {}
 
@@ -122,8 +138,15 @@ export class Daemon {
     onChange()
   }
 
-  async start(onChange: () => void): Promise<void> {
-    if (this.state !== 'stopped') return
+  start(onChange: () => void): Promise<void> {
+    if (this.starting) return this.starting
+    if (this.state === 'running') return Promise.resolve()
+    const run = this.begin(onChange).finally(() => { this.starting = null })
+    this.starting = run
+    return run
+  }
+
+  private async begin(onChange: () => void): Promise<void> {
     if (await this.probe()) { this.adopt(onChange); return }
     if (!exists(this.paths.bin)) {
       this.error = `qc-mcp is not installed at ${this.paths.bin} — run setup first.`
@@ -198,18 +221,39 @@ export class Daemon {
     onChange()
   }
 
-  stop(): void {
+  /**
+   * Stop it — including one we only adopted.
+   *
+   * This used to kill `child` and then unlink the socket unconditionally. For an
+   * ADOPTED daemon there is no child, so the daemon kept running and holding the
+   * device while its socket file was deleted out from under it: probe() could
+   * never find it again, the UI said 'stopped' forever, and every later connect
+   * failed on a device that was plainly in use. Now an adopted daemon is stopped
+   * by pid, and a socket we did not create is never removed.
+   */
+  async stop(): Promise<void> {
+    const wasExternal = this.external
+    const child = this.child
     this.state = 'stopped'
     this.startedAt = null
     this.session = null
-    const child = this.child
     this.child = null
+    this.external = false
+
     if (child && child.pid) {
       try { child.kill('SIGTERM') } catch { /* already gone */ }
       setTimeout(() => { try { child.kill('SIGKILL') } catch { /* already gone */ } }, 2000)
+    } else if (wasExternal) {
+      await killStrayDaemons()
+      // it owned the socket, so it cleans up after itself; wait for the endpoint
+      // to actually close rather than deleting the file and calling it stopped
+      for (let i = 0; i < 25 && (await this.endpointUp()); i++) await sleep(200)
+      this.liveSocket = null
+      return
     }
-    const socketPath = this.liveSocket ?? this.paths.socket
+
+    const socketPath = this.liveSocket
     this.liveSocket = null
-    if (IS_MAC) { try { unlinkSync(socketPath) } catch { /* nothing to clean */ } }
+    if (IS_MAC && socketPath) { try { unlinkSync(socketPath) } catch { /* nothing to clean */ } }
   }
 }

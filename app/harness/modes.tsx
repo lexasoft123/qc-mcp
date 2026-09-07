@@ -6,6 +6,7 @@ import './stub'
 import { createRoot } from 'react-dom/client'
 import type { Mode, SessionMode, Snapshot } from '../src/shared/types'
 import { ModeChoice } from '../src/renderer/src/views/Home'
+import { SignalPath } from '../src/renderer/src/components/SignalPath'
 
 /*
  * Every sentence the front page's mode block can produce, on one page.
@@ -42,11 +43,12 @@ function snap(over: {
       error: null, reportsPerSecond: 0, clients: []
     },
     prefs: { mode: o.mode },
-    checks: [], clients: [], paths: {}
+    checks: [], clients: [{ id: 'claude', installed: true, stale: false, found: true, name: 'Claude', path: '' }],
+    paths: {}
   } as unknown as Snapshot
 }
 
-const CASES: [string, Snapshot, boolean][] = [
+const ALL: [string, Snapshot, boolean][] = [
   ['mac · auto · nothing running', snap({ mode: 'auto' }), false],
   ['mac · auto · instrumented app already up', snap({ mode: 'auto', running: true, instrumented: true }), false],
   ['mac · auto · stock app holding the device', snap({ mode: 'auto', running: true }), false],
@@ -55,21 +57,26 @@ const CASES: [string, Snapshot, boolean][] = [
   ['mac · direct · app closed', snap({ mode: 'direct' }), false],
   ['mac · direct · app holding the device (blocked)', snap({ mode: 'direct', running: true }), false],
   ['mac · connected, bridge session', snap({ mode: 'auto', running: true, instrumented: true, daemon: 'running', session: 'bridge' }), true],
-  ['mac · connected, adopted direct session', snap({ mode: 'auto', daemon: 'running', session: 'direct', external: true }), true],
+  ['mac · connected, adopted direct session', snap({ mode: 'direct', daemon: 'running', session: 'direct', external: true }), true],
   ['win · auto · app closed', snap({ platform: 'win', mode: 'auto' }), false],
   ['win · auto · app open', snap({ platform: 'win', mode: 'auto', running: true }), false],
   ['win · bridge · app closed (blocked)', snap({ platform: 'win', mode: 'bridge' }), false]
 ]
 
+// ?only=1,7 narrows the page down when you are looking at one thing.
+const pick = new URLSearchParams(location.search).get('only')
+const CASES = pick ? pick.split(',').map((i) => ALL[Number(i)]).filter(Boolean) : ALL
+
 document.body.style.background = '#12100d'
 createRoot(document.getElementById('root')!).render(
-  <div style={{ padding: 20, display: 'grid', gap: 18, width: 560 }}>
+  <div style={{ padding: 20, display: 'grid', gap: 26, width: 700 }}>
     {CASES.map(([label, s, live]) => (
       <div key={label}>
         <div style={{
           font: "700 9.5px 'Bricolage Grotesque', system-ui", letterSpacing: '.14em',
           textTransform: 'uppercase', color: '#6b6355', marginBottom: 7
         }}>{label}</div>
+        <SignalPath snap={s} />
         <ModeChoice snap={s} live={live} />
       </div>
     ))}

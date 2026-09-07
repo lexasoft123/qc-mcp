@@ -28,21 +28,6 @@ export const isLinked = (s: Snapshot): boolean =>
   s.device.present &&
   (sessionMode(s) !== 'bridge' || s.cortex.running)
 
-/** How a mode reaches the device, said once, without reference to the moment. */
-export function modeGist(s: Snapshot, mode: Mode): string {
-  if (mode === 'direct') {
-    return isMac(s)
-      ? 'Patchbay takes the Quad Cortex for itself. Cortex Control has to be closed.'
-      : 'Patchbay takes an exclusive handle. Cortex Control has to be closed.'
-  }
-  if (mode === 'bridge') {
-    return isMac(s)
-      ? "Patchbay rides Cortex Control's own connection, so both can be open at once."
-      : 'Patchbay opens a second handle beside Cortex Control, so both can be open at once.'
-  }
-  return 'Patchbay picks bridge or direct from whatever is already running.'
-}
-
 export interface ModePlan {
   mode: Mode
   /** The session this mode opens, resolved against the snapshot. */

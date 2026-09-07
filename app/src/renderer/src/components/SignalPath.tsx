@@ -1,6 +1,18 @@
 import type { Snapshot } from '@shared/types'
-import { isLinked, regCount } from '../derive.js'
-import { Bubble, Device, PatchCable } from './Icons.js'
+import { isLinked, modePlan, regCount, sessionMode } from '../derive.js'
+import { AppWindow, Bubble, Device, PatchCable } from './Icons.js'
+
+/**
+ * The route, drawn.
+ *
+ * The connection mode used to be a word in the header and the same word in the
+ * footer, which told you nothing about what it meant. It is really a question
+ * about the shape of this path — does the signal run THROUGH Cortex Control, or
+ * around it — so the path draws that: bridge grows a fourth node, direct does
+ * not, and Windows' shared handle says it runs beside the app rather than
+ * through it. Before a session exists the shape comes from what the selected
+ * mode WILL open, so pressing Connect holds no surprise.
+ */
 
 function Node({ tone, cap, sub, children, onClick }: {
   tone: string
@@ -20,14 +32,27 @@ function Node({ tone, cap, sub, children, onClick }: {
   )
 }
 
+const Link = ({ lit, label }: { lit: boolean; label?: string }): React.JSX.Element => (
+  <span className={lit ? 'link lit' : 'link'}>
+    <i />
+    {label && <em>{label}</em>}
+  </span>
+)
+
 export function SignalPath({ snap }: { snap: Snapshot }): React.JSX.Element {
   const live = snap.daemon.state === 'running'
   const starting = snap.daemon.state === 'starting'
   const linked = isLinked(snap)
   const n = regCount(snap)
 
+  // What is open, or — before anything is — what this mode would open.
+  const route = live ? sessionMode(snap) : modePlan(snap).will
+  const through = route === 'bridge'
+  const beside = route === 'shared'
+  const appUp = snap.cortex.running
+
   return (
-    <div className="flow">
+    <div className={`flow route-${route}`}>
       <Node
         tone={n && live ? 'on' : ''}
         cap="Claude"
@@ -35,7 +60,7 @@ export function SignalPath({ snap }: { snap: Snapshot }): React.JSX.Element {
       >
         <Bubble />
       </Node>
-      <span className={live && n > 0 ? 'link lit' : 'link'}><i /></span>
+      <Link lit={live && n > 0} />
       <Node
         tone={live || starting ? 'on' : ''}
         cap="Patchbay"
@@ -43,7 +68,25 @@ export function SignalPath({ snap }: { snap: Snapshot }): React.JSX.Element {
       >
         <PatchCable />
       </Node>
-      <span className={linked ? 'link lit' : 'link'}><i /></span>
+
+      {through && (
+        <>
+          <Link lit={linked} label="through" />
+          <Node
+            tone={`cc${appUp ? ' on' : ''}`}
+            cap="Cortex Control"
+            sub={appUp ? 'session shared' : 'not open yet'}
+            onClick={() => { void window.patchbay.cortexFocus() }}
+          >
+            <AppWindow />
+          </Node>
+        </>
+      )}
+
+      <Link
+        lit={linked}
+        label={through ? undefined : beside ? 'beside the app' : 'direct'}
+      />
       <Node
         tone={!snap.device.present ? 'bad' : linked ? 'filled' : ''}
         cap="Quad Cortex"

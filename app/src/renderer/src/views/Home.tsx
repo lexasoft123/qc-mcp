@@ -1,53 +1,78 @@
 import { useState } from 'react'
-import { Button, SegmentedControl } from '@singz/ui'
+import { Button } from '@singz/ui'
 import type { Mode, Snapshot } from '@shared/types'
 import {
-  isLinked, isMac, modeGist, modePlan, sessionMode, sessionWords, setupPending
+  isLinked, isMac, modePlan, sessionMode, sessionWords, setupPending
 } from '../derive.js'
 import { act, publish, say, useProgress } from '../store.js'
 import { SignalPath } from '../components/SignalPath.js'
 import { Strip } from '../components/Bits.js'
 
-const MODES: { value: Mode; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'bridge', label: 'Bridge' },
-  { value: 'direct', label: 'Direct' }
+/**
+ * Auto is a decision, not a session, so the tile says what it decides FROM.
+ * The other two say what they do, in the fewest words that stay true.
+ */
+const MODES: { value: Mode; name: string; mac: string; win: string }[] = [
+  { value: 'auto', name: 'Auto',
+    mac: 'Whichever fits what is already running',
+    win: 'Whichever fits what is already running' },
+  { value: 'bridge', name: 'Bridge',
+    mac: "Through Cortex Control's own connection",
+    win: 'A second handle beside Cortex Control' },
+  { value: 'direct', name: 'Direct',
+    mac: 'Straight to the device, app closed',
+    win: 'Straight to the device, app closed' }
 ]
 
 /**
  * Which mode is selected, and what that means for the press about to happen.
  *
- * The mode lived only in Preferences, so the front page offered one button and
- * no way to know whether it was about to seize the device or share the app's
- * session. `auto` made that worse by naming a decision instead of a session.
- * Both lines here are the same resolution the connect sequence performs.
+ * The mode lived only in Preferences, then briefly as a word in the header and
+ * the same word in the footer — small, twice, and explaining nothing. Three
+ * tiles carry it now, and the line under them resolves it the same way the two
+ * places that actually make the call do: Home's connect() sequence, and
+ * daemon.serve() (qc_mcp/daemon.py).
  */
 export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): React.JSX.Element {
   const mode = snap.prefs.mode
+  const mac = isMac(snap)
   const p = modePlan(snap)
+  // The chip belongs to the ROUTE, not the selection: it labels a sentence about
+  // the session, and it is the tie back to the colour running through the path.
+  const route = live ? sessionMode(snap) : p.will
 
   return (
-    <div className={`home-mode${p.blocked ? ' warn' : ''}`}>
-      <div className="hm-pick">
-        <span className="eyebrow">Connection mode</span>
-        <SegmentedControl
-          options={MODES}
-          value={mode}
-          aria-label="Connection mode"
-          onChange={(m) => {
-            void act(() => window.patchbay.setMode(m))
-            if (m === 'direct' && snap.cortex.running) {
-              say('Direct mode needs the device to itself — quit Cortex Control.', true)
-            }
-          }}
-        />
+    <div className={`home-mode r-${route}${p.blocked ? ' warn' : ''}`}>
+      <div className="hm-tiles" role="radiogroup" aria-label="Connection mode">
+        {MODES.map((m) => {
+          const on = m.value === mode
+          return (
+            <button
+              key={m.value}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              className={`hm-tile m-${m.value}${on ? ' on' : ''}`}
+              onClick={() => {
+                if (on) return
+                void act(() => window.patchbay.setMode(m.value))
+                if (m.value === 'direct' && snap.cortex.running) {
+                  say('Direct mode needs the device to itself — quit Cortex Control.', true)
+                }
+              }}
+            >
+              <b><i className="dot" />{m.name}</b>
+              <span>{mac ? m.mac : m.win}</span>
+            </button>
+          )
+        })}
       </div>
-      <p className="hm-gist">{modeGist(snap, mode)}</p>
+
       <p className="hm-plan">
         {live
-          ? <><b>Open now:</b> {sessionWords(snap, sessionMode(snap))}
+          ? <><i>Open now</i> {sessionWords(snap, sessionMode(snap))}
               {snap.daemon.external ? ' · adopted from a daemon started outside Patchbay' : ''}</>
-          : <><b>{p.blocked ? 'Cannot connect:' : 'This press:'}</b> {p.blocked ?? p.plan}</>}
+          : <><i>{p.blocked ? 'Cannot connect' : 'This press'}</i> {p.blocked ?? p.plan}</>}
       </p>
     </div>
   )

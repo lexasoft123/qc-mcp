@@ -16,7 +16,8 @@ Two pages:
   load.** The component reads the IPC bridge off `window.patchbay` inside an
   effect, and effects run after every render, so several panels on one page
   would all see whichever stub was installed last.
-- `/modes.html` — every sentence Home's mode block can produce, all on one page.
+- `/modes.html` — every route and every sentence Home's mode block can produce,
+  all on one page; `?only=1,7` narrows it to the cases you are looking at.
   `ModeChoice` is pure (it reads the snapshot it is handed and nothing else), so
   these can be stacked; `stub.ts` still has to install a bridge first, because
   importing a view pulls in the store, which subscribes at import time.

@@ -337,10 +337,18 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
         qc = _conn()
         qc.read_state("Version")
         name = f" [{qc.custom_name}]" if qc.custom_name else ""
-        how = "shared handle" if qc.shared else ("interposer" if qc.bridge else "exclusive")
+        riding = qc.shared and getattr(qc, "riding", False)
+        if qc.shared:
+            # A shared handle either rides the app's live session (no handshake
+            # of our own - ours would knock the app off the device) or, with the
+            # app shut, runs its own.
+            how = ("shared handle, riding Cortex Control's session" if riding
+                   else "shared handle, own session (Cortex Control not connected)")
+        else:
+            how = "interposer" if qc.bridge else "exclusive"
         out = {"status": f"Connected ({mode}, {how}). CorOS {qc.firmware or '?'}"
                          f"{name}, protocol generation {qc.protocol_version}."}
-        if qc.shared:
+        if riding:
             # Two independent writers on one HID endpoint. Single-report messages
             # (~97% of the app's traffic, and most of ours) are atomic, but a
             # multi-report message from each side can interleave and corrupt both.
@@ -350,7 +358,8 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
                 "one endpoint: a multi-report message from each side can "
                 "interleave (~97% of the app's traffic is single-report, so this "
                 "is narrow but real). For preset building/saving, prefer "
-                "connect(mode='direct', quit_app=True).")
+                "connect(mode='direct', quit_app=True). If Cortex Control quits, "
+                "its heartbeat goes with it: disconnect() then connect() again.")
         return out
     except QCError as e:
         return {"error": f"Connect failed: {e}"}

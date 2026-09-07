@@ -191,6 +191,20 @@ export interface MeterOutput {
   limit?: number
 }
 
+/** One scene's line in the per-scene report. */
+export interface SceneRow {
+  scene: number
+  name?: string | null
+  measured?: number | null
+  true_peak?: number | null
+  correction_db?: number | null
+  /** The true-peak guard would cap this trim. */
+  limited?: boolean
+  /** No data of its own — the device answers with scene A's, so it is skipped. */
+  undefinedScene?: boolean
+  error?: string | null
+}
+
 /** One preset's line in the level report. */
 export interface ReportRow {
   position: number
@@ -213,13 +227,19 @@ export interface ReportResult {
 }
 
 export type LevelEvent =
-  | { event: 'meter'; at: number; outputs: Record<string, MeterOutput> }
+  | {
+      event: 'meter'; at: number; outputs: Record<string, MeterOutput>
+      /** One flag for both headphone channels, not one each. */
+      hp_limit?: boolean
+    }
   | { event: 'stopped'; error: string | null }
   | { event: 'fatal'; error: string }
   | { event: 'autolevel'; row: number; step: AutoStep }
   | { event: 'measuring'; index: number; name: string; total: number }
   | { event: 'measured'; row: ReportRow }
   | { event: 'play'; done?: boolean; error?: string }
+  | { event: 'scene_measuring'; scene: number }
+  | { event: 'scene_measured'; row: SceneRow }
 
 /** One measure->correct pass of the automatic loop. */
 export interface AutoStep {
@@ -371,6 +391,8 @@ export interface Api {
       presets: { folder_key: string; position: number; name: string; cloud_id?: string }[],
       o?: { target?: number; metric?: string; }
     ): Promise<ReportResult>
+    measureScenes(o?: { target?: number; scenes?: number[] }): Promise<{ rows: SceneRow[] }>
+    levelScenes(o?: { target?: number; scenes?: number[] }): Promise<unknown>
   }
 
   window: {

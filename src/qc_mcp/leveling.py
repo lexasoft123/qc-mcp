@@ -349,7 +349,10 @@ class Bench:
                 entry["limit"] = float(getattr(newest, lim))
             outs[f] = entry
         self._last_meter = time.time()
-        emit({"event": "meter", "at": self._last_meter, "outputs": outs})
+        # The headphones carry ONE limiter flag for both channels, so it rides
+        # alongside the ports rather than being duplicated onto hp_l and hp_r.
+        emit({"event": "meter", "at": self._last_meter, "outputs": outs,
+              "hp_limit": bool(getattr(newest, "hp_limiter_active", False))})
 
 
 # --------------------------------------------------- measured leveling ----
@@ -377,7 +380,8 @@ def measure_ops(bench, emit):
         return {k: stub for k in ("audio", "sample_arm", "sample_status",
                                   "sample_info", "sample_stop", "sample_discard",
                                   "sample_play", "sample_stop_play", "measure",
-                                  "autolevel", "revert_levels", "measure_many")}
+                                  "autolevel", "revert_levels", "measure_many",
+                                  "measure_scenes", "level_scenes")}
 
     def audio(m):
         try:
@@ -469,6 +473,57 @@ def measure_ops(bench, emit):
         return {"target": target, "metric": metric, "rows": rows,
                 "spread": (round(max(vals) - min(vals), 2) if len(vals) > 1 else None)}
 
+    def do_measure_scenes(m):
+        """Measure each scene of the loaded preset. Reports; writes nothing.
+
+        A scene with no data of its own is reported as undefined and skipped — the
+        device answers for it, but the answer is whatever scene A holds, and
+        trimming that would be trimming a scene the player never uses.
+        """
+        target = float(m.get("target", autolevel.DEFAULT_TARGET_LUFS))
+        want = m.get("scenes") or list(range(autolevel.MAX_SCENES))
+        state = bench.preset_state() or {}
+        labels = state.get("scene_labels") or []
+        before = bench.current_scene()
+        rows = []
+        in_row, out_row = autolevel.measurement_rows(bench.qc)
+        try:
+            with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row):
+                for sc in want:
+                    label = labels[sc] if sc < len(labels) else ""
+                    emit({"event": "scene_measuring", "scene": sc})
+                    row = {"scene": sc, "name": label or None}
+                    if not bench.qc.set_scene(sc) or not bench.qc._await_scene(sc):
+                        row["error"] = "scene switch not confirmed"
+                        rows.append(row); emit({"event": "scene_measured", "row": row})
+                        continue
+                    res = autolevel.measure(di_path=m.get("di_path") or None)
+                    if res.get("error"):
+                        row["error"] = res["error"]
+                    else:
+                        row.update({
+                            "measured": res.get("lufs_integrated"),
+                            "true_peak": res.get("true_peak_dbtp"),
+                            "correction_db": autolevel._delta(res, target, "lufs"),
+                        })
+                        tp = res.get("true_peak_dbtp")
+                        if tp is not None and row["correction_db"] is not None:
+                            head = autolevel.TRUE_PEAK_CEILING_DBTP - tp
+                            row["limited"] = row["correction_db"] > head
+                    rows.append(row)
+                    emit({"event": "scene_measured", "row": row})
+        finally:
+            bench.qc.set_scene(before)
+            bench.qc._await_scene(before)
+        return {"target": target, "rows": rows}
+
+    def do_level_scenes(m):
+        """Write the per-scene trims. Explicit — nothing here happens by default."""
+        return autolevel.level_scenes(
+            bench.qc, scenes=m.get("scenes"),
+            target=float(m.get("target", autolevel.DEFAULT_TARGET_LUFS)),
+            di_path=m.get("di_path") or None, dry_run=bool(m.get("dry_run", False)))
+
     def do_measure(m):
         # The signal enters on one lane and leaves on another; feeding and tapping
         # the same row would cut the chain and measure a dead end.
@@ -548,6 +603,8 @@ def measure_ops(bench, emit):
         "sample_stop_play": guard(do_stop_play),
         "measure": guard(do_measure),
         "measure_many": guard(do_measure_many),
+        "measure_scenes": guard(do_measure_scenes),
+        "level_scenes": guard(do_level_scenes),
         "autolevel": guard(do_autolevel),
         "revert_levels": guard(do_revert),
     }

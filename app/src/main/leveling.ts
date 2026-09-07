@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import type {
   AudioState, AutoResult, LevelEvent, Measurement, Paths, PresetFolder, PresetState,
-  ReportResult, SampleState
+  ReportResult, SampleState, SceneRow
 } from '../shared/types.js'
 import { exists } from './util.js'
 
@@ -258,6 +258,21 @@ export class Leveling {
       presets, target: o.target ?? -18, metric: o.metric ?? 'lufs'
       // Generous: every preset is a recall plus a full playback of the riff.
     }, 600000)) as unknown as ReportResult
+  }
+
+  /** Measure every scene of the loaded preset. Writes nothing. */
+  async measureScenes(o: { target?: number; scenes?: number[] } = {}):
+    Promise<{ rows: SceneRow[] }> {
+    return (await this.call('measure_scenes', {
+      target: o.target ?? -18, scenes: o.scenes
+    }, 600000)) as unknown as { rows: SceneRow[] }
+  }
+
+  /** Write the per-scene trims. Explicit: nothing here happens by default. */
+  async levelScenes(o: { target?: number; scenes?: number[] } = {}): Promise<unknown> {
+    return await this.call('level_scenes', {
+      target: o.target ?? -18, scenes: o.scenes, dry_run: false
+    }, 600000)
   }
 
   async autolevel(opts: {

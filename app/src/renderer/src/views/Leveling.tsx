@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge, Button, StatusDot } from '@singz/ui'
 import type {
-  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, Snapshot
+  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, SceneRow,
+  Snapshot
 } from '@shared/types'
 import { slotId } from '../derive.js'
 import { act, say } from '../store.js'
@@ -10,6 +11,9 @@ import { Meter, loudest } from '../components/Meter.js'
 import { PresetPicker } from '../modals/PresetPicker.js'
 import { Measured } from '../components/Measured.js'
 import { LevelReport } from '../components/LevelReport.js'
+import { Scenes } from '../components/Scenes.js'
+import { Dock } from '../components/Dock.js'
+import { LevelingHelp } from '../modals/LevelingHelp.js'
 
 const SCENES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 /** The QC grid is four rows, so every column reserves four lane slots and the
@@ -71,6 +75,12 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const [applied, setApplied] = useState<number[]>([])
   const [chosen, setChosen] = useState<number[] | null>(null)
   const [playTick, setPlayTick] = useState(0)
+  const [helping, setHelping] = useState(false)
+  const [scenes, setScenes] = useState<Record<number, SceneRow>>({})
+  const [sceneBusy, setSceneBusy] = useState(false)
+  const [sceneAt, setSceneAt] = useState<number | null>(null)
+  const [sceneSel, setSceneSel] = useState<number[]>([0, 1, 2, 3, 4, 5, 6, 7])
+  const [hpLimit, setHpLimit] = useState(false)
 
   const live = snap.daemon.state === 'running'
   const slot: BenchSlot | undefined = bench[focus]
@@ -99,12 +109,16 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     let gone = false
     void window.patchbay.leveling.start()
     const off = window.patchbay.leveling.onEvent((e: LevelEvent) => {
-      if (e.event === 'meter') setMeter(e.outputs)
+      if (e.event === 'meter') { setMeter(e.outputs); setHpLimit(Boolean(e.hp_limit)) }
       else if (e.event === 'autolevel') setAutoStep(e.step)
       else if (e.event === 'measuring') setMeasuring(e.name)
       else if (e.event === 'measured') {
         setRows((r) => ({ ...r, [e.row.position]: e.row }))
       } else if (e.event === 'play') { setPlayTick((n) => n + 1) }
+      else if (e.event === 'scene_measuring') setSceneAt(e.scene)
+      else if (e.event === 'scene_measured') {
+        setScenes((r) => ({ ...r, [e.row.scene]: e.row }))
+      }
       else if (e.error) setError(e.error)
     })
     void window.patchbay.leveling.meter(true).catch(() => undefined)
@@ -366,6 +380,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           />
           Auto-save
         </label>
+        <Button size="sm" onClick={() => setHelping(true)}>How this works</Button>
         <Button size="sm" onClick={() => setPicking(true)}>Add preset…</Button>
       </div>
 
@@ -439,6 +454,31 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
               return window.patchbay.leveling.state().then(setPreset)
             })
             .catch((e: Error) => setError(e.message))
+        }}
+      />
+
+      <Scenes
+        rows={scenes}
+        busy={sceneBusy}
+        progress={sceneAt}
+        selected={sceneSel}
+        presetName={preset?.name ?? slot?.name ?? null}
+        onToggle={(sc) =>
+          setSceneSel((v) => (v.includes(sc) ? v.filter((x) => x !== sc) : [...v, sc]))}
+        onMeasure={() => {
+          setSceneBusy(true); setScenes({}); setError(null)
+          void window.patchbay.leveling
+            .measureScenes({ target, scenes: sceneSel })
+            .catch((e: Error) => setError(e.message))
+            .finally(() => { setSceneBusy(false); setSceneAt(null) })
+        }}
+        onApply={() => {
+          setSceneBusy(true)
+          void window.patchbay.leveling
+            .levelScenes({ target, scenes: sceneSel })
+            .then(() => window.patchbay.leveling.state().then(setPreset))
+            .catch((e: Error) => setError(e.message))
+            .finally(() => { setSceneBusy(false); mark(true) })
         }}
       />
 
@@ -565,12 +605,15 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         </div>
       )}
 
+      <Dock outputs={meter} hpLimit={hpLimit} />
+
       <div className="lvl-keys fine">
         <kbd>←</kbd><kbd>→</kbd> preset · <kbd>↑</kbd><kbd>↓</kbd> scene ·
         <kbd>A</kbd>–<kbd>H</kbd> jump to scene · <kbd>−</kbd><kbd>+</kbd> level
         (<kbd>⇧</kbd> fine) · <kbd>⌘S</kbd> save
       </div>
 
+      {helping && <LevelingHelp onClose={() => setHelping(false)} />}
       {picking && (
         <PresetPicker
           onClose={() => setPicking(false)}

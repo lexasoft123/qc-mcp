@@ -203,6 +203,8 @@ function handlers(): void {
   ipcMain.handle('leveling:sampleStopPlay', () => bench().sampleStopPlay())
   ipcMain.handle('leveling:revertLevels', () => bench().revertLevels())
   ipcMain.handle('leveling:measureMany', (_e, presets, o) => bench().measureMany(presets, o ?? {}))
+  ipcMain.handle('leveling:measureScenes', (_e, o) => bench().measureScenes(o ?? {}))
+  ipcMain.handle('leveling:levelScenes', (_e, o) => bench().levelScenes(o ?? {}))
 
   ipcMain.handle('window:isMaximized', () => Boolean(win?.isMaximized()))
   ipcMain.on('window:minimize', () => win?.minimize())

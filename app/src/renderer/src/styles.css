@@ -917,3 +917,80 @@ body.win .lvl-col.on { background: var(--sz-surface-raised); }
   font-family: var(--sz-font-mono); font-size: 11px; color: var(--sz-text);
   font-variant-numeric: tabular-nums; font-variation-settings: 'wdth' 87.5;
 }
+
+/* ── scenes ─────────────────────────────────────────────────────────────── */
+.scn {
+  display: grid; gap: 10px; margin-bottom: 12px; padding: 13px 16px;
+  border-radius: 16px; border: 1px solid var(--sz-line);
+  background: rgba(255, 240, 214, 0.02);
+}
+.scn-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.scn-head h3 { font-size: 13.5px; font-weight: 700; }
+.scn-head .fine { min-width: 0; }
+.scn-grid { display: grid; gap: 2px; }
+.scn-cell {
+  display: grid; align-items: center; gap: 10px;
+  grid-template-columns: 26px minmax(0, 1fr) 72px 200px auto;
+  padding: 7px 12px; border-radius: 11px; border: 1px solid transparent;
+}
+.scn-cell.now { border-color: rgba(255, 160, 40, 0.32); background: var(--sz-accent-soft); }
+/* a scene with no data of its own is shown, not hidden: hiding it would renumber
+   the letters and make the row labels lie */
+.scn-cell.dead { opacity: 0.45; }
+.scn-name { font-size: 12px; }
+.scn-lufs, .scn-corr b {
+  font-family: var(--sz-font-mono); font-size: 11px; text-align: right;
+  font-variant-numeric: tabular-nums; font-variation-settings: 'wdth' 87.5;
+}
+.scn-lufs { color: var(--sz-text); }
+.scn-corr { display: flex; align-items: center; gap: 10px; }
+.scn-corr b { flex: none; width: 46px; font-weight: 400; color: var(--sz-text); }
+.scn-track { position: relative; flex: 1 1 auto; height: 14px; }
+.scn-track::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 6px; height: 2px;
+  background: rgba(255, 240, 214, 0.06); border-radius: 2px;
+}
+.scn-zero {
+  position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+  background: var(--sz-line-strong);
+}
+.scn-bar { position: absolute; top: 4px; height: 6px; border-radius: 2px;
+  background: var(--sz-accent); }
+
+/* ── the docked output meter ────────────────────────────────────────────── */
+.dock {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 9px 14px; border-radius: 13px; margin-bottom: 10px;
+  border: 1px solid var(--sz-line); background: var(--sz-panel-deep);
+}
+.dock.bad { border-color: var(--sz-danger-strong-line); background: var(--sz-danger-strong-wash); }
+.dock .dp { display: flex; align-items: center; gap: 7px; }
+.dock .dp i {
+  font-style: normal; font-size: 8.5px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--sz-faint); min-width: 34px;
+}
+.dock .dp .lvl {
+  position: relative; width: 62px; height: 6px; border-radius: 99px;
+  background: rgba(255, 240, 214, 0.07); overflow: hidden;
+}
+.dock .dp .lvl .fill {
+  position: absolute; inset: 0 auto 0 0; border-radius: 99px;
+  background: linear-gradient(90deg, var(--sz-accent-deep), #ffd489);
+  transition: width 0.08s linear;
+}
+.dock .dp.lim .lvl .fill { background: linear-gradient(90deg, #ff8a5c, #ff7a5c); }
+.dock .dp b {
+  font-weight: 400; font-family: var(--sz-font-mono); font-size: 10px;
+  color: var(--sz-dim); min-width: 40px; text-align: right;
+  font-variant-numeric: tabular-nums; font-variation-settings: 'wdth' 87.5;
+}
+.dock .dp.lim b { color: var(--sz-danger-strong); }
+.dock-state {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--sz-faint);
+}
+.dock-state.ok { color: var(--sz-success); }
+.dock-state.bad { color: var(--sz-danger-strong); }
+
+/* the help sheet is taller than the kit's default card */
+.help-card { width: min(660px, calc(100% - 60px)); max-height: 82vh; overflow-y: auto; }

@@ -22,7 +22,7 @@ const db = (v: number | null | undefined): string =>
   v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 
 export function Measured({
-  live, presetName, target, onTarget, step, onTrimmed
+  live, presetName, target, onTarget, step, onTrimmed, playDone
 }: {
   /** The daemon is up. Without it there is nothing to talk to. */
   live: boolean
@@ -38,6 +38,8 @@ export function Measured({
   step: AutoStep | null
   /** A run wrote a trim, so the bench should re-read the preset. */
   onTrimmed: () => void
+  /** Playback finished or failed, pushed from the service. */
+  playDone?: number
 }): React.JSX.Element | null {
   const [audio, setAudio] = useState<AudioState | null>(null)
   const [sample, setSample] = useState<SampleState | null>(null)
@@ -45,6 +47,7 @@ export function Measured({
   const [result, setResult] = useState<AutoResult | null>(null)
   const [busy, setBusy] = useState<'measure' | 'auto' | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [playing, setPlaying] = useState(false)
   const poll = useRef<ReturnType<typeof setInterval> | null>(null)
   const quietSince = useRef<number | null>(null)
 
@@ -68,6 +71,8 @@ export function Measured({
     poll.current = null
   }
   useEffect(() => stopPoll, [])
+  // The service says when playback ends; the button must not stay on "Stop".
+  useEffect(() => { if (playDone) setPlaying(false) }, [playDone])
 
   const keep = useCallback(async (): Promise<void> => {
     stopPoll()
@@ -113,6 +118,20 @@ export function Measured({
     try { setSample(await window.patchbay.leveling.sampleDiscard()) }
     catch (e) { setErr((e as Error).message) }
   }, [])
+
+  const play = async (): Promise<void> => {
+    setErr(null)
+    try {
+      setPlaying(true)
+      await window.patchbay.leveling.samplePlay()
+    } catch (e) { setErr((e as Error).message); setPlaying(false) }
+  }
+
+  const stopPlay = async (): Promise<void> => {
+    try { await window.patchbay.leveling.sampleStopPlay() }
+    catch { /* it may have finished on its own */ }
+    setPlaying(false)
+  }
 
   const measure = async (): Promise<void> => {
     setBusy('measure'); setErr(null); setResult(null)
@@ -263,6 +282,10 @@ export function Measured({
                   <dd className="muted">{presetName ?? 'none loaded'}</dd></div>
               </dl>
               <div className="lvl-measured-acts">
+                <Button size="sm" disabled={playing}
+                        onClick={() => void (playing ? stopPlay() : play())}>
+                  {playing ? 'Stop' : 'Play through preset'}
+                </Button>
                 <Button size="sm" onClick={() => void arm()}>Re-record</Button>
                 <span className="grow" />
                 {(reading || shown || result) && (

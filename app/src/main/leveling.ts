@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import type {
   AudioState, AutoResult, LevelEvent, Measurement, Paths, PresetFolder, PresetState,
-  SampleState
+  ReportResult, SampleState
 } from '../shared/types.js'
 import { exists } from './util.js'
 
@@ -233,12 +233,41 @@ export class Leveling {
    * `autolevel` event per pass so the view can follow rather than freeze, which
    * is why the timeout here is generous.
    */
+  /** Play the riff through the preset so it can be heard. Returns once started. */
+  async samplePlay(): Promise<{ playing: boolean; seconds: number }> {
+    return (await this.call('sample_play', {}, 20000)) as unknown as
+      { playing: boolean; seconds: number }
+  }
+
+  async sampleStopPlay(): Promise<void> {
+    await this.call('sample_stop_play', {}, 8000)
+  }
+
+  /** Put back every fader an applied trim moved. */
+  async revertLevels(): Promise<{ reverted: { row: number; db: number }[] }> {
+    return (await this.call('revert_levels', {}, 15000)) as unknown as
+      { reverted: { row: number; db: number }[] }
+  }
+
+  /** Measure every preset given and report what each needs. Writes nothing. */
+  async measureMany(
+    presets: { folder_key: string; position: number; name: string; cloud_id?: string }[],
+    o: { target?: number; metric?: string } = {}
+  ): Promise<ReportResult> {
+    return (await this.call('measure_many', {
+      presets, target: o.target ?? -18, metric: o.metric ?? 'lufs'
+      // Generous: every preset is a recall plus a full playback of the riff.
+    }, 600000)) as unknown as ReportResult
+  }
+
   async autolevel(opts: {
     target?: number; metric?: string; tolerance?: number; dryRun?: boolean
   } = {}): Promise<AutoResult> {
     return (await this.call('autolevel', {
       target: opts.target ?? -18, metric: opts.metric ?? 'lufs',
-      tolerance: opts.tolerance ?? 0.5, dry_run: opts.dryRun ?? false
+      // Reports by default: moving the player's faders is a separate decision
+      // from measuring, so it has to be asked for.
+      tolerance: opts.tolerance ?? 0.5, dry_run: opts.dryRun ?? true
     }, 300000)) as unknown as AutoResult
   }
 }

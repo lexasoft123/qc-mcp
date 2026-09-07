@@ -191,11 +191,35 @@ export interface MeterOutput {
   limit?: number
 }
 
+/** One preset's line in the level report. */
+export interface ReportRow {
+  position: number
+  name?: string
+  row?: number
+  lufs?: number | null
+  n5?: number | null
+  true_peak?: number | null
+  /** The metric being levelled by — LUFS, or relative sones when perceived. */
+  measured?: number | null
+  correction_db?: number | null
+  error?: string | null
+}
+
+export interface ReportResult {
+  target: number
+  metric: string
+  rows: ReportRow[]
+  spread: number | null
+}
+
 export type LevelEvent =
   | { event: 'meter'; at: number; outputs: Record<string, MeterOutput> }
   | { event: 'stopped'; error: string | null }
   | { event: 'fatal'; error: string }
   | { event: 'autolevel'; row: number; step: AutoStep }
+  | { event: 'measuring'; index: number; name: string; total: number }
+  | { event: 'measured'; row: ReportRow }
+  | { event: 'play'; done?: boolean; error?: string }
 
 /** One measure->correct pass of the automatic loop. */
 export interface AutoStep {
@@ -340,6 +364,13 @@ export interface Api {
     sampleDiscard(): Promise<SampleState>
     measure(perceived?: boolean): Promise<Measurement>
     autolevel(o?: { target?: number; tolerance?: number; dryRun?: boolean }): Promise<AutoResult>
+    samplePlay(): Promise<{ playing: boolean; seconds: number }>
+    sampleStopPlay(): Promise<void>
+    revertLevels(): Promise<{ reverted: { row: number; db: number }[] }>
+    measureMany(
+      presets: { folder_key: string; position: number; name: string; cloud_id?: string }[],
+      o?: { target?: number; metric?: string; }
+    ): Promise<ReportResult>
   }
 
   window: {

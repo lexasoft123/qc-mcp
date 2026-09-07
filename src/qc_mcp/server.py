@@ -870,8 +870,12 @@ def _level_row(res):
 @mcp.tool()
 def level_preset(target_lufs: float = -18.0, metric: str = "lufs",
                  tolerance: float = 0.5, max_iterations: int = 4, row: int = 0,
-                 di_path: str = "", save: bool = False) -> dict:
+                 di_path: str = "", save: bool = False, apply: bool = False) -> dict:
     """LEVEL the current preset: measure, trim, re-measure until it lands on target.
+
+    REPORTS ONLY unless apply=True. Moving somebody's faders is a separate decision
+    from telling them what a preset needs, so it has to be asked for. Even with
+    apply=True nothing reaches the preset FILE until save=True.
 
     The correction goes to a Gain block at the end of the measured lane (added if
     absent) — amp master, cab and drive are never touched. A true-peak guard backs the
@@ -887,7 +891,8 @@ def level_preset(target_lufs: float = -18.0, metric: str = "lufs",
     try:
         out = leveling.level_current(qc, target=target_lufs, metric=metric,
                                      tolerance=tolerance, max_iterations=max_iterations,
-                                     row=row, di_path=di_path or None)
+                                     row=row, di_path=di_path or None,
+                                     dry_run=not apply)
     except Exception as e:
         return {"error": str(e)}
     if save and out.get("written") and not out.get("error"):

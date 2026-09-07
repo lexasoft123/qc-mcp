@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   Api, AudioState, AutoResult, CheckId, LevelEvent, LogLine, Measurement, Mode, Prefs,
-  PresetFolder, PresetState, Progress, SampleState, Snapshot
+  PresetFolder, PresetState, Progress, ReportResult, SampleState, Snapshot
 } from '../shared/types.js'
 
 /** Subscribe to a main-process push; returns the unsubscribe. */
@@ -68,6 +68,15 @@ const api: Api = {
       ipcRenderer.invoke('leveling:measure', perceived) as Promise<Measurement>,
     autolevel: (o?: { target?: number; tolerance?: number; dryRun?: boolean }) =>
       ipcRenderer.invoke('leveling:autolevel', o) as Promise<AutoResult>,
+    samplePlay: () =>
+      ipcRenderer.invoke('leveling:samplePlay') as Promise<{ playing: boolean; seconds: number }>,
+    sampleStopPlay: () => ipcRenderer.invoke('leveling:sampleStopPlay') as Promise<void>,
+    revertLevels: () =>
+      ipcRenderer.invoke('leveling:revertLevels') as Promise<{
+        reverted: { row: number; db: number }[]
+      }>,
+    measureMany: (presets, o) =>
+      ipcRenderer.invoke('leveling:measureMany', presets, o) as Promise<ReportResult>,
     onEvent: (cb) => on<LevelEvent>('leveling:event', cb)
   },
 

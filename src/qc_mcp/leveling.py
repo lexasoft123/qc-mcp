@@ -376,7 +376,8 @@ def measure_ops(bench, emit):
         stub = lambda m: _audio_unavailable(exc)   # noqa: E731
         return {k: stub for k in ("audio", "sample_arm", "sample_status",
                                   "sample_info", "sample_stop", "sample_discard",
-                                  "measure", "autolevel")}
+                                  "sample_play", "sample_stop_play", "measure",
+                                  "autolevel", "revert_levels", "measure_many")}
 
     def audio(m):
         try:
@@ -397,6 +398,77 @@ def measure_ops(bench, emit):
                 return {"error": f"{type(exc).__name__}: {exc}"}
         return run
 
+    def do_play(m):
+        """Audition the riff through the preset — heard, not measured.
+
+        The input is fed from USB but the output is left alone, so the preset
+        reaches the XLRs as usual and the player hears it in the room. That is the
+        opposite of a measurement, which taps the output away and is silent.
+        """
+        import threading
+        stim, rate = audio_io.load_wav(m.get("path") or audio_io.DEFAULT_SAMPLE_PATH)
+        in_row, out_row = autolevel.measurement_rows(bench.qc)
+        seconds = round(stim.shape[0] / float(rate), 2)
+
+        def run():
+            try:
+                with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row,
+                                             tap=False):
+                    audio_io.play(stim, rate=rate, blocking=True)
+            except Exception as exc:                          # noqa: BLE001
+                emit({"event": "play", "error": str(exc)})
+            else:
+                emit({"event": "play", "done": True})
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"playing": True, "seconds": seconds, "through_row": in_row,
+                "note": "heard through the preset — the output is not tapped"}
+
+    def do_stop_play(m):
+        audio_io.stop_play()
+        return {"playing": False}
+
+    def do_measure_many(m):
+        """Measure a list of presets and report what each one needs. Writes nothing.
+
+        Emits per-preset progress so a table can fill in as it goes rather than
+        appearing all at once after a minute of silence.
+        """
+        target = float(m.get("target", autolevel.DEFAULT_TARGET_LUFS))
+        metric = m.get("metric", "lufs")
+        perceived = metric == "perceived" or bool(m.get("perceived"))
+        rows = []
+        for i, p in enumerate(m.get("presets") or []):
+            emit({"event": "measuring", "index": i, "name": p.get("name"),
+                  "total": len(m.get("presets") or [])})
+            try:
+                bench.open(p["folder_key"], int(p["position"]),
+                           bool(p.get("is_factory")), p.get("cloud_id", ""))
+                in_row, out_row = autolevel.measurement_rows(bench.qc)
+                with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row):
+                    res = autolevel.measure(di_path=m.get("di_path") or None,
+                                            perceived=perceived)
+                row = {"position": int(p["position"]), "name": p.get("name"),
+                       "row": out_row, "error": res.get("error")}
+                if not res.get("error"):
+                    got = (res.get("zwicker_n5_rel") if metric == "perceived"
+                           else res.get("lufs_integrated"))
+                    row.update({
+                        "lufs": res.get("lufs_integrated"),
+                        "n5": res.get("zwicker_n5_rel"),
+                        "true_peak": res.get("true_peak_dbtp"),
+                        "measured": got,
+                        "correction_db": autolevel._delta(res, target, metric),
+                    })
+            except Exception as exc:                          # noqa: BLE001
+                row = {"position": int(p.get("position", -1)), "name": p.get("name"),
+                       "error": "%s: %s" % (type(exc).__name__, exc)}
+            rows.append(row)
+            emit({"event": "measured", "row": row})
+        vals = [r["measured"] for r in rows if r.get("measured") is not None]
+        return {"target": target, "metric": metric, "rows": rows,
+                "spread": (round(max(vals) - min(vals), 2) if len(vals) > 1 else None)}
+
     def do_measure(m):
         # The signal enters on one lane and leaves on another; feeding and tapping
         # the same row would cut the chain and measure a dead end.
@@ -405,6 +477,22 @@ def measure_ops(bench, emit):
             return {"measurement": autolevel.measure(
                 di_path=m.get("di_path") or None,
                 perceived=bool(m.get("perceived")))}
+
+    #: What each lane read before a trim was applied, so it can be put back. Keyed by
+    #: (preset name, row) — a trim only means anything for the preset it was measured on.
+    applied = {}
+
+    def do_revert(m):
+        """Put every fader this session moved back where it was."""
+        name = (bench.preset_state() or {}).get("name")
+        back = []
+        for (preset, row), db in list(applied.items()):
+            if name is not None and preset != name:
+                continue
+            bench.set_db(row, db)
+            back.append({"row": row, "db": db})
+            applied.pop((preset, row), None)
+        return {"reverted": back, "remaining": len(applied)}
 
     def do_autolevel(m):
         # Trim the lane the sound leaves by, not row 0: a preset that enters on one
@@ -417,6 +505,17 @@ def measure_ops(bench, emit):
         # to the grid. Scene work still needs the Gain block.
         knob = (autolevel.LaneVolumeTrim(bench, row) if m.get("knob", "lane") == "lane"
                 else autolevel.GainBlockTrim(bench.qc, row))
+        # Report-only unless the caller says otherwise. The measured half exists to
+        # tell you what a preset needs; moving somebody's faders is a separate
+        # decision and has to be asked for.
+        dry = m.get("dry_run")
+        dry = True if dry is None else bool(dry)
+        if not dry:
+            state = bench.preset_state() or {}
+            before = next((l["db"] for l in state.get("lanes", [])
+                           if l.get("row") == row), None)
+            if before is not None:
+                applied.setdefault((state.get("name"), row), before)
         return autolevel.level_current(
             bench.qc,
             target=float(m.get("target", autolevel.DEFAULT_TARGET_LUFS)),
@@ -426,7 +525,7 @@ def measure_ops(bench, emit):
                                      autolevel.DEFAULT_MAX_ITERATIONS)),
             row=row, in_row=in_row, out_row=tail,
             di_path=m.get("di_path") or None,
-            dry_run=bool(m.get("dry_run")), trim=knob,
+            dry_run=dry, trim=knob,
             on_step=lambda step: emit({"event": "autolevel", "row": row, "step": step}))
 
     sampler = audio_io.sampler
@@ -445,8 +544,12 @@ def measure_ops(bench, emit):
                              or {"state": "idle", "error": "no reference riff yet"}),
         "sample_stop": guard(lambda m: sampler().stop(path=m.get("path") or None)),
         "sample_discard": guard(lambda m: sampler().discard()),
+        "sample_play": guard(do_play),
+        "sample_stop_play": guard(do_stop_play),
         "measure": guard(do_measure),
+        "measure_many": guard(do_measure_many),
         "autolevel": guard(do_autolevel),
+        "revert_levels": guard(do_revert),
     }
 
 

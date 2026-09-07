@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge, Button, StatusDot } from '@singz/ui'
 import type {
-  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, Snapshot
+  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, Snapshot
 } from '@shared/types'
 import { slotId } from '../derive.js'
 import { act, say } from '../store.js'
@@ -9,6 +9,7 @@ import { Knob } from '../components/Knob.js'
 import { Meter, loudest } from '../components/Meter.js'
 import { PresetPicker } from '../modals/PresetPicker.js'
 import { Measured } from '../components/Measured.js'
+import { LevelReport } from '../components/LevelReport.js'
 
 const SCENES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 /** The QC grid is four rows, so every column reserves four lane slots and the
@@ -62,6 +63,14 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
    *  sat in front of: every pass replays the whole riff. */
   const [autoStep, setAutoStep] = useState<AutoStep | null>(null)
   const [target, setTarget] = useState(-18)
+  /** The report, keyed by bench position. Empty until Measure all is pressed. */
+  const [rows, setRows] = useState<Record<number, ReportRow>>({})
+  const [measuring, setMeasuring] = useState<string | null>(null)
+  const [busyAll, setBusyAll] = useState(false)
+  /** Positions whose fader an Apply moved, so Undo has something to offer. */
+  const [applied, setApplied] = useState<number[]>([])
+  const [chosen, setChosen] = useState<number[] | null>(null)
+  const [playTick, setPlayTick] = useState(0)
 
   const live = snap.daemon.state === 'running'
   const slot: BenchSlot | undefined = bench[focus]
@@ -92,6 +101,10 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     const off = window.patchbay.leveling.onEvent((e: LevelEvent) => {
       if (e.event === 'meter') setMeter(e.outputs)
       else if (e.event === 'autolevel') setAutoStep(e.step)
+      else if (e.event === 'measuring') setMeasuring(e.name)
+      else if (e.event === 'measured') {
+        setRows((r) => ({ ...r, [e.row.position]: e.row }))
+      } else if (e.event === 'play') { setPlayTick((n) => n + 1) }
       else if (e.error) setError(e.error)
     })
     void window.patchbay.leveling.meter(true).catch(() => undefined)
@@ -362,11 +375,70 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         target={target}
         onTarget={setTarget}
         step={autoStep}
+        playDone={playTick}
         onTrimmed={() => {
           // The run moved the fader on the device; re-read so the bench agrees.
           setAutoStep(null)
           void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
           mark(true)
+        }}
+      />
+
+      <LevelReport
+        slots={bench}
+        rows={rows}
+        target={target}
+        metric="lufs"
+        busy={busyAll}
+        progress={measuring}
+        applied={applied}
+        selected={chosen ?? bench.map((b) => b.position)}
+        onToggle={(pos) => {
+          const now = chosen ?? bench.map((b) => b.position)
+          setChosen(now.includes(pos) ? now.filter((p) => p !== pos) : [...now, pos])
+        }}
+        onMeasure={() => {
+          setBusyAll(true); setRows({}); setError(null)
+          const want = chosen ?? bench.map((b) => b.position)
+          void window.patchbay.leveling
+            .measureMany(
+              bench.filter((b) => want.includes(b.position)).map((b) => ({
+                folder_key: b.folderKey, position: b.position,
+                name: b.name, cloud_id: b.cloudId
+              })),
+              { target }
+            )
+            .catch((e: Error) => setError(e.message))
+            .finally(() => { setBusyAll(false); setMeasuring(null) })
+        }}
+        onApply={() => {
+          // One preset at a time, and only the selected ones: each Apply is a
+          // separate, undoable move of that preset's fader.
+          const want = chosen ?? bench.map((b) => b.position)
+          setBusyAll(true)
+          void (async () => {
+            for (const b of bench.filter((x) => want.includes(x.position))) {
+              const r = rows[b.position]
+              if (!r || r.correction_db === null || r.correction_db === undefined) continue
+              try {
+                await window.patchbay.leveling.open(
+                  b.folderKey, b.position, false, b.cloudId)
+                await window.patchbay.leveling.autolevel({ target, dryRun: false })
+                setApplied((a) => (a.includes(b.position) ? a : [...a, b.position]))
+              } catch (e) { setError((e as Error).message); break }
+            }
+            setBusyAll(false)
+            void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
+          })()
+        }}
+        onRevert={() => {
+          void window.patchbay.leveling
+            .revertLevels()
+            .then(() => {
+              setApplied([])
+              return window.patchbay.leveling.state().then(setPreset)
+            })
+            .catch((e: Error) => setError(e.message))
         }}
       />
 

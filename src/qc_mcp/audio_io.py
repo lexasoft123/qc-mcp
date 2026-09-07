@@ -152,6 +152,35 @@ def play_and_record(stimulus, rate=QC_RATE, out_channels=DEFAULT_REAMP_CHANNELS,
     return rec, rate
 
 
+def play(stimulus, rate=QC_RATE, out_channels=DEFAULT_REAMP_CHANNELS,
+         name_hint=QC_NAME_HINT, blocking=True):
+    """Play into The Grid without recording — auditioning, not measuring.
+
+    Same channel rule as `play_and_record`: only 5-8 reach The Grid, and 1-4 are
+    refused because they bypass it straight to the analog jacks.
+    """
+    np = _np()
+    sd = _sd()
+    if rate != QC_RATE:
+        raise ValueError("the Quad Cortex is fixed at %d Hz; resample first" % QC_RATE)
+    dev = find_device(name_hint)
+    _check_channels(dev, out_channels=out_channels)
+    a = np.asarray(stimulus, dtype="float32")
+    if a.ndim == 1:
+        a = a.reshape(-1, 1)
+    if a.shape[1] != len(out_channels):
+        a = (np.repeat(a[:, :1], len(out_channels), axis=1) if a.shape[1] == 1
+             else a[:, :len(out_channels)])
+    sd.play(a, samplerate=rate, device=dev["index"],
+            mapping=list(out_channels), blocking=blocking)
+    return round(a.shape[0] / float(rate), 2)
+
+
+def stop_play():
+    """Cut short whatever `play` started."""
+    _sd().stop()
+
+
 def load_wav(path, target_rate=QC_RATE):
     """Read a WAV/AIFF/FLAC into float32 at 48 kHz, resampling only if needed."""
     np = _np()

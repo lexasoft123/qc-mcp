@@ -855,3 +855,65 @@ body.win .lvl-col.on { background: var(--sz-surface-raised); }
   border: 1px solid var(--sz-danger-strong-line);
   background: var(--sz-danger-strong-wash);
 }
+
+/* ── the level report ───────────────────────────────────────────────────── */
+/* Read first, write second, and the two are deliberately far apart. */
+.rep {
+  display: grid; gap: 10px; margin-bottom: 12px;
+  padding: 13px 16px; border-radius: 16px;
+  border: 1px solid var(--sz-line); background: rgba(255, 240, 214, 0.02);
+}
+.rep-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rep-head h3 { font-size: 13.5px; font-weight: 700; }
+.rep-head .fine { min-width: 0; }
+
+.rep-table { display: grid; gap: 2px; }
+.rep-row {
+  display: grid; align-items: center; gap: 10px;
+  grid-template-columns: 22px minmax(0, 1fr) 74px 76px 210px;
+  padding: 8px 12px; border-radius: 11px; border: 1px solid transparent;
+}
+.rep-row.now { border-color: rgba(255, 160, 40, 0.32); background: var(--sz-accent-soft); }
+.rep-row.skip .rep-name, .rep-row.skip .num { color: var(--sz-faint); }
+.rep-row.skip .rep-bar { background: var(--sz-faint); box-shadow: none; }
+.rep-th { padding-bottom: 6px; border-bottom: 1px solid var(--sz-line); border-radius: 0; }
+.rep-th span {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--sz-faint);
+}
+.rep-name { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.rep-name .badge { font-size: 8.5px; }
+.rep-foot { padding: 0 2px; }
+
+/* selection, in the kit's checkbox treatment */
+.selbox {
+  width: 17px; height: 17px; border-radius: 5px; border: 1px solid var(--sz-line-strong);
+  display: grid; place-items: center; background: none;
+}
+.selbox svg { opacity: 0; color: var(--sz-accent-ink); }
+.selbox.on { background: var(--sz-accent); border-color: var(--sz-accent); }
+.selbox.on svg { opacity: 1; }
+
+/* the correction: direction and distance from a centre line, because "which way
+   and how far" is the whole question and a column of signed numbers hides it */
+.rep-corr { display: flex; align-items: center; gap: 10px; }
+.rep-corr.muted { color: var(--sz-faint); font-family: var(--sz-font-mono); font-size: 11px; }
+.rep-track { position: relative; flex: 1 1 auto; height: 16px; }
+.rep-track::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 2px;
+  background: rgba(255, 240, 214, 0.06); border-radius: 2px;
+}
+.rep-zero {
+  position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+  background: var(--sz-line-strong);
+}
+.rep-bar {
+  position: absolute; top: 5px; height: 6px; border-radius: 2px;
+  background: var(--sz-accent);
+}
+.rep-bar.big { box-shadow: 0 0 10px rgba(255, 160, 40, 0.45); }
+.rep-corr b {
+  flex: none; width: 48px; text-align: right; font-weight: 400;
+  font-family: var(--sz-font-mono); font-size: 11px; color: var(--sz-text);
+  font-variant-numeric: tabular-nums; font-variation-settings: 'wdth' 87.5;
+}

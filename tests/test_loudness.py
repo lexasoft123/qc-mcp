@@ -208,6 +208,20 @@ def test_analyze_only_computes_the_spectrum_when_asked():
     assert full["crest_db"] is not None, full
 
 
+def test_silence_on_the_measurement_pair_blames_routing_first():
+    """Host 5-8 carry only what a grid output block feeds them, so silence there is
+    almost always unrouted lanes — not the macOS permission trap."""
+    _need(HAVE_NUMPY, "numpy")
+    from qc_mcp import server
+    from qc_mcp import audio_io
+    audio_io.record = lambda seconds, channels=None: (np.zeros((RATE, 2)), RATE)
+    out = server.measure_loudness(seconds=1.0, channels=[5, 6])
+    assert out["silent"] is True, out
+    assert "no lane is routed" in out["error"], out["error"]
+    assert out["error"].index("routed") < out["error"].index("permission"), \
+        "the likely cause has to come first"
+
+
 # ------------------------------------------------------ channel safety rules ----
 def test_playing_on_host_outputs_1_to_4_is_refused():
     """Outputs 1-4 bypass The Grid and hit the analog jacks — full level to monitors."""

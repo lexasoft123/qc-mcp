@@ -557,11 +557,26 @@ def output_meter(hold_s: float = 1.0, detail: bool = False) -> dict:
     qc = _conn()
     msgs = qc.latest_broadcast("IOMeter", hold_s=hold_s)
     if not msgs:
+        # IOMeter is not in the handshake's subscribe list, so a session that never
+        # asked gets nothing. Cortex Control sends this CREATE on connect; do the
+        # same and listen again rather than reporting a dead meter.
+        try:
+            m = P.message_class("IOMeter")()
+            m.action = P.ACTION["CREATE"]
+            m.request_id = qc.next_request_id()
+            qc.send("IOMeter", m)
+        except Exception as e:                                # noqa: BLE001
+            return {"note": "no IOMeter update captured",
+                    "hint": "could not subscribe to the meter stream: %s" % e}
+        msgs = qc.latest_broadcast("IOMeter", hold_s=max(hold_s, 1.5))
+    if not msgs:
         return {"note": "no IOMeter update captured",
-                "hint": ("The device streams IOMeter continuously in bridge mode. If "
-                         "this stays empty, the session may be stale — disconnect() "
-                         "then connect() — or in direct mode the stream may need the "
-                         "app running to be subscribed.")}
+                "subscribed": True,
+                "hint": ("Subscribed and still nothing. The QC only sends meter frames "
+                         "while audio is actually moving — a silent rig produces none, "
+                         "so treat this as a resting state and play something. If it "
+                         "persists while playing, the session may be stale: "
+                         "disconnect() then connect().")}
 
     def fold(field):
         vals = [float(getattr(m, field, 0.0) or 0.0) for m in msgs]
@@ -688,6 +703,18 @@ def measure_loudness(seconds: float = 6.0, channels: list = None,
         data, rate = audio_io.record(seconds, channels=chans)
         out = loudness.analyze(data, rate, perceived=perceived)
         out["channels_recorded"] = list(chans)
+        if out.get("silent") and all(c >= 5 for c in chans):
+            # 5-8 carry ONLY what a grid output block is routed to, so silence here
+            # usually means no lane targets them — not a permission problem. Say the
+            # likely cause first; chasing the wrong one costs an afternoon.
+            out["error"] = (
+                "digital silence on USB %s. These channels carry only what a Grid USB "
+                "output block feeds them, so the usual cause is that no lane is routed "
+                "there — set the measured lane's out_portid to 14 (USB 5/6), which "
+                "measure_preset and the leveling tools do for you. If a lane IS routed "
+                "and it is still silent, then suspect microphone permission: on macOS a "
+                "denied grant returns silence rather than failing."
+                % "/".join(str(c) for c in chans))
         return out
     except Exception as e:
         return _audio_err(e)

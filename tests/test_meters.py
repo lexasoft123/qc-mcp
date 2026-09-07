@@ -115,6 +115,41 @@ def test_detail_adds_grid_and_usb_channels():
     assert len(out["usb_out"]) == 8 and len(out["usb_in"]) == 8, out["usb_out"].keys()
 
 
+class _SubscribingQC(_FakeQC):
+    """Silent until asked. IOMeter is not in the handshake's subscribe list, so a
+    session that never sent a CREATE hears nothing — the tool has to ask."""
+
+    def __init__(self, msgs_after_subscribe):
+        super().__init__([])
+        self.after = msgs_after_subscribe
+        self.sent = []
+
+    def next_request_id(self):
+        return 4242
+
+    def send(self, name, msg):
+        self.sent.append((name, getattr(msg, "action", None)))
+        self.msgs = self.after
+
+
+def test_an_unsubscribed_stream_is_subscribed_to_rather_than_declared_dead():
+    fake = _SubscribingQC([_meter(xlr_1=0.5)])
+    server._conn = lambda: fake
+    out = server.output_meter()
+    assert fake.sent and fake.sent[0][0] == "IOMeter", fake.sent
+    assert out["ports"]["xlr_1"]["peak"] == 0.5, out
+    assert out["samples"] == 1, out
+
+
+def test_still_silent_after_subscribing_says_so_plainly():
+    fake = _SubscribingQC([])
+    server._conn = lambda: fake
+    out = server.output_meter()
+    assert out.get("subscribed") is True, out
+    assert "play" in out["hint"].lower(), out["hint"]
+    assert "ports" not in out, "must not report zeros as if they were measurements"
+
+
 def test_empty_stream_returns_a_hint_not_a_crash():
     _with_qc([])
     out = server.output_meter()

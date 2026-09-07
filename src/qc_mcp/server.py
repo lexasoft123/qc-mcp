@@ -230,16 +230,25 @@ def _preset_summary(bp):
             info = catalog.lookup(m.hash) or {}
             cparams = info.get("params", [])
             params = {}
+            expr = {}
             for pos, p in enumerate(m.params):   # param index == array position
-                if not p.param_values or pos >= len(cparams):
+                if pos >= len(cparams):
+                    continue
+                if p.expression:
+                    expr[cparams[pos]["name"]] = {1: "Exp1 (CC#1)",
+                                                  2: "Exp2 (CC#2)"}.get(p.expression, p.expression)
+                if not p.param_values:
                     continue
                 nv = p.param_values[0].float_value
                 params[cparams[pos]["name"]] = round(catalog.to_display(m.hash, pos, nv), 3)
-            blocks.append({"slot": i, "model_hash": m.hash,
-                           "name": info.get("name", f"unknown#{m.hash}"),
-                           "category": info.get("category"),
-                           "based_on": info.get("tm", ""),
-                           "params": params})
+            b = {"slot": i, "model_hash": m.hash,
+                 "name": info.get("name", f"unknown#{m.hash}"),
+                 "category": info.get("category"),
+                 "based_on": info.get("tm", ""),
+                 "params": params}
+            if expr:
+                b["expression"] = expr   # param name -> assigned expression pedal
+            blocks.append(b)
         def lane_ctrl(models):
             for m in models:
                 if not m.hash:
@@ -980,6 +989,25 @@ def set_parameter_scenes(row: int, column: int, param_index: int, values: list,
     vals = [_norm(device_hash, param_index, v) if device_hash else v for v in values]
     _conn().set_param_scenes(row, column, param_index, vals)
     return f"Set param {param_index} across {len(vals)} scenes at row{row} col{column}."
+
+
+@mcp.tool()
+def assign_expression(row: int, column: int, param_index: int, expression: int,
+                      expr_min: float = 0.0, expr_max: float = 1.0) -> str:
+    """WRITE: assign a block parameter to an expression pedal — the Quad Cortex's
+    per-parameter MIDI handle (the QC has no direct per-parameter MIDI CC mapping;
+    expression pedals are the equivalent, driven over MIDI). `expression`: 0 = none
+    (clears the assignment), 1 = Expression Pedal 1 (driven by MIDI CC#1), 2 =
+    Expression Pedal 2 (MIDI CC#2 — no physical jack, MIDI-only). `expr_min`/`expr_max`
+    bound the swept range in NORMALIZED units (0.0-1.0 = full range); the param's value
+    then tracks the pedal/CC, so an unfed pedal rests it within that range. Discrete
+    dropdown params (e.g. Pitch Correction ROOT/MODE) can be assigned too, not just
+    knobs. Verify with get_current_preset — each block reports an `expression` map."""
+    if expression not in (0, 1, 2):
+        return "expression must be 0 (none), 1 (Exp 1 / CC#1), or 2 (Exp 2 / CC#2)."
+    _conn().assign_expression(row, column, param_index, expression, expr_min, expr_max)
+    pedal = {0: "cleared", 1: "Exp 1 (CC#1)", 2: "Exp 2 (CC#2)"}[expression]
+    return f"Assigned param {param_index} at row{row} col{column} -> {pedal}."
 
 
 @mcp.tool()

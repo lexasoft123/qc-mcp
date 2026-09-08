@@ -93,6 +93,25 @@ class QuadCortex:
         self.detect_version()
         return self
 
+    def _overheard_version(self, seconds=2.5):
+        """A Version message the APP asked for, taken off the shared wire.
+
+        Returns None if none arrives in the window — the caller then asks, once,
+        and accepts that Cortex Control will see that one reply.
+        """
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            self._collect(0.25)
+            for cmd, obj, _raw, _pb in reversed(self._pending):
+                if obj is None:
+                    continue
+                if cmd != P.NAME_TO_CMD.get("Version"):
+                    continue
+                # a READ going the other way has none of these filled in
+                if any(getattr(obj, f, "") for f in ("zenos_git_hash", "app_fw_version")):
+                    return obj
+        return None
+
     def detect_version(self):
         """Read the device's firmware and select the matching wire schema.
 
@@ -101,7 +120,25 @@ class QuadCortex:
         connection re-negotiates rather than assuming the newest generation.
         """
         v = None
+        # In BRIDGE mode, listen before asking.
+        #
+        # Cortex Control is handed every device->host report, including the
+        # replies to requests WE injected. It has no idea what they are: a
+        # Version READ we send comes back as a three-report message the app
+        # never asked for, and its reassembler dies on it —
+        #
+        #   CORTEX USB PROTOBUF MESSAGE PARSING ERROR {binaryToMessage:…,107}
+        #   Aborting due to signal: Segmentation fault: 11
+        #
+        # (measured: inject at 583730050, the reply 711ms later, the crash on
+        # the next report). The app announces its own Version on boot and again
+        # when it reconnects, so in bridge mode we take it off the wire instead
+        # of asking for one, and an idle bridge daemon stays silent.
+        if self.bridge:
+            v = self._overheard_version(seconds=2.5)
         for attempt in range(3):
+            if v is not None:
+                break
             try:
                 v = self.read_state("Version", timeout_ms=3000)
                 break

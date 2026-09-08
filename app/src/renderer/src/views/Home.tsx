@@ -255,6 +255,30 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
           )}
         </div>
 
+        {/* What the connected state is FOR.
+            The reward for finishing setup used to be one sentence — "Ask Claude
+            for a tone" — for a product with two halves. The bench, the pedal,
+            the measured loop and the report were reachable only by clicking a
+            tab labelled with a word most guitarists associate with mixing
+            desks, and nothing had given them a reason to press it. */}
+        {!busy && linked && (
+          <div className="home-next">
+            <div className="nx">
+              <span className="eyebrow">Ask Claude</span>
+              <p>Describe a tone and it gets built on the grid — blocks, routing, scenes and all.</p>
+              <q>a Vox-style clean with a slow tape echo, and a lead scene 3 dB up</q>
+            </div>
+            <button type="button" className="nx go" onClick={() => goto('leveling')}>
+              <span className="eyebrow">Level your setlist</span>
+              <p>
+                Your presets are different loudnesses. This measures each one with the
+                same riff and tells you what it needs.
+              </p>
+              <span className="nx-cta">Open the bench →</span>
+            </button>
+          </div>
+        )}
+
         {!busy && <p className="home-note">Every one of these has a detailed view under Console.</p>}
       </div>
     </div>

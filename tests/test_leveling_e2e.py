@@ -570,6 +570,60 @@ def test_apply_opens_the_preset_it_was_told_to():
     check("it opened the right slot", bench.opened == [("/f", 4)], bench.opened)
 
 
+# ── the riffs, reachable ─────────────────────────────────────────────────
+
+def test_the_bench_can_list_and_load_a_shipped_riff():
+    """The gap the review opened with: five riffs in the package and no way in.
+    A player without a guitar to hand could not start at all."""
+    import shutil
+    import tempfile
+    from qc_mcp import audio_io, riffs as R
+
+    dev = Device(Amp("p", 0.0))
+    bench = FakeBench(dev)
+    ops, _ev = _ops(bench)
+    check("riffs is offered", "riffs" in ops, sorted(ops))
+    check("use_riff is offered", "use_riff" in ops, sorted(ops))
+
+    listed = ops["riffs"]({})
+    names = [r["name"] for r in listed.get("riffs", [])]
+    check("all five are listed", len(names) == 5, names)
+    check("each carries a reason", all(len(r["why"]) > 30 for r in listed["riffs"]))
+    check("each carries a length", all(r["seconds"] > 2 for r in listed["riffs"]))
+
+    with tempfile.TemporaryDirectory() as d:
+        real_default = audio_io.DEFAULT_SAMPLE_PATH
+        real_dir = R.default_dir
+        audio_io.DEFAULT_SAMPLE_PATH = os.path.join(d, "reference_di.wav")
+        R.default_dir = lambda: os.path.join(d, "riffs")
+        try:
+            out = ops["use_riff"]({"name": "chords"})
+            check("loading one reports it", out.get("loaded") == "chords", out)
+            check("and it lands where measurements read from",
+                  os.path.exists(audio_io.DEFAULT_SAMPLE_PATH))
+            again = ops["riffs"]({})
+            check("and the list now knows which", again.get("loaded") == "chords", again)
+            check("and stops calling it a recording", again.get("recorded") is False, again)
+            bad = ops["use_riff"]({"name": "nope"})
+            check("an unknown riff is refused", "error" in bad, bad)
+            check("and nothing was named for it", not shutil.os.path.exists(
+                os.path.join(d, "riffs", "nope.wav")))
+        finally:
+            audio_io.DEFAULT_SAMPLE_PATH = real_default
+            R.default_dir = real_dir
+
+
+def test_a_loaded_riff_is_good_enough_to_measure_with():
+    """Whatever the bench offers has to pass the bar the verdict shows the user:
+    hotter than -12 dBFS peak and not mostly gaps."""
+    for name, _w, _s in riffs.catalogue():
+        a = riff(name)
+        r = loudness.analyze(a, RATE)
+        check("%s would pass the verdict" % name,
+              r["sample_peak_dbfs"] >= -12.0 and r["lufs_integrated"] >= -30.0,
+              (r["sample_peak_dbfs"], r["lufs_integrated"]))
+
+
 def _raises(exc, fn, *a, **kw):
     try:
         fn(*a, **kw)

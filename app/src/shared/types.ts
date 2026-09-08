@@ -262,6 +262,24 @@ export interface ApplyResult {
   error?: string
 }
 
+/** One of the riffs the bench brings itself. */
+export interface Riff {
+  name: string
+  why: string
+  seconds: number
+  path: string
+  rendered: boolean
+}
+
+export interface RiffList {
+  riffs: Riff[]
+  /** Which one is currently the reference, if it is one of ours. */
+  loaded: string | null
+  /** There is a reference riff and it was recorded, not chosen. */
+  recorded: boolean
+  error?: string
+}
+
 export interface ReportResult {
   target: number
   metric: string
@@ -434,6 +452,10 @@ export interface Api {
     autolevel(o?: { target?: number; tolerance?: number; dryRun?: boolean }): Promise<AutoResult>
     /** Write ONE proposed correction, exactly as shown — relative to where the
      *  fader is now, and recorded so Undo trims can put it back. */
+    /** The riffs the bench ships, and which is loaded. */
+    riffs(): Promise<RiffList>
+    /** Make one of them the reference every measurement plays. */
+    useRiff(name: string): Promise<SampleState & { loaded?: string; why?: string }>
     applyTrim(o: {
       folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
       row?: number; db: number

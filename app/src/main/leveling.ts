@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import type {
   ApplyResult, AudioState, AutoResult, LevelEvent, Measurement, Paths, PresetFolder, PresetState,
-  ReportResult, SampleState, SceneRow
+  ReportResult, RiffList, SampleState, SceneRow
 } from '../shared/types.js'
 import { exists } from './util.js'
 
@@ -282,6 +282,17 @@ export class Leveling {
    * change it, and Apply has to write THAT. Re-measuring here would let the
    * table describe a change nobody is going to make.
    */
+  /** The riffs the package ships, so nobody needs a guitar to start. */
+  async riffs(): Promise<RiffList> {
+    return (await this.call('riffs', {}, 30000)) as unknown as RiffList
+  }
+
+  async useRiff(name: string): Promise<SampleState> {
+    // Rendering the first time takes a moment of pure numpy; after that it is
+    // a file copy.
+    return (await this.call('use_riff', { name }, 60000)) as unknown as SampleState
+  }
+
   async applyTrim(o: {
     folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
     row?: number; db: number

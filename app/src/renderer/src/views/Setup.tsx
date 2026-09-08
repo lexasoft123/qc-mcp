@@ -28,6 +28,11 @@ export function Setup({ snap }: { snap: Snapshot }): React.JSX.Element {
     <div className="view">
       <div className="setup-head">
         <h1>Set up once, then forget it</h1>
+        <p className="fine setup-what">
+          Patchbay connects your Quad Cortex to Claude, so you can ask for a tone and have
+          it built on the grid — and it carries a bench for measuring your presets against
+          each other so a setlist plays at one level.
+        </p>
         <p className="fine">
           Patchbay checks the {COUNT[snap.checks.length] ?? snap.checks.length} things qc-mcp needs,
           and fixes the ones it can.{' '}

@@ -4,7 +4,8 @@ import type {
   AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, SceneRow,
   Snapshot
 } from '@shared/types'
-import { slotId } from '../derive.js'
+import { cleanError, slotId } from '../derive.js'
+import { MOD, SHORTCUTS, type Shortcut, matches, typing } from '../keys.js'
 import { act, say } from '../store.js'
 import { Knob } from '../components/Knob.js'
 import { Meter, loudest } from '../components/Meter.js'
@@ -14,6 +15,10 @@ import { LevelReport } from '../components/LevelReport.js'
 import { Scenes } from '../components/Scenes.js'
 import { Dock } from '../components/Dock.js'
 import { LevelingHelp } from '../modals/LevelingHelp.js'
+import { Shortcuts } from '../modals/Shortcuts.js'
+
+/** The last useful sentence of whatever went wrong, never the traceback. */
+const cleanish = (m: string): string => cleanError(m) ?? m
 
 const SCENES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 /** The QC grid is four rows, so every column reserves four lane slots and the
@@ -92,6 +97,14 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const [sceneAt, setSceneAt] = useState<number | null>(null)
   const [sceneSel, setSceneSel] = useState<number[]>([0, 1, 2, 3, 4, 5, 6, 7])
   const [hpLimit, setHpLimit] = useState(false)
+  /** Set by Stop; the run checks it between presets. A run used to be five
+   *  presets of nothing you could do, and realising at the second that the
+   *  riff was wrong meant waiting out three more. */
+  const abort = useRef(false)
+  const [runAt, setRunAt] = useState<{ n: number; total: number } | null>(null)
+  const [auditing, setAuditing] = useState<number | null>(null)
+  const [keysOpen, setKeysOpen] = useState(false)
+  const [playing, setPlaying] = useState(false)
 
   const live = snap.daemon.state === 'running'
   const slot: BenchSlot | undefined = bench[focus]
@@ -122,7 +135,10 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     const off = window.patchbay.leveling.onEvent((e: LevelEvent) => {
       if (e.event === 'meter') { setMeter(e.outputs); setHpLimit(Boolean(e.hp_limit)) }
       else if (e.event === 'autolevel') setAutoStep(e.step)
-      else if (e.event === 'measuring') setMeasuring(e.name)
+      else if (e.event === 'measuring') {
+        setMeasuring(e.name)
+        setRunAt({ n: e.index + 1, total: e.total })
+      }
       else if (e.event === 'measured') {
         setRows((r) => ({ ...r, [e.row.position]: e.row }))
       } else if (e.event === 'play') { setPlayTick((n) => n + 1) }
@@ -331,13 +347,162 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     setPicking(false)
   }
 
+  /**
+   * An error belongs on the row that produced it.
+   *
+   * Every failure path used to call setError on one string, so a run that
+   * failed on three presets showed the last one and lost the other two — in a
+   * bar at the bottom of the page, away from the thing that caused it.
+   */
+  const rowFail = useCallback((position: number, why: string): void => {
+    setRows((r) => ({ ...r, [position]: { ...(r[position] ?? { position }), error: why } }))
+  }, [])
+
+  /** Play the riff through the preset in front of you, or stop it. */
+  const togglePlay = useCallback(async (): Promise<void> => {
+    try {
+      if (playing) { await window.patchbay.leveling.sampleStopPlay(); setPlaying(false); return }
+      setPlaying(true)
+      await window.patchbay.leveling.samplePlay()
+    } catch (e) {
+      setError(cleanish((e as Error).message))
+    } finally {
+      setPlaying(false)
+    }
+  }, [playing])
+
+  // ── the report's actions, as functions ────────────────────────────────
+  //
+  // Named rather than inline, because the keyboard has to reach the same ones
+  // the buttons do. Every core action in this view was mouse-only, on a screen
+  // whose whole premise is that your hands are busy.
+
+  const wanted = useCallback(
+    (): number[] => chosen ?? bench.map((b) => b.position), [chosen, bench])
+
+  const measureAll = useCallback((): void => {
+    if (busyAll || bench.length === 0) return
+    abort.current = false
+    const want = wanted()
+    const list = bench.filter((b) => want.includes(b.position))
+    setBusyAll(true); setRows({}); setProposals({}); setError(null)
+    setRunAt({ n: 0, total: list.length })
+    void window.patchbay.leveling
+      .measureMany(
+        list.map((b) => ({
+          folder_key: b.folderKey, position: b.position, name: b.name, cloud_id: b.cloudId
+        })),
+        { target }
+      )
+      .catch((e: Error) => setError(cleanish(e.message)))
+      .finally(() => { setBusyAll(false); setMeasuring(null); setRunAt(null) })
+  }, [busyAll, bench, wanted, target])
+
+  const applyAll = useCallback((): void => {
+    if (busyAll) return
+    const want = wanted()
+    setBusyAll(true)
+    void (async () => {
+      for (const b of bench.filter((x) => want.includes(x.position))) {
+        if (abort.current) break
+        const r = rows[b.position]
+        const db = proposals[b.position] ?? r?.correction_db
+        if (db === null || db === undefined) continue
+        try {
+          const res = await window.patchbay.leveling.applyTrim({
+            folderKey: b.folderKey, position: b.position,
+            isFactory: false, cloudId: b.cloudId, row: r?.row, db
+          })
+          if (res.error) { rowFail(b.position, res.error); continue }
+          setApplied((a) => ({ ...a, [b.position]: res.applied_db }))
+          setSaved((v) => v.filter((p) => p !== b.position))
+          if (res.limited_by === 'range') {
+            rowFail(b.position,
+              `fader ran out — ${res.applied_db.toFixed(1)} of ${db.toFixed(1)} dB given`)
+          }
+        } catch (e) { rowFail(b.position, cleanish((e as Error).message)) }
+      }
+      setBusyAll(false)
+      void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
+    })()
+  }, [busyAll, bench, wanted, rows, proposals])
+
+  const saveAll = useCallback((): void => {
+    const pending = Object.keys(applied).map(Number).filter((p) => !saved.includes(p))
+    if (pending.length === 0 || busyAll) return
+    setBusyAll(true)
+    void (async () => {
+      for (const b of bench.filter((x) => pending.includes(x.position))) {
+        try {
+          await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
+          await window.patchbay.leveling.save()
+          setSaved((v) => (v.includes(b.position) ? v : [...v, b.position]))
+        } catch (e) { rowFail(b.position, cleanish((e as Error).message)) }
+      }
+      setBusyAll(false)
+    })()
+  }, [applied, saved, busyAll, bench])
+
+  const undoAll = useCallback((): void => {
+    if (Object.keys(applied).length === 0) return
+    void window.patchbay.leveling
+      .revertLevels()
+      .then(() => {
+        setApplied({}); setSaved([])
+        return window.patchbay.leveling.state().then(setPreset)
+      })
+      .catch((e: Error) => setError(cleanish(e.message)))
+  }, [applied])
+
+  /**
+   * Listen to the set, one preset after another.
+   *
+   * The reason anyone levels a setlist is so it sounds even, and until now
+   * there was no way to hear whether it did.
+   */
+  const audition = useCallback((): void => {
+    if (auditing !== null) { abort.current = true; return }
+    if (bench.length === 0) return
+    abort.current = false
+    const want = wanted()
+    const list = bench.filter((b) => want.includes(b.position))
+    void (async () => {
+      for (const b of list) {
+        if (abort.current) break
+        setAuditing(b.position)
+        try {
+          await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
+          await window.patchbay.leveling.samplePlay()
+        } catch (e) { rowFail(b.position, cleanish((e as Error).message)); break }
+      }
+      setAuditing(null)
+      abort.current = false
+    })()
+  }, [auditing, bench, wanted])
+
+  const stopRun = useCallback((): void => {
+    if (!busyAll && auditing === null) return
+    abort.current = true
+    if (auditing !== null) void window.patchbay.leveling.sampleStopPlay().catch(() => undefined)
+    say('Stopping after this preset', false)
+  }, [busyAll, auditing])
+
   // ── keyboard: the reason this tool exists ─────────────────────────────
 
   useEffect(() => {
+    const key = (cap: string): Shortcut => SHORTCUTS.find((k) => k.cap === cap)!
     const onKey = (e: KeyboardEvent): void => {
-      const el = e.target as HTMLElement
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return }
+      if (typing(e)) return
+
+      if (matches(e, key('P'))) { e.preventDefault(); void togglePlay(); return }
+      if (matches(e, key('M'))) { e.preventDefault(); measureAll(); return }
+      if (matches(e, key('L'))) { e.preventDefault(); audition(); return }
+      if (matches(e, key('esc'))) { e.preventDefault(); stopRun(); return }
+      if (matches(e, key(`${MOD}↵`))) { e.preventDefault(); applyAll(); return }
+      if (matches(e, key(`${MOD}Z`))) { e.preventDefault(); undoAll(); return }
+      if (matches(e, key(`${MOD}⇧S`))) { e.preventDefault(); saveAll(); return }
+      if (matches(e, key(`${MOD}S`))) { e.preventDefault(); save(); return }
+      if (matches(e, key(`${MOD}N`))) { e.preventDefault(); setPicking(true); return }
       if (e.metaKey || e.ctrlKey || e.altKey) return
 
       if (e.key === 'ArrowLeft') { e.preventDefault(); goto(focus <= 0 ? bench.length - 1 : focus - 1) }
@@ -346,9 +511,14 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       else if (e.key === 'ArrowDown') { e.preventDefault(); pickScene(Math.min(7, (preset?.scene ?? 0) + 1)) }
       else if (e.key === '-' || e.key === '_') { e.preventDefault(); commit(level - (e.shiftKey ? 0.1 : 0.5)) }
       else if (e.key === '=' || e.key === '+') { e.preventDefault(); commit(level + (e.shiftKey ? 0.1 : 0.5)) }
-      else {
-        const s = SCENES.indexOf(e.key.toUpperCase())
-        if (s >= 0) { e.preventDefault(); pickScene(s) }
+      else if (/^[1-9]$/.test(e.key)) {
+        // Straight to a slot. Arrows only walk, so the fifth preset was four
+        // presses away.
+        const i = Number(e.key) - 1
+        if (i < bench.length) { e.preventDefault(); goto(i) }
+      } else {
+        const s2 = SCENES.indexOf(e.key.toUpperCase())
+        if (s2 >= 0) { e.preventDefault(); pickScene(s2) }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -392,6 +562,22 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           Auto-save
         </label>
         <Button size="sm" onClick={() => setHelping(true)}>How this works</Button>
+        {(busyAll || auditing !== null) && (
+          <span className="lvl-run">
+            <span className="lvl-run-dot" />
+            {auditing !== null
+              ? 'Listening…'
+              : runAt
+                ? `Measuring ${runAt.n} of ${runAt.total}${measuring ? ` · ${measuring}` : ''}`
+                : 'Working…'}
+            <button type="button" onClick={stopRun}>Stop</button>
+          </span>
+        )}
+        <Button size="sm" disabled={bench.length === 0 || busyAll}
+                onClick={audition}
+                title="Play the riff through each preset in turn (L)">
+          {auditing !== null ? 'Stop' : 'Listen to the set'}
+        </Button>
         <Button size="sm" onClick={() => setPicking(true)}>Add preset…</Button>
       </div>
 
@@ -436,80 +622,33 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           const now = chosen ?? bench.map((b) => b.position)
           setChosen(now.includes(pos) ? now.filter((p) => p !== pos) : [...now, pos])
         }}
-        onMeasure={() => {
-          // A fresh measurement replaces the proposals: keeping an edit from
-          // the last run against a new number would be a proposal about
-          // nothing. What was already written stays, and stays marked.
-          setBusyAll(true); setRows({}); setProposals({}); setError(null)
-          const want = chosen ?? bench.map((b) => b.position)
-          void window.patchbay.leveling
-            .measureMany(
-              bench.filter((b) => want.includes(b.position)).map((b) => ({
-                folder_key: b.folderKey, position: b.position,
-                name: b.name, cloud_id: b.cloudId
-              })),
-              { target }
-            )
-            .catch((e: Error) => setError(e.message))
-            .finally(() => { setBusyAll(false); setMeasuring(null) })
-        }}
-        onApply={() => {
-          // Writes the number on the screen, one preset at a time — not a fresh
-          // decision per preset. Each Apply is a separate, undoable move of that
-          // preset's fader, and none of them touches the preset file.
-          const want = chosen ?? bench.map((b) => b.position)
-          setBusyAll(true)
+        onUndoOne={(pos) => {
+          const b = bench.find((x) => x.position === pos)
+          const db = applied[pos]
+          if (!b || db === undefined) return
           void (async () => {
-            for (const b of bench.filter((x) => want.includes(x.position))) {
-              const r = rows[b.position]
-              const db = proposals[b.position] ?? r?.correction_db
-              if (db === null || db === undefined) continue
-              try {
-                const res = await window.patchbay.leveling.applyTrim({
-                  folderKey: b.folderKey, position: b.position,
-                  isFactory: false, cloudId: b.cloudId, row: r?.row, db
-                })
-                if (res.error) { setError(res.error); break }
-                setApplied((a) => ({ ...a, [b.position]: res.applied_db }))
-                setSaved((v) => v.filter((p) => p !== b.position))
-                if (res.limited_by === 'range') {
-                  setError(`${b.name}: the fader ran out ${
-                    (res.short_by_db ?? 0) > 0 ? 'of headroom' : 'of travel'} — ` +
-                    `${res.applied_db.toFixed(1)} dB of ${db.toFixed(1)} given.`)
-                }
-              } catch (e) { setError((e as Error).message); break }
-            }
-            setBusyAll(false)
-            void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
+            try {
+              await window.patchbay.leveling.applyTrim({
+                folderKey: b.folderKey, position: b.position,
+                isFactory: false, cloudId: b.cloudId, row: rows[pos]?.row, db: -db
+              })
+              setApplied((a) => { const { [pos]: _g, ...rest } = a; return rest })
+              setSaved((v) => v.filter((p2) => p2 !== pos))
+            } catch (e) { rowFail(pos, cleanish((e as Error).message)) }
           })()
         }}
-        onSave={() => {
-          // Only a save makes a trim outlive the next preset change, and only
-          // for the presets that actually have one.
-          const pending = Object.keys(applied).map(Number).filter((p) => !saved.includes(p))
-          setBusyAll(true)
-          void (async () => {
-            for (const b of bench.filter((x) => pending.includes(x.position))) {
-              try {
-                await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
-                await window.patchbay.leveling.save()
-                setSaved((v) => (v.includes(b.position) ? v : [...v, b.position]))
-              } catch (e) { setError((e as Error).message); break }
-            }
-            setBusyAll(false)
-          })()
-        }}
-        onRevert={() => {
-          void window.patchbay.leveling
-            .revertLevels()
-            .then(() => {
-              setApplied({})
-              setSaved([])
-              return window.patchbay.leveling.state().then(setPreset)
-            })
-            .catch((e: Error) => setError(e.message))
-        }}
+        onMeasure={measureAll}
+        onApply={applyAll}
+        onSave={saveAll}
+        onRevert={undoAll}
       />
+
+      {/* Two tables that look alike and answer different questions. */}
+      <p className="lvl-divider fine">
+        Above: your presets against each other. Below: the scenes inside the one
+        preset in front of you — a different knob, because a lane has one output
+        level for the whole preset and a Gain block can hold eight.
+      </p>
 
       <Scenes
         rows={scenes}
@@ -661,13 +800,23 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
 
       <Dock outputs={meter} hpLimit={hpLimit} />
 
+      {/* Written from keys.ts, not by hand. The hand-written version listed
+          five bindings and left out `space`, which is the one you use most and
+          the only one that works with both hands on the guitar. */}
       <div className="lvl-keys fine">
-        <kbd>←</kbd><kbd>→</kbd> preset · <kbd>↑</kbd><kbd>↓</kbd> scene ·
-        <kbd>A</kbd>–<kbd>H</kbd> jump to scene · <kbd>−</kbd><kbd>+</kbd> level
-        (<kbd>⇧</kbd> fine) · <kbd>⌘S</kbd> save
+        {SHORTCUTS.filter((k) => k.scope === 'leveling' && !k.local).slice(0, 7).map((k) => (
+          <span key={k.cap}>
+            {k.cap.split(' ').map((c) => <kbd key={c}>{c}</kbd>)}
+            {' '}{k.does.split(' —')[0].split(' (')[0].toLowerCase()}
+          </span>
+        ))}
+        <button type="button" className="lvl-keys-all" onClick={() => setKeysOpen(true)}>
+          all shortcuts <kbd>?</kbd>
+        </button>
       </div>
 
       {helping && <LevelingHelp onClose={() => setHelping(false)} />}
+      {keysOpen && <Shortcuts onClose={() => setKeysOpen(false)} />}
       {picking && (
         <PresetPicker
           onClose={() => setPicking(false)}

@@ -93,6 +93,22 @@ differences. Nobody notices that while playing.
     riffs.catalogue()          # [(name, what it is for, seconds)]
     riffs.ensure("chords")     # -> path to a wav, rendered on first use
 
+The bench offers them over its own protocol — `riffs` lists them and says which
+is loaded, `use_riff` makes one the reference. Patchbay shows them beside the
+pedal, so nobody needs a guitar to see what the feature does. Loading COPIES the
+wav to the reference path rather than pointing at it, so playback, the waveform
+and the info panel keep reading one path and a later recording simply replaces
+it; "which riff is loaded" is then answered by comparing bytes, since a sidecar
+marker would go stale the moment the sampler wrote over the wav.
+
+### Keyboard
+
+Every binding is declared once, in `app/src/renderer/src/keys.ts`, and the
+legend and the `?` sheet are generated from it. They used to be written
+separately and had already drifted: the strip along the bottom of the bench
+listed five keys and omitted `space`, which is the one a player uses most and
+the only one that works with both hands on the guitar.
+
 ### Proposals, not changes
 
 Measuring produces a **proposal per preset**, and nothing is written until it is

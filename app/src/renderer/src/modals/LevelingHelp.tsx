@@ -1,4 +1,4 @@
-import { Button } from '@singz/ui'
+import { Button, Modal, ModalActions } from '@singz/ui'
 
 /**
  * How measured leveling works, in the order you do it.
@@ -36,41 +36,43 @@ const NEEDS: [string, string][] = [
 ]
 
 export function LevelingHelp({ onClose }: { onClose: () => void }): React.JSX.Element {
+  // The kit's Modal, not a hand-rolled scrim: three of the four dialogs here
+  // closed on Escape and this one did not, which is worse than none of them
+  // doing it. The kit has handled the scrim, the key and the focus since it
+  // replaced seven copies of the same mistake.
   return (
-    <div className="modal-scrim" onClick={onClose} role="presentation">
-      <div className="modal-card help-card" onClick={(e) => e.stopPropagation()}
-           role="dialog" aria-label="How measured leveling works">
-        <h2>Leveling by measurement</h2>
-        <p className="fine">
-          One riff of yours, played into every preset, so they can be compared on a
-          number instead of on memory. Five steps, and only the fourth changes anything.
-        </p>
+    <Modal onClose={onClose} cardClassName="help-card"
+           aria-label="How measured leveling works">
+      <h2>Leveling by measurement</h2>
+      <p className="fine">
+        One riff of yours, played into every preset, so they can be compared on a
+        number instead of on memory. Five steps, and only the fourth changes anything.
+      </p>
 
-        <div className="steps">
-          {STEPS.map(([title, body], i) => (
-            <div className="step" key={title}>
-              <span className="num">{i + 1}</span>
-              <div className="txt"><h3>{title}</h3><p>{body}</p></div>
-            </div>
-          ))}
-        </div>
-
-        <dl className="facts" style={{ marginTop: 16 }}>
-          {NEEDS.map(([k, v]) => (
-            <div className="fact" key={k}><dt>{k}</dt><dd>{v}</dd></div>
-          ))}
-        </dl>
-
-        <p className="fine" style={{ marginTop: 12 }}>
-          A capture that comes back as digital silence is reported as an error rather
-          than as a quiet preset — on macOS a denied microphone permission returns
-          silence instead of failing, and the two must not look alike.
-        </p>
-
-        <div className="modal-actions">
-          <Button variant="primary" onClick={onClose}>Got it</Button>
-        </div>
+      <div className="steps">
+        {STEPS.map(([title, body], i) => (
+          <div className="step" key={title}>
+            <span className="num">{i + 1}</span>
+            <div className="txt"><h3>{title}</h3><p>{body}</p></div>
+          </div>
+        ))}
       </div>
-    </div>
+
+      <dl className="facts" style={{ marginTop: 16 }}>
+        {NEEDS.map(([k, v]) => (
+          <div className="fact" key={k}><dt>{k}</dt><dd>{v}</dd></div>
+        ))}
+      </dl>
+
+      <p className="fine" style={{ marginTop: 12 }}>
+        A capture that comes back as digital silence is reported as an error rather
+        than as a quiet preset — on macOS a denied microphone permission returns
+        silence instead of failing, and the two must not look alike.
+      </p>
+
+      <ModalActions>
+        <Button variant="primary" onClick={onClose}>Got it</Button>
+      </ModalActions>
+    </Modal>
   )
 }

@@ -49,6 +49,7 @@ function Demo({ title, applied, saved, proposals }: {
           ...p, [pos]: Math.round(((p[pos] ?? ROWS[pos]?.correction_db ?? 0) + by) * 10) / 10
         }))}
         onResetProposal={(pos) => setProp((p) => { const { [pos]: _g, ...r } = p; return r })}
+        onUndoOne={() => {}}
         onMeasure={() => {}} onApply={() => {}} onSave={() => {}} onRevert={() => {}}
       />
     </div>

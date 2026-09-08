@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge, Button } from '@singz/ui'
-import type { AudioState, AutoResult, AutoStep, Measurement, SampleState } from '@shared/types'
+import type {
+  AudioState, AutoResult, AutoStep, Measurement, RiffList, SampleState
+} from '@shared/types'
 import { InputMeter, Pedal, Wave } from './Pedal.js'
 
 /**
@@ -153,6 +155,30 @@ export function Measured({
   }
 
   const state = (sample?.state ?? 'idle') as 'idle' | 'armed' | 'recording' | 'done'
+  const [riffs, setRiffs] = useState<RiffList | null>(null)
+  const [loadingRiff, setLoadingRiff] = useState<string | null>(null)
+
+  /* The riffs the bench brings itself. Fetched once the strip is live, because
+     until they were reachable the only way to start was to plug a guitar in —
+     and the first riff anyone records is usually not good enough to measure
+     with. */
+  useEffect(() => {
+    if (!live) return
+    void window.patchbay.leveling.riffs().then(setRiffs).catch(() => undefined)
+  }, [live])
+
+  const useRiff = async (name: string): Promise<void> => {
+    setLoadingRiff(name)
+    try {
+      const s2 = await window.patchbay.leveling.useRiff(name)
+      setSample(s2 as SampleState)
+      setRiffs(await window.patchbay.leveling.riffs())
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setLoadingRiff(null)
+    }
+  }
   const recording = state === 'recording'
   const armed = state === 'armed'
   const busyRecording = recording || armed
@@ -212,7 +238,7 @@ export function Measured({
         {ready && (
           <div className="lvl-measured-acts-head">
             <label className="lvl-measured-target">
-              Target
+              <abbr title="Broadcast loudness standard (EBU R128). -18 LUFS leaves headroom for a band and matches most amp models' own output.">Target</abbr>
               <select value={target} onChange={(e) => onTarget(Number(e.target.value))}
                       disabled={running}>
                 {TARGETS.map((t) => <option key={t} value={t}>{t} LUFS</option>)}
@@ -231,6 +257,34 @@ export function Measured({
           </div>
         )}
       </div>
+
+      {!busyRecording && riffs && riffs.riffs.length > 0 && (
+        <div className="riffs">
+          <span className="eyebrow">
+            {ready ? 'Or use one of ours' : 'No guitar to hand?'}
+          </span>
+          <div className="riff-row">
+            {riffs.riffs.map((r) => (
+              <button
+                type="button" key={r.name}
+                className={`riff${riffs.loaded === r.name ? ' on' : ''}`}
+                disabled={loadingRiff !== null}
+                title={r.why}
+                onClick={() => void useRiff(r.name)}
+              >
+                <b>{r.name}</b>
+                <span>{loadingRiff === r.name ? 'loading…' : `${r.seconds.toFixed(1)}s`}</span>
+              </button>
+            ))}
+          </div>
+          <p className="hint">
+            {riffs.loaded
+              ? riffs.riffs.find((r) => r.name === riffs.loaded)?.why
+              : 'Synthesised, always the same, and loud enough to measure with. '
+                + 'Recording your own is better — it is your playing — but these need no room and no guitar.'}
+          </p>
+        </div>
+      )}
 
       <div className="lvl-measured-body">
         <Pedal
@@ -271,6 +325,12 @@ export function Measured({
           ) : ready ? (
             <>
               <Wave peaks={peaks} height={72} />
+              {/* Say whether the take is any good. It used to show peak, LUFS
+                  and duration and leave the judgement to somebody who has no
+                  way to make it — and every number downstream depends on this
+                  one signal being loud and busy enough. The thresholds are the
+                  ones tests/test_leveling_e2e.py holds the shipped riffs to. */}
+              <Verdict peak={sample?.peak_dbfs ?? null} lufs={sample?.lufs ?? null} />
               <dl className="facts lvl-measured-facts">
                 <div className="fact"><dt>Duration</dt>
                   <dd>{(sample?.duration_s ?? 0).toFixed(2)} s</dd></div>
@@ -283,8 +343,9 @@ export function Measured({
               </dl>
               <div className="lvl-measured-acts">
                 <Button size="sm" disabled={playing}
-                        onClick={() => void (playing ? stopPlay() : play())}>
-                  {playing ? 'Stop' : 'Play through preset'}
+                        onClick={() => void (playing ? stopPlay() : play())}
+                        title="Hear the riff through this preset (P)">
+                  {playing ? 'Stop' : 'Play through preset'} <kbd>P</kbd>
                 </Button>
                 <Button size="sm" onClick={() => void arm()}>Re-record</Button>
                 <span className="grow" />
@@ -353,6 +414,41 @@ export function Measured({
           <Button size="sm" onClick={() => setErr(null)}>Dismiss</Button>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Is this take worth measuring with?
+ *
+ * A riff that is quiet or mostly gaps produces numbers that look exactly like
+ * preset differences. The first one ever recorded against this feature peaked
+ * at -22.8 dBFS with three-quarters of its samples near silence, and nothing
+ * anywhere said so — every reading taken with it was noise wearing a decimal
+ * point. This is the one cheap moment to catch that.
+ */
+function Verdict({ peak, lufs }: { peak: number | null; lufs: number | null }): React.JSX.Element | null {
+  if (peak === null) return null
+  const quiet = peak < -12
+  const thin = lufs !== null && lufs < -30
+  if (!quiet && !thin) {
+    return (
+      <div className="verdict good">
+        <span className="dot" />
+        Good to measure with — {peak.toFixed(1)} dBFS peak, plenty to hear through a preset.
+      </div>
+    )
+  }
+  return (
+    <div className="verdict bad">
+      <span className="dot" />
+      <span>
+        <b>Too quiet to measure with.</b>{' '}
+        {quiet
+          ? `It peaks at ${peak.toFixed(1)} dBFS; -12 or hotter gives a preset something to work on.`
+          : `It averages ${lufs?.toFixed(1)} LUFS — mostly gaps, so the gaps get measured.`}{' '}
+        Play harder and re-record, or use one of the sample riffs.
+      </span>
     </div>
   )
 }

@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   Api, ApplyResult, AudioState, AutoResult, CheckId, LevelEvent, LogLine, Measurement, Mode, Prefs,
-  PresetFolder, PresetState, Progress, ReportResult, SampleState, SceneRow, Snapshot
+  PresetFolder, PresetState, Progress, ReportResult, RiffList, SampleState, SceneRow,
+  Snapshot
 } from '../shared/types.js'
 
 /** Subscribe to a main-process push; returns the unsubscribe. */
@@ -72,6 +73,8 @@ const api: Api = {
       ipcRenderer.invoke('leveling:sampleDiscard') as Promise<SampleState>,
     measure: (perceived?: boolean) =>
       ipcRenderer.invoke('leveling:measure', perceived) as Promise<Measurement>,
+    riffs: () => ipcRenderer.invoke('leveling:riffs') as Promise<RiffList>,
+    useRiff: (name: string) => ipcRenderer.invoke('leveling:useRiff', name),
     applyTrim: (o: {
       folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
       row?: number; db: number

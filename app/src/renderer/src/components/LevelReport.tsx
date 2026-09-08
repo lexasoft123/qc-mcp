@@ -114,7 +114,8 @@ function Proposal({ db, edited, disabled, onChange, onNudge, onReset }: {
 
 export function LevelReport({
   slots, rows, target, metric, busy, progress, applied, saved, proposals, selected,
-  onToggle, onPropose, onNudge, onResetProposal, onMeasure, onApply, onSave, onRevert
+  onToggle, onPropose, onNudge, onResetProposal, onUndoOne,
+  onMeasure, onApply, onSave, onRevert
 }: {
   slots: BenchSlot[]
   /** Keyed by bench position; empty until measured. */
@@ -135,6 +136,7 @@ export function LevelReport({
   onPropose: (position: number, db: number) => void
   onNudge: (position: number, by: number) => void
   onResetProposal: (position: number) => void
+  onUndoOne: (position: number) => void
   onMeasure: () => void
   onApply: () => void
   onSave: () => void
@@ -179,13 +181,15 @@ export function LevelReport({
             Undo trims ({Object.keys(applied).length})
           </Button>
         )}
-        <Button size="sm" disabled={busy} onClick={onMeasure}>
-          {busy ? `Measuring ${progress ?? ''}…` : 'Measure all'}
+        <Button size="sm" disabled={busy} onClick={onMeasure}
+                title="Play the riff into every selected preset (M)">
+          {busy ? `Measuring ${progress ?? ''}…` : 'Measure all'} <kbd>M</kbd>
         </Button>
         <Button size="sm" variant="primary"
                 disabled={busy || selected.length === 0 || measured.length === 0}
-                onClick={onApply}>
-          Apply to {selected.length} on the device
+                onClick={onApply}
+                title="Moves faders on the device. Undoable, and it does not touch the preset files.">
+          Apply to {selected.length} · undoable
         </Button>
         {unsaved.length > 0 && (
           <Button size="sm" variant="primary" disabled={busy} onClick={onSave}>
@@ -199,7 +203,9 @@ export function LevelReport({
           <span />
           <span>Preset</span>
           <span className="right">{metric === 'perceived' ? 'N5 rel' : 'LUFS'}</span>
-          <span className="right">True pk</span>
+          <span className="right">
+            <abbr title="True peak in dBTP — the highest level between samples, which is what actually clips a converter. Above -1 is trouble.">True pk</abbr>
+          </span>
           <span className="right">Correction</span>
           <span className="right">Proposed&nbsp;dB</span>
         </div>
@@ -230,7 +236,10 @@ export function LevelReport({
                 )}
                 {s.name}
                 {saved.includes(s.position) && <Badge className="live">saved</Badge>}
-                {r?.error && <Badge className="bad">failed</Badge>}
+                {isUnsaved && (
+                  <button type="button" className="rowundo" title="Put this one fader back"
+                          onClick={() => onUndoOne(s.position)}>undo</button>
+                )}
               </span>
               <span className="num">
                 {live ? '…' : r?.measured !== undefined ? fmt(r.measured) : '—'}
@@ -245,6 +254,9 @@ export function LevelReport({
                 onNudge={(by) => onNudge(s.position, by)}
                 onReset={() => onResetProposal(s.position)}
               />
+              {/* On the row that produced it. One shared error string meant a
+                  run that failed three times showed the last one. */}
+              {r?.error && <span className="rep-err">{r.error}</span>}
             </div>
           )
         })}

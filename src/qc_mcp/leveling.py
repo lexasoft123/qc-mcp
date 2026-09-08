@@ -380,7 +380,8 @@ def measure_ops(bench, emit):
         return {k: stub for k in ("audio", "sample_arm", "sample_status",
                                   "sample_info", "sample_stop", "sample_discard",
                                   "sample_play", "sample_stop_play", "measure",
-                                  "autolevel", "revert_levels", "measure_many",
+                                  "autolevel", "apply_trim", "riffs", "use_riff",
+                                  "revert_levels", "measure_many",
                                   "measure_scenes", "level_scenes")}
 
     def audio(m):
@@ -549,6 +550,83 @@ def measure_ops(bench, emit):
             applied.pop((preset, row), None)
         return {"reverted": back, "remaining": len(applied)}
 
+    def do_riffs(m):
+        """The riffs the bench brings itself, and which one is loaded.
+
+        Recording was the only way to get a reference signal, and the one thing
+        known about recorded ones is that the first attempt is usually unusable
+        — the first riff played into this feature peaked at -22.8 dBFS with 74%
+        of its samples near silence. A player without a guitar to hand could not
+        start at all. These need no guitar and no room.
+        """
+        from . import riffs
+        import os
+        current = audio_io.DEFAULT_SAMPLE_PATH
+        loaded = _same_riff_as(current)
+        return {"riffs": [{"name": n, "why": w, "seconds": s2,
+                           "path": riffs.path_for(n),
+                           "rendered": os.path.exists(riffs.path_for(n))}
+                          for n, w, s2 in riffs.catalogue()],
+                "loaded": loaded,
+                "recorded": (os.path.exists(current) and loaded is None)}
+
+    def _same_riff_as(path):
+        """Which shipped riff is currently the reference, by content.
+
+        `use_riff` COPIES rather than points, so that playback, the waveform and
+        the info panel all keep reading one path and a later recording simply
+        replaces it. That makes path comparison useless — the copy is a
+        different file — and a sidecar marker would go stale the moment the
+        sampler wrote over the wav without knowing about it. The bytes cannot
+        lie, the files are a few hundred kilobytes, and it is read once when the
+        strip opens.
+        """
+        from . import riffs
+        import os
+        try:
+            size = os.path.getsize(path)
+            with open(path, "rb") as fh:
+                mine = fh.read()
+        except OSError:
+            return None
+        for name, _why, _secs in riffs.catalogue():
+            cand = riffs.path_for(name)
+            try:
+                if os.path.getsize(cand) != size:
+                    continue
+                with open(cand, "rb") as fh:
+                    if fh.read() == mine:
+                        return name
+            except OSError:
+                continue
+        return None
+
+    def do_use_riff(m):
+        """Make one of them the reference the bench measures with.
+
+        Rendered on first use and cached; the wav becomes the sample every
+        measurement plays, exactly as a recorded take would.
+        """
+        from . import riffs
+        import os
+        import shutil
+        name = m.get("name")
+        if not name:
+            return {"error": "which riff?"}
+        try:
+            src = riffs.ensure(name)
+        except KeyError:
+            return {"error": "no riff called %r" % name}
+        dest = audio_io.DEFAULT_SAMPLE_PATH
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        # Copied rather than pointed at, so everything downstream — playback,
+        # the waveform, the info panel — keeps reading one path and a later
+        # recording simply replaces it.
+        shutil.copyfile(src, dest)
+        info = audio_io.sample_info(dest) or {}
+        info.update({"loaded": name, "why": riffs.describe(name)})
+        return info
+
     def do_apply_trim(m):
         """Write ONE proposed correction — the number the report is showing.
 
@@ -644,6 +722,8 @@ def measure_ops(bench, emit):
         "level_scenes": guard(do_level_scenes),
         "autolevel": guard(do_autolevel),
         "apply_trim": guard(do_apply_trim),
+        "riffs": guard(do_riffs),
+        "use_riff": guard(do_use_riff),
         "revert_levels": guard(do_revert),
     }
 

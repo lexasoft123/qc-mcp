@@ -140,15 +140,33 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   `.` as a key-PATH separator, so `com.apple.security.cs.*` parses as five
   nested dicts and every insert fails with "Key path not found" — which strips
   exactly the entitlements injection depends on.
+- **One block per Grid UPDATE** — a chain message carrying several models only
+  places the first. But that one block may carry ALL its params with all 8
+  scene values + `scene_mode` flags at once (strings too). Lane sub-blocks
+  (input/output control, splitter, mixer) take ONE value per message; their
+  scene params need assign (`scene_mode:true`) + write per active scene.
+- **The bypass param index is the block's param count**, not always 4 (4 for a
+  4-param pedal, 7 for a capture — index 4 there is VOLUME). Bypass-map
+  row/column are array positions in a read, like everything else.
+- **`default_scene` = the scene active at save time.** Set the scene, then
+  File CREATE. A Grid UPDATE with `default_scene` is a no-op.
+- **File ops** (copy/delete/rename/setlist create, author rules): see
+  `docs/DIRECTORY.md` "File operations". Always send `type` explicitly.
+- **Never "rebuild" a preset from `describe()`** — it is a summary. A rebuild
+  verified only against it silently dropped the preset's MIDI out. Diff the
+  raw `BinaryPreset` (every field) before trusting a clone.
 - **Captures**: block hash 14000(V1)/14001(V2) + param[5] `file_name`=`<64hex key><name>`;
   also list the key in the preset's `factory_/product_dependencies`.
 - **Loading Downloads/Plugin presets** uses `key_in_downloads` (cloud_id) / plugin key, not
   folder+position. And **recalls REQUIRE `folder_key`** — a folderless SetlistPosition
   UPDATE is silently refused (device echoes the unchanged position back). `recall_preset`
   now defaults to the current folder and verifies the position actually moved.
-- Value taper: `min>0 and max/min>=5` ⇒ power taper (k≈1.667), else linear. Ranges
-  that are symbolic names in the XML need a calibrated entry in `catalog.SYMBOLIC`
-  or they fall through unconverted (raw 0-1).
+- **Value taper**: ModelRepo declares a JUCE `skew` on 773 params and `catalog.py`
+  honours it — `norm = ((display-lo)/(hi-lo))**skew`. Sanity anchor: Gain (16005) LEVEL
+  is −60..+12 dB, skew 3.8018, and 0 dB lands on norm **0.5** exactly. `LIN_SKEW`/
+  `LOG_SKEW` and skew-less params fall back to the heuristic: `min>0 and max/min>=5`
+  ⇒ power taper (k≈1.667), else linear. Ranges that are symbolic names in the XML
+  need a calibrated entry in `catalog.SYMBOLIC` or they fall through unconverted.
 - **Lane output level** = `LaneOutputControl`(23000) param 0 VOLUME, **-40..+12 dB**
   linear (0 dB = 0.769230783). It lives in `Chain.output_control`, so it is stored
   in the preset — the right knob for balancing presets against each other. PAN is
@@ -161,6 +179,50 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   other's frames and reads silently return `None` (telemetry still flows, so it
   looks like a dead session). `disconnect` the MCP before driving the device from
   a script.
+- **Every user-facing string goes through `t()`.** `app/src/shared/i18n/` holds
+  `en.ts` and `zh-CN.ts`, typed `Record<Key, string>` so a MISSING translation
+  is a compile error — but nothing catches a string that never went through
+  `t()` at all, which is how ~120 hard-coded English strings once landed in a
+  translated app. `app/tests/localized.test.ts` sweeps the renderer for bare
+  English JSX and checks both dictionaries for matching keys, `{vars}` and
+  balanced `**`/`` ` ``. `shared/session.ts` and `shared/run-plan.ts` translate
+  too, so the MAIN process narrates a plan in the user's language.
+- **Keyboard shortcuts are declared once**, in `app/src/renderer/src/keys.ts`;
+  the legend and the `?` sheet are generated from that list, and `shortcut(key)`
+  is the only way to look one up — `SHORTCUTS.find(...)!` returned undefined
+  after a rename and took every keydown in the window down with it.
+- **A bench run is ONE call that loops server-side.** Stopping it needs the
+  `cancel` op (`leveling.py` sets a flag `measure_many` reads between presets);
+  a client-side flag stops only what the renderer loops over itself — Apply and
+  the audition walk.
+- **The session lock is the single source of truth for who holds the device.**
+  `~/Library/Application Support/qc-mcp/session.json` (next to the socket;
+  `%LOCALAPPDATA%\qc-mcp\` on Windows) — `{pid, owner, mode, socket, firmware,
+  launched_by, app_pid}`. The daemon writes it after the device is open (never
+  before, so it cannot claim a session that failed to start) and releases it on
+  exit; a bare `qc-mcp` MCP server writes one too, because a stdio server that
+  opened the device itself was the contender nothing could see. **`pid` is the
+  liveness test** — a stale record reads as no owner, so a SIGKILLed daemon
+  leaves no lasting lie. Starting a daemon over a live owner raises
+  `lockfile.Held` with a sentence naming who, which pid and what mode; pass
+  `--takeover` only after actually stopping them. `--launched-by patchbay` is
+  what lets a reader tell our session from somebody else's: Patchbay stops what
+  it started and *evicts* (a named step, never a side effect) what it did not.
+  Do NOT go back to inferring this from `pgrep`, FIFO existence or a socket
+  probe — those three could each be true about a different world, which is what
+  the lock exists to end. **The socket and the lock are separate facts**: a
+  socket file outlives the process that made it, and a process can outlive its
+  socket (Patchbay's old `stop()` deleted an adopted daemon's socket without
+  killing it — device held, nobody served, nothing to see). `heldBy.serving`
+  is an actual connect, never `existsSync`.
+- **`os.kill(pid, 0)` is a KILL on Windows, not a probe.** Anything but
+  CTRL_C_EVENT/CTRL_BREAK_EVENT goes to `TerminateProcess` with the signal as
+  the exit code, so the POSIX "does this process exist" idiom would execute the
+  owner of the device on every read of the lock. `lockfile._alive_win32` uses
+  `OpenProcess` + `WaitForSingleObject` (not `GetExitCodeProcess`, whose
+  STILL_ACTIVE is 259 — also a legal exit code, so a process that exited with
+  259 would read as alive for ever). `tests/test_platform.py` guards both.
+  Node's `process.kill(pid, 0)` IS safe on Windows: libuv special-cases 0.
 - **CorOS version matters.** `connect`/`device_info` report `firmware` +
   `protocol_generation`; 4.1-only tools gate on `P.require(...)`. The device's
   human version is in `Version.zenos_git_hash` — `app_fw_version` is a build hash.
@@ -242,6 +304,15 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
 - Verified on Win10 22H2 x64 + CorOS 4.1.0: reads, the 8336-capture directory
   stream, open/close cycles, and the device-busy error. **Writes not yet run from
   Windows** (same `set_report` path, so no untested Windows code — but untried).
+- **Audio / measured leveling** (`loudness.py`, `audio_io.py`, `autolevel.py`; extra
+  `.[audio]`). Distinct from the Bench (`leveling.py`), which is the manual by-ear
+  service the Patchbay Leveling view attaches to. Measure on **host USB in 5/6**, never
+  3/4 — 3/4 is fed from the *analog outputs* so it folds master volume into the reading.
+  **Never play on host outputs 1–4**: they bypass The Grid straight to the analog jacks
+  (full level into the monitors); the code raises. Reamp = lane `in_portid=12` +
+  `out_portid=14`, both restored in a `finally`. A **silent capture means denied
+  microphone permission**, not a quiet preset — macOS returns silence rather than
+  failing. See docs/LEVELING.md + docs/METERS.md.
 
 ## Conventions
 - This is for interop/debugging on hardware you own + licensed software. Keep capture logs

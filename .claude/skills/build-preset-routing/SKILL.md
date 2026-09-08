@@ -131,7 +131,9 @@ lane. Params (display): `SOURCE` (0–44 — picks the tap), `BLEND` 0–100 %, 
   each at unity overloads the output. **Reduce each parallel lane's output volume** (Lane
   Output Control VOLUME, or the mixer level) so the summed level stays below clipping —
   order of −20·log₁₀(N) dB, e.g. ≈1/3 for three amps (default lane VOLUME is 0.769 → drop
-  the amp lanes to ~0.4–0.5). Verify against the output meter; leave headroom for the reverb.
+  the amp lanes to ~0.4–0.5). **Verify with `output_meter(hold_s=2)` while playing** —
+  `limiters.*` must all be false; leave headroom for the reverb. For a real number
+  rather than a meter, `measure_loudness()` gives LUFS + true peak (needs `.[audio]`).
 
 ## 4. Build gotchas that cause silent failures
 - **`clear_grid` needs working reads.** It deletes what it reads; if reads are empty,
@@ -154,6 +156,8 @@ was made robust this way (`bridge.py`, `transport.py`):
   ids use a high base to avoid colliding with the app's.
 - **Streamed telemetry** (CPULoad, IOMeter) is `request_id=0` broadcast — take the
   **latest** message, not the first buffered one (drain, then read).
+  `transport.latest_broadcast(name, hold_s)` does this; `cpu_load` and `output_meter`
+  both use it.
 - If reads still come back empty, **reconnect** (`disconnect`→`connect`) to revive a
   stale bridge session; `get_current_preset` also auto-reconnects+retries once.
 - **Only one reader on the bridge at a time.** The out FIFO is a single stream: if a
@@ -231,7 +235,11 @@ ad-hoc scripts for device control. The full toolbox:
 - **Footswitches:** `assign_stomp(row, column, 'A'-'H', kind, momentary)` /
   `unassign_stomp` (§7).
 - **Read / verify:** `get_current_preset`, `cpu_load(detail)`, `get_io_settings`,
-  `current_preset_position`, `device_info` (firmware + which features this unit has). The only non-MCP helper is `tools/gui/gui.py shot` for a
+  `current_preset_position`, `device_info` (firmware + which features this unit has),
+  **`output_meter(hold_s, detail)`** (per-port peak-hold in dB + limiter flags — the
+  fastest check for "is signal reaching the outputs / is it clipping"). With the
+  `.[audio]` extra: `measure_loudness()` and `suggest_levels()` compare presets by
+  measured loudness without writing anything (docs/LEVELING.md). The only non-MCP helper is `tools/gui/gui.py shot` for a
   *visual* wiring screenshot — verification, not control.
 
 If an operation has no tool yet, **add the MCP tool** rather than scripting it — keep the

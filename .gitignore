@@ -54,3 +54,5 @@ app/build/icon/ico/
 # .keys/ must never be committable. Also in .git/info/exclude, which covers
 # every worktree at once.
 .keys/
+# built output of the component harness (app/harness/README.md)
+app/harness/dist/

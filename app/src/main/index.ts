@@ -1,10 +1,13 @@
 import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron'
 import { join } from 'node:path'
-import type { CheckId, Mode, Prefs, Progress } from '../shared/types.js'
+import type { CheckId, Mode, Prefs, Progress, Snapshot } from '../shared/types.js'
+import type { Goal } from '../shared/session.js'
+import { modeSwitch } from '../shared/session.js'
 import * as clients from './clients.js'
 import * as cortex from './cortex.js'
 import * as install from './install.js'
 import * as logs from './logs.js'
+import * as session from './session.js'
 import * as state from './state.js'
 import * as updater from './updater.js'
 import { Leveling } from './leveling.js'
@@ -147,47 +150,80 @@ function handlers(): void {
     return state.push(true)
   })
 
-  ipcMain.handle('daemon:start', async () => {
-    await state.getDaemon().start(() => void state.push())
+  // ── connect / disconnect / mode ───────────────────────────────────────
+  //
+  // Every one of these is the same call: decide a plan from what is true, run
+  // it, report. They used to be six handlers that each did a piece — start the
+  // daemon, launch the app, write a preference — and pressing them in an order
+  // nobody had thought about left the app describing a session it did not have.
+  const pursue = async (goal: Goal, mode?: Mode): Promise<Snapshot> => {
+    const out = await session.pursue(goal, mode, (label) =>
+      emit('progress', { label, done: 0, total: 0 }))
+    emit('progress', {
+      label: out.error ?? 'Done', done: 1, total: 1, finished: true,
+      error: out.error ?? undefined
+    })
     return state.push()
-  })
+  }
+
+  ipcMain.handle('session:connect', () => pursue('connect'))
+  // Ending somebody else's session is its own verb, never a side effect of
+  // pressing Connect.
+  ipcMain.handle('session:takeOver', () => pursue('take-over'))
+  ipcMain.handle('session:disconnect', () => pursue('disconnect'))
+  ipcMain.handle('session:plan', (_e, goal: Goal, mode?: Mode) => session.preview(goal, mode))
+
+  ipcMain.handle('daemon:start', () => pursue('connect'))
   ipcMain.handle('daemon:stop', async () => {
     // the bench is an attached client of that session — it cannot outlive it
     leveling?.stop()
-    state.getDaemon().stop()
-    return state.push()
+    return pursue('disconnect')
   })
-  ipcMain.handle('daemon:mode', async (_e, mode: Mode) => {
+
+  /**
+   * Switching mode is a re-connect, not a preference write.
+   *
+   * Setting `prefs.mode` alone left a live bridge session running under a
+   * selector that said Direct. If nothing is connected the preference is all
+   * there is to change; if something is, the session is rebuilt to match.
+   */
+  /**
+   * Switching mode is a preference, and only ever a preference.
+   *
+   * With nothing connected it changes what Connect will do — no app is opened,
+   * no daemon started. With a session live it is refused: reshaping a session
+   * under the person using it is what Disconnect is for. Enforced here and not
+   * only in the view, so no other caller can route around it.
+   */
+  const setMode = async (mode: Mode): Promise<Snapshot> => {
+    const snap = state.current() ?? (await state.refresh())
+    const gate = modeSwitch(session.factsFrom(snap, false), snap.daemon.state !== 'stopped')
+    if (!gate.allowed) {
+      emit('progress', { label: gate.why!, done: 1, total: 1, finished: true, error: gate.why! })
+      return snap
+    }
     state.updatePrefs({ mode })
+    return state.push()
+  }
+
+  ipcMain.handle('daemon:mode', async (_e, mode: Mode) => setMode(mode))
+
+  ipcMain.handle('cortex:launch', () => pursue('show-app'))
+  ipcMain.handle('cortex:focus', () => pursue('show-app'))
+  ipcMain.handle('cortex:quit', async () => {
+    // Quitting the app under a bridge session kills the session's transport and
+    // leaves a daemon holding a dead FIFO. Take the session down first.
+    const snap = state.current() ?? (await state.refresh())
+    if (snap.daemon.state === 'running' && snap.daemon.session === 'bridge') {
+      leveling?.stop()
+      await session.pursue('disconnect', undefined, () => {})
+    }
+    await cortex.quit(state.getPaths().repo)
     return state.push()
   })
 
-  ipcMain.handle('cortex:launch', async () => {
-    const paths = state.getPaths()
-    const err = await cortex.launch(paths)
-    if (err) emit('progress', { label: err, done: 0, total: 0, finished: true, error: err })
-    // Wait for the bridge rather than just for the process: whoever starts the
-    // daemon next needs it actually open, or auto silently picks direct.
-    if (!err && IS_MAC && state.getPrefs().mode !== 'direct') {
-      emit('progress', { label: t('prog.openingApp'), done: 0, total: 0 })
-      const ok = await cortex.waitForBridge(paths.repo)
-      emit('progress', {
-        label: ok ? t('prog.appUp') : t('prog.appTimeout'),
-        done: 0, total: 0, finished: true
-      })
-    }
-    return state.push(true)
-  })
-  ipcMain.handle('cortex:focus', async () => {
-    await cortex.focus(state.getPaths())
-    return state.push()
-  })
-  ipcMain.handle('cortex:quit', async () => {
-    await cortex.quit()
-    return state.push()
-  })
   ipcMain.handle('cortex:rebuild', async () => {
-    await cortex.quit()
+    await cortex.quit(state.getPaths().repo)
     const err = await install.buildInstrumented(state.getPaths(), (p) => emit('progress', p))
     emit('progress', { label: err ?? t('prog.rebuilt'), done: 1, total: 1, finished: true, error: err ?? undefined })
     return state.push(true)
@@ -199,7 +235,10 @@ function handlers(): void {
 
   ipcMain.handle('prefs:get', () => state.getPrefs())
   ipcMain.handle('prefs:set', async (_e, patch: Partial<Prefs>) => {
-    state.updatePrefs(patch)
+    // The mode means the same thing in Preferences as it does on Home.
+    const { mode, ...rest } = patch
+    if (Object.keys(rest).length) state.updatePrefs(rest)
+    if (mode && mode !== state.getPrefs().mode) return setMode(mode)
     return state.push()
   })
 
@@ -232,6 +271,24 @@ function handlers(): void {
   ipcMain.handle('leveling:scene', (_e, index: number) => bench().scene(index))
   ipcMain.handle('leveling:save', (_e, name?: string) => bench().save(name))
   ipcMain.handle('leveling:meter', (_e, on: boolean) => bench().meter(on))
+  ipcMain.handle('leveling:audio', () => bench().audio())
+  ipcMain.handle('leveling:sampleArm', (_e, o) => bench().sampleArm(o ?? {}))
+  ipcMain.handle('leveling:sampleStatus', () => bench().sampleStatus())
+  ipcMain.handle('leveling:sampleInfo', () => bench().sampleInfo())
+  ipcMain.handle('leveling:sampleStop', () => bench().sampleStop())
+  ipcMain.handle('leveling:sampleDiscard', () => bench().sampleDiscard())
+  ipcMain.handle('leveling:measure', (_e, perceived?: boolean) => bench().measure(perceived))
+  ipcMain.handle('leveling:autolevel', (_e, o) => bench().autolevel(o ?? {}))
+  ipcMain.handle('leveling:applyTrim', (_e, o) => bench().applyTrim(o))
+  ipcMain.handle('leveling:cancel', () => bench().cancel())
+  ipcMain.handle('leveling:riffs', () => bench().riffs())
+  ipcMain.handle('leveling:useRiff', (_e, name: string) => bench().useRiff(name))
+  ipcMain.handle('leveling:samplePlay', () => bench().samplePlay())
+  ipcMain.handle('leveling:sampleStopPlay', () => bench().sampleStopPlay())
+  ipcMain.handle('leveling:revertLevels', () => bench().revertLevels())
+  ipcMain.handle('leveling:measureMany', (_e, presets, o) => bench().measureMany(presets, o ?? {}))
+  ipcMain.handle('leveling:measureScenes', (_e, o) => bench().measureScenes(o ?? {}))
+  ipcMain.handle('leveling:levelScenes', (_e, o) => bench().levelScenes(o ?? {}))
 
   ipcMain.handle('window:isMaximized', () => Boolean(win?.isMaximized()))
   ipcMain.on('window:minimize', () => win?.minimize())
@@ -269,7 +326,7 @@ async function tick(): Promise<void> {
     if (missing >= 2) {
       missing = 0
       leveling?.stop()
-      state.getDaemon().stop()
+      await state.getDaemon().stop()
       await state.push()
       return
     }
@@ -278,10 +335,15 @@ async function tick(): Promise<void> {
   }
 
   if (!snap.prefs.autoconnect) return
+  if (session.busy()) return                 // a plan is already running
   if (!snap.device.present || snap.daemon.state !== 'stopped') return
   if (snap.daemon.error || !snap.daemon.supported) return
   if (snap.checks.some((c) => c.fixable && c.status !== 'ok')) return
-  await state.getDaemon().start(() => void state.push())
+  // Through the plan, like every other route in. Starting the daemon directly
+  // here meant autoconnect in Bridge mode fired at a closed Cortex Control and
+  // failed on the daemon's own BridgeError — a connection the plan would have
+  // opened the app for first.
+  await session.pursue('connect', undefined, () => {})
   await state.push()
 }
 
@@ -322,5 +384,5 @@ app.on('before-quit', () => {
   updater.stop()
   leveling?.stop()
   state.getDaemon()?.stop()
-  if (state.getPrefs().quitApp) void cortex.quit()
+  if (state.getPrefs().quitApp) void cortex.quit(state.getPaths().repo)
 })

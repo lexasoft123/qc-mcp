@@ -14,6 +14,8 @@ severity with concrete fixes.
   params (display units), and per-lane `input_block`/`output_block` (VOLUME/PAN/MUTE/SOLO).
 - `cpu_load(detail=True)` — `total_percent`, `by_core_weight`, per-block cost + core.
 - `get_io_settings` — physical in/out config.
+- `output_meter(hold_s=2)` — per-port peak-hold + **limiter flags**, straight from the
+  device. Levels are relative (uncalibrated), the flags are not: use them for clipping.
 - **Screenshot the grid** (`tools/gui/gui.py home && shot`) — the only reliable way to see
   the actual wiring (orphaned lanes, merges). Read-vs-delta: in a full read, row = chain
   index, column = models-array index.
@@ -35,7 +37,13 @@ severity with concrete fixes.
 
 ### 3. Gain-staging & clipping  — *major*
 - **Parallel lanes SUM** — N amps at unity clip. Each parallel lane's output VOLUME should
-  be reduced (~−20·log₁₀N; ≈1/3 for three). Check the **output meter under playing**.
+  be reduced (~−20·log₁₀N; ≈1/3 for three). Check with **`output_meter(hold_s=2)` while
+  playing**: `any_limiting` must be false. Compare `grid_*` (pre output stage) against
+  `xlr_*` (post) with `detail=True` to tell a hot preset from a hot output level.
+- **Loudness vs its neighbours** (needs `.[audio]`): `suggest_levels()` reports how many
+  dB this preset is off the others — the usual cause of "sounds wrong next to my other
+  presets". `metric="perceived"` catches the case where a dense high-gain preset and a
+  clean measure the same LUFS but do not sound equally loud. See docs/LEVELING.md.
 - Amp OUTPUT / lane VOLUME level-matched so no single amp dominates the blend.
 - Drive/boost stack isn't producing unintended mush (see §6).
 

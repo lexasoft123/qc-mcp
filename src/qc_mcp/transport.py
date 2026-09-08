@@ -130,6 +130,37 @@ class QuadCortex:
         self._pending.clear()
         return live
 
+    @_serialized
+    def _overheard_version(self, seconds=2.5):
+        """A Version message the APP asked for, taken off the shared wire.
+
+        Returns None if none arrives in the window — the caller then asks, once,
+        and accepts that Cortex Control will see that one reply.
+
+        Serialized and self-clearing for the same reason every other exchange is:
+        `_pending` is shared, and listening for 2.5s fills it with whatever the
+        app was doing. The handshake clears it at the end for exactly this
+        reason, and bridge mode skips the handshake — so this has to.
+        """
+        want = P.NAME_TO_CMD.get("Version")
+        found = None
+        deadline = time.time() + seconds
+        try:
+            while found is None and time.time() < deadline:
+                self._collect(0.25)
+                for cmd, obj, _raw, _pb in reversed(self._pending):
+                    if obj is None or cmd != want:
+                        continue
+                    # a READ going the other way has none of these filled in
+                    if any(getattr(obj, f, "") for f in ("zenos_git_hash", "app_fw_version")):
+                        found = obj
+                        break
+        finally:
+            # Nothing overheard is ours to answer: drop it all rather than leave
+            # the app's traffic sitting where the next request() will sift it.
+            self._pending.clear()
+        return found
+
     def detect_version(self):
         """Read the device's firmware and select the matching wire schema.
 
@@ -138,7 +169,25 @@ class QuadCortex:
         connection re-negotiates rather than assuming the newest generation.
         """
         v = None
+        # In BRIDGE mode, listen before asking.
+        #
+        # Cortex Control is handed every device->host report, including the
+        # replies to requests WE injected. It has no idea what they are: a
+        # Version READ we send comes back as a three-report message the app
+        # never asked for, and its reassembler dies on it —
+        #
+        #   CORTEX USB PROTOBUF MESSAGE PARSING ERROR {binaryToMessage:…,107}
+        #   Aborting due to signal: Segmentation fault: 11
+        #
+        # (measured: inject at 583730050, the reply 711ms later, the crash on
+        # the next report). The app announces its own Version on boot and again
+        # when it reconnects, so in bridge mode we take it off the wire instead
+        # of asking for one, and an idle bridge daemon stays silent.
+        if self.bridge:
+            v = self._overheard_version(seconds=2.5)
         for attempt in range(3):
+            if v is not None:
+                break
             try:
                 v = self.read_state("Version", timeout_ms=3000)
                 break
@@ -336,6 +385,32 @@ class QuadCortex:
                 except Exception:
                     obj = None
                 self._pending.append((cmd, obj, raw, pb))
+
+    @_serialized
+    def latest_broadcast(self, command, hold_s=1.0, settle_s=0.25):
+        """Collect streamed telemetry for `hold_s` and return every fresh message.
+
+        Broadcast telemetry (CPULoad, IOMeter, LooperStatus) arrives unsolicited with
+        `request_id=0`, so `request()` cannot be used — it correlates on request_id.
+        The buffer also holds stale copies, so drop what is already queued first and
+        only then sample. Returns oldest-first; callers that want one value take
+        [-1], callers that want a peak-hold fold over the whole list.
+
+        Serialized for the same reason `request` is: this drains the shared `_pending`,
+        so running it alongside another exchange would eat that exchange's replies.
+        """
+        import time
+        want = command if isinstance(command, int) else P.NAME_TO_CMD[command]
+        self._pending = [t for t in self._pending if t[0] != want]
+        fresh = []
+        deadline = time.time() + max(hold_s, settle_s)
+        while time.time() < deadline:
+            self._collect(settle_s)
+            got = [obj for cmd, obj, raw, pb in self._pending
+                   if cmd == want and obj is not None]
+            self._pending = [t for t in self._pending if t[0] != want]
+            fresh.extend(got)
+        return fresh
 
     @_serialized
     def request(self, command, proto_message=None, proto_bytes=None,
@@ -691,6 +766,31 @@ class QuadCortex:
                 pv.int_value = i
             elif s is not None:
                 pv.string_value = s
+        self.send("Grid", g)
+
+    def assign_expression(self, row, column, param_index, expression,
+                          expr_min=0.0, expr_max=1.0):
+        """Assign a block parameter to an expression pedal (the QC's per-parameter
+        MIDI handle), matching the app's Grid UPDATE. `expression`: 0 = none (clears
+        the assignment), 1 = Expression Pedal 1 (driven by MIDI CC#1), 2 = Expression
+        Pedal 2 (MIDI CC#2, no physical jack). `expr_min`/`expr_max` bound the swept
+        range in NORMALIZED units (0.0-1.0 = full range). Decoded from a preset that
+        already carried assignments (ROOT->exp2, MODE->exp1). Like set_param, this is
+        a partial Param UPDATE: only the expression fields are sent, and the device's
+        field-level merge preserves the param's existing value and per-scene data
+        (verified — clearing an assignment leaves the value intact)."""
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        ch = g.preset.chains.add()
+        ch.row = row
+        m = ch.models.add()
+        m.column = column
+        p = m.params.add()
+        p.index = param_index
+        p.expression = int(expression)
+        p.expression_min = float(expr_min)
+        p.expression_max = float(expr_max)
         self.send("Grid", g)
 
     def set_scene(self, scene):

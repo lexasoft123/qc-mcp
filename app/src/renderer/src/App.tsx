@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, SegmentedControl, StatusDot, WindowButtons } from '@singz/ui'
 import { isMac, railText, regCount, sessionWord } from './derive.js'
 import { useSnapshot, useToast, useUpdate } from './store.js'
 import { t, tn } from './i18n.js'
-import { Gear } from './components/Icons.js'
+import { Gear, Keyboard } from './components/Icons.js'
 import { UpdateChip } from './components/Bits.js'
 import { Language } from './components/Language.js'
 import { Home } from './views/Home.js'
@@ -12,6 +12,8 @@ import { Setup } from './views/Setup.js'
 import { Logs } from './views/Logs.js'
 import { Leveling } from './views/Leveling.js'
 import { Prefs } from './modals/Prefs.js'
+import { Shortcuts } from './modals/Shortcuts.js'
+import { matches, shortcut, typing } from './keys.js'
 
 type View = 'home' | 'console' | 'leveling' | 'setup' | 'logs'
 
@@ -30,6 +32,44 @@ export function App(): React.JSX.Element {
   const update = useUpdate()
   const [view, setView] = useState<View>('home')
   const [prefs, setPrefs] = useState(false)
+  const [keysOpen, setKeysOpen] = useState(false)
+
+  /*
+   * Getting around, by key. The whole navigation was a mouse-only segmented
+   * control, which for a tool operated with a guitar in both hands is most of
+   * the tool being out of reach.
+   */
+  useEffect(() => {
+    const jump = shortcut('keys.views')
+    const sheet = shortcut('keys.thisList')
+    const settings = shortcut('prefs.open')
+
+    const onKey = (e: KeyboardEvent): void => {
+      if (typing(e)) return
+      if (matches(e, jump)) {
+        e.preventDefault()
+        setView(views()[Number(e.key) - 1].value)
+      } else if (matches(e, sheet)) {
+        e.preventDefault()
+        setKeysOpen((v) => !v)
+      } else if (matches(e, settings)) {
+        e.preventDefault()
+        setPrefs((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  /* A view change should move the caret to the new view, not leave it in the
+     titlebar so the next Tab starts the tour again. */
+  useEffect(() => {
+    const main = document.querySelector<HTMLElement>('.view')
+    if (!main) return
+    // -1 so it takes focus programmatically without joining the tab order
+    main.tabIndex = -1
+    main.focus({ preventScroll: true })
+  }, [view])
 
   // the kit's chrome only belongs on Windows; macOS keeps its traffic lights
   const onWindows = document.body.classList.contains('win')
@@ -57,13 +97,19 @@ export function App(): React.JSX.Element {
           <span>
             {live
               ? t('tb.session', { mode: sessionWord(snap), clients: tn('clients', n) })
-              : t('tb.stopped')}
+              : snap.daemon.state === 'starting'
+                ? t('tb.connecting')
+                : t('tb.stopped')}
           </span>
         </div>
         {/* The flag alone, beside the gear: the one control someone who cannot
             read the window needs to find, on every screen, without opening a
             dialog whose title they cannot read either. */}
         <Language snap={snap} compact />
+        <Button size="sm" icon title={t('keys.open')} aria-label={t('keys.open')}
+                onClick={() => setKeysOpen(true)}>
+          <Keyboard />
+        </Button>
         <Button size="sm" icon title={t('prefs.open')} aria-label={t('prefs.open')} onClick={() => setPrefs(true)}>
           <Gear />
         </Button>
@@ -92,6 +138,7 @@ export function App(): React.JSX.Element {
       </div>
 
       {prefs && <Prefs snap={snap} onClose={() => setPrefs(false)} />}
+      {keysOpen && <Shortcuts onClose={() => setKeysOpen(false)} />}
 
       {toast && (
         <div className={toast.bad ? 'toast bad' : 'toast'} key={toast.id}>

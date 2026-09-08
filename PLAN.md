@@ -1,5 +1,7 @@
 # Plan — preset-building capability (build multiamp-class presets)
 
+> See also [docs/PLAN-LEVELING.md](docs/PLAN-LEVELING.md) — loudness metering + automatic preset leveling (2026-09).
+
 ## 🎯 GOAL
 **Recreate an SRV-multiamp-like preset from a natural-language prompt.** i.e. Claude
 takes a request ("dual-amp SRV rig: clean Fender + driven Dumble blended in parallel,

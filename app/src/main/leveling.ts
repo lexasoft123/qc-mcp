@@ -1,5 +1,8 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import type { LevelEvent, Paths, PresetFolder, PresetState } from '../shared/types.js'
+import type {
+  ApplyResult, AudioState, AutoResult, LevelEvent, Measurement, Paths, PresetFolder, PresetState,
+  ReportResult, RiffList, SampleState, SceneRow
+} from '../shared/types.js'
 import { exists } from './util.js'
 import { t } from '../shared/i18n/index.js'
 
@@ -173,6 +176,157 @@ export class Leveling {
 
   async meter(on: boolean): Promise<boolean> {
     return (await this.call('meter', { on }, 8000)).metering as boolean
+  }
+
+  // ── the measured half ───────────────────────────────────────────────────
+  // These need the optional audio extra. The service answers with a plain
+  // `available: false` rather than failing, so the view can explain itself.
+
+  async audio(): Promise<AudioState> {
+    const r = await this.call('audio', {}, 10000)
+    return {
+      available: r.available === true,
+      error: r.error as string | undefined,
+      hint: r.hint as string | undefined,
+      quadCortex: (r.quad_cortex ?? null) as AudioState['quadCortex'],
+      sample: (r.sample ?? null) as string | null
+    }
+  }
+
+  async sampleArm(opts: { thresholdDbfs?: number; maxSeconds?: number } = {}) {
+    return (await this.call('sample_arm', {
+      threshold_dbfs: opts.thresholdDbfs ?? -40, max_seconds: opts.maxSeconds ?? 30
+    }, 10000)) as unknown as SampleState
+  }
+
+  async sampleStatus(): Promise<SampleState> {
+    return (await this.call('sample_status', {}, 8000)) as unknown as SampleState
+  }
+
+  /** Facts and envelope for the riff on disk, whoever recorded it and whenever. */
+  async sampleInfo(): Promise<SampleState> {
+    return (await this.call('sample_info', {}, 20000)) as unknown as SampleState
+  }
+
+  async sampleStop(): Promise<SampleState> {
+    return (await this.call('sample_stop', {}, 20000)) as unknown as SampleState
+  }
+
+  async sampleDiscard(): Promise<SampleState> {
+    return (await this.call('sample_discard', {}, 8000)) as unknown as SampleState
+  }
+
+  /**
+   * Play the riff through the preset and measure what comes back. Writes nothing.
+   *
+   * No row: the service finds the lane the signal enters on and the one it leaves
+   * by, which are routinely different. Naming a row here would only get that wrong.
+   */
+  async measure(perceived = false): Promise<Measurement> {
+    const r = await this.call('measure', { perceived }, 120000)
+    return (r.measurement ?? r) as unknown as Measurement
+  }
+
+  /**
+   * Measure, trim, verify — until the preset lands on target.
+   *
+   * Slow by nature: every iteration plays the whole riff. The service emits an
+   * `autolevel` event per pass so the view can follow rather than freeze, which
+   * is why the timeout here is generous.
+   */
+  /** Play the riff through the preset so it can be heard. Returns once started. */
+  async samplePlay(): Promise<{ playing: boolean; seconds: number }> {
+    return (await this.call('sample_play', {}, 20000)) as unknown as
+      { playing: boolean; seconds: number }
+  }
+
+  async sampleStopPlay(): Promise<void> {
+    await this.call('sample_stop_play', {}, 8000)
+  }
+
+  /** Put back every fader an applied trim moved. */
+  async revertLevels(): Promise<{ reverted: { row: number; db: number }[] }> {
+    return (await this.call('revert_levels', {}, 15000)) as unknown as
+      { reverted: { row: number; db: number }[] }
+  }
+
+  /** Measure every preset given and report what each needs. Writes nothing. */
+  async measureMany(
+    presets: { folder_key: string; position: number; name: string; cloud_id?: string }[],
+    o: { target?: number; metric?: string } = {}
+  ): Promise<ReportResult> {
+    return (await this.call('measure_many', {
+      presets, target: o.target ?? -18, metric: o.metric ?? 'lufs'
+      // Generous: every preset is a recall plus a full playback of the riff.
+    }, 600000)) as unknown as ReportResult
+  }
+
+  /** Measure every scene of the loaded preset. Writes nothing. */
+  async measureScenes(o: { target?: number; scenes?: number[] } = {}):
+    Promise<{ rows: SceneRow[] }> {
+    return (await this.call('measure_scenes', {
+      target: o.target ?? -18, scenes: o.scenes
+    }, 600000)) as unknown as { rows: SceneRow[] }
+  }
+
+  /** Write the per-scene trims. Explicit: nothing here happens by default. */
+  async levelScenes(o: { target?: number; scenes?: number[] } = {}): Promise<unknown> {
+    return await this.call('level_scenes', {
+      target: o.target ?? -18, scenes: o.scenes, dry_run: false
+    }, 600000)
+  }
+
+  /**
+   * Write one proposed correction, relative to where the fader is now.
+   *
+   * Separate from autolevel on purpose: the report shows a number, the user may
+   * change it, and Apply has to write THAT. Re-measuring here would let the
+   * table describe a change nobody is going to make.
+   */
+  /**
+   * Stop the run after the preset it is on.
+   *
+   * Deliberately its own op rather than a flag on the request: a measurement of
+   * a whole bench is ONE call that loops server-side, so there is nothing on
+   * this side to interrupt — the Stop button used to set a local flag that the
+   * loop never read, announce that it was stopping, and then measure every
+   * remaining preset anyway.
+   */
+  async cancel(): Promise<{ cancelling: boolean }> {
+    return (await this.call('cancel', {}, 10000)) as unknown as { cancelling: boolean }
+  }
+
+  /** The riffs the package ships, so nobody needs a guitar to start. */
+  async riffs(): Promise<RiffList> {
+    return (await this.call('riffs', {}, 30000)) as unknown as RiffList
+  }
+
+  async useRiff(name: string): Promise<SampleState> {
+    // Rendering the first time takes a moment of pure numpy; after that it is
+    // a file copy.
+    return (await this.call('use_riff', { name }, 60000)) as unknown as SampleState
+  }
+
+  async applyTrim(o: {
+    folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
+    row?: number; db: number
+  }): Promise<ApplyResult> {
+    return (await this.call('apply_trim', {
+      folder_key: o.folderKey, position: o.position,
+      is_factory: o.isFactory ?? false, cloud_id: o.cloudId ?? '',
+      row: o.row, db: o.db
+    }, 120000)) as unknown as ApplyResult
+  }
+
+  async autolevel(opts: {
+    target?: number; metric?: string; tolerance?: number; dryRun?: boolean
+  } = {}): Promise<AutoResult> {
+    return (await this.call('autolevel', {
+      target: opts.target ?? -18, metric: opts.metric ?? 'lufs',
+      // Reports by default: moving the player's faders is a separate decision
+      // from measuring, so it has to be asked for.
+      tolerance: opts.tolerance ?? 0.5, dry_run: opts.dryRun ?? true
+    }, 300000)) as unknown as AutoResult
   }
 }
 

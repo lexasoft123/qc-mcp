@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from qc_mcp import backend as B        # noqa: E402
+from qc_mcp import lockfile as L       # noqa: E402
 from qc_mcp import winhid              # noqa: E402
 from qc_mcp import server as S         # noqa: E402
 
@@ -431,6 +432,94 @@ def test_connect_docstring_states_the_platform_limits():
     assert "macOS" in doc and "Windows" in doc
     assert "interposer" in doc, "must explain the macOS mechanism"
     assert "NON-exclusive" in doc, "must explain the Windows mechanism"
+
+
+# ── the session lock ────────────────────────────────────────────────────
+
+def _code(fn):
+    """A function's source with comments and docstrings removed.
+
+    These checks are about what runs, and the first draft of them failed on
+    their own explanations — the comment saying why GetExitCodeProcess is wrong
+    read as a use of GetExitCodeProcess.
+    """
+    import io
+    import tokenize
+    src = inspect.getsource(fn)
+    out = []
+    prev_type = tokenize.INDENT
+    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+        if tok.type == tokenize.COMMENT:
+            continue
+        # a bare string right after a def/indent is a docstring
+        if tok.type == tokenize.STRING and prev_type in (tokenize.INDENT, tokenize.NEWLINE):
+            prev_type = tok.type
+            continue
+        if tok.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT):
+            out.append(tok.string)
+        prev_type = tok.type
+    return " ".join(out)
+
+def test_liveness_never_uses_os_kill_on_windows():
+    """`os.kill(pid, 0)` is not a probe on Windows — it is a kill.
+
+    Anything other than CTRL_C_EVENT/CTRL_BREAK_EVENT goes to TerminateProcess
+    with the signal as the exit code, so the POSIX idiom for "does this process
+    exist" would execute the owner of the device on every read of the lock. The
+    win32 branch must not reach os.kill at all.
+    """
+    src = _code(L._alive_win32)
+    assert "os.kill" not in src, "the Windows liveness check must not call os.kill"
+    assert "OpenProcess" in src and "WaitForSingleObject" in src
+
+    body = _code(L.alive)
+    assert "win32" in body, "alive() must branch on the platform"
+    assert body.index("win32") < body.index("os . kill"), \
+        "the win32 branch has to come first, or Windows falls through to os.kill"
+
+
+def test_win32_liveness_uses_wait_not_exit_code():
+    """GetExitCodeProcess reports STILL_ACTIVE as 259, which is also a legal exit
+    code: a process that exited with 259 would read as alive for ever."""
+    src = _code(L._alive_win32)
+    assert "GetExitCodeProcess" not in src
+    assert "WAIT_TIMEOUT" in src
+
+
+def test_lock_lives_beside_the_socket_on_both_platforms():
+    """One directory holds the whole session, wherever that directory is."""
+    for sock in ("/Users/x/Library/Application Support/qc-mcp/daemon.sock",
+                 r"C:\Users\x\AppData\Local\qc-mcp\daemon.sock"):
+        p = L.path(sock)
+        assert p.endswith("session.json")
+        assert os.path.dirname(p) == os.path.dirname(sock)
+
+
+def test_lock_reads_and_writes_are_pure_stdlib():
+    """No POSIX-only calls in the paths every platform runs: the lock is read on
+    whichever machine holds the device, and a NameError there is a lie about
+    ownership rather than an error anybody sees."""
+    for fn in (L.read, L.read_raw, L.acquire, L.release, L.update, L._write):
+        src = _code(fn)
+        for posix_only in ("fcntl", "os.fork", "pwd", "grp", "os.getuid"):
+            assert posix_only not in src, "%s uses %s" % (fn.__name__, posix_only)
+
+
+def test_stale_records_need_no_cleanup_to_stop_lying():
+    """The pid IS the liveness test, so nothing has to tidy up after a crash —
+    which is what lets the file be advisory rather than an OS lock."""
+    import json
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        sock = os.path.join(d, "daemon.sock")
+        L._write(L.path(sock), {"pid": 999_999_999, "owner": "daemon", "mode": "direct"})
+        assert L.read(sock) is None, "a dead owner still read as an owner"
+        assert L.read_raw(sock)["pid"] == 999_999_999, "the record should still be inspectable"
+        # ...and claiming it needs no --takeover
+        rec = L.acquire("daemon", "bridge", sock)
+        assert rec["pid"] == os.getpid()
+        assert json.loads(open(L.path(sock)).read())["owner"] == "daemon"
+        L.release(sock)
 
 
 if __name__ == "__main__":

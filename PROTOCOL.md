@@ -433,11 +433,14 @@ and scene names/colors. Additions/corrections from the manual:
 - **Global EQ** is assignable to one or both output pairs (1/2, 3/4).
 - **Deleting a User Setlist permanently deletes all presets in it** — never automate
   setlist deletion.
-- **Device variants:** Quad Cortex mini (own manual) differs materially — 4 scenes
-  (A–D), 4-preset banks, and **bypass is NOT scene-assignable** on the mini. Facts
-  in this document were verified on a full-size unit ("QC MAX"); don't assume they
-  transfer to the mini. `VersionMessage.device_type` distinguishes them:
-  `QC = 0`, `ATMA = 1` (the mini).
+- **Device variants:** Quad Cortex mini (own manual) differs in presentation, not
+  on the wire (checked on a mini, CorOS 4.1.0, 2026-09): it has the same **8
+  scenes** — protocol indices 0–7 — shown as `AI BI CI DI / AII BII CII DII`
+  instead of A–H; setlist positions are shown in **banks of 4** (index 4 = 2A,
+  index 30 = 8C), and **per-scene bypass works** (the bypass map takes
+  `sceneMode` + eight `sceneBypass` flags and reads back). Every message in this
+  document behaved identically on the mini. `VersionMessage.device_type`
+  distinguishes them: `QC = 0`, `ATMA = 1` (the mini).
 
 Re-checked against the **4.1.0** manual 2026-08-27, which confirms the reversed
 4.1 behaviour: Virtual Device Presets cover "most virtual devices, I/O Settings,

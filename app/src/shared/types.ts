@@ -60,10 +60,34 @@ export interface CortexInfo {
   version: string | null
   running: boolean
   pid: number | null
+  /** The running app is the instrumented copy, not the stock one (macOS). */
+  runningInstrumented?: boolean
   /** macOS only */
   instrumented: InstrumentedInfo | null
   /** the source app moved past the instrumented copy (macOS only) */
   needsRebuild: boolean
+}
+
+/**
+ * The session lock — who holds the Quad Cortex, and how.
+ *
+ * Written by whoever opened the device (qc_mcp/lockfile.py), read by everyone.
+ * It is the answer to "what is running", replacing three inferences that could
+ * each be true about a different world.
+ */
+export interface SessionLock {
+  pid: number
+  /** 'daemon' serves clients; 'mcp' is a stdio server that opened the device
+   *  itself; 'bench' is the leveling service. */
+  owner: 'daemon' | 'mcp' | 'bench'
+  mode: SessionMode
+  socket: string
+  startedAt: number | null
+  firmware: string | null
+  /** 'patchbay' for one we started — anything else is somebody else's. */
+  launchedBy: string | null
+  /** The Cortex Control a bridge or shared session rides, when there is one. */
+  appPid: number | null
 }
 
 export interface DaemonInfo {
@@ -74,6 +98,8 @@ export interface DaemonInfo {
   mode: Mode
   /** The mode the running daemon reported, or null before it has said. */
   session: SessionMode | null
+  /** Running, but started outside this app — adopted, not spawned. */
+  external?: boolean
   /** false once we have proven this qc-mcp build has no daemon entry point */
   supported: boolean
   error: string | null
@@ -137,6 +163,8 @@ export interface Snapshot {
   checks: Check[]
   clients: ClientTarget[]
   daemon: DaemonInfo
+  /** Who holds the device, from the record they wrote. Null when nobody does. */
+  lock: SessionLock | null
   cortex: CortexInfo
   device: DeviceInfo
   prefs: Prefs
@@ -208,10 +236,161 @@ export interface MeterOutput {
   limit?: number
 }
 
+/** One scene's line in the per-scene report. */
+export interface SceneRow {
+  scene: number
+  name?: string | null
+  measured?: number | null
+  true_peak?: number | null
+  correction_db?: number | null
+  /** The true-peak guard would cap this trim. */
+  limited?: boolean
+  /** No data of its own — the device answers with scene A's, so it is skipped. */
+  undefinedScene?: boolean
+  error?: string | null
+}
+
+/** One preset's line in the level report. */
+export interface ReportRow {
+  position: number
+  name?: string
+  row?: number
+  lufs?: number | null
+  n5?: number | null
+  true_peak?: number | null
+  /** The metric being levelled by — LUFS, or relative sones when perceived. */
+  measured?: number | null
+  correction_db?: number | null
+  error?: string | null
+}
+
+/** What one Apply did — the number written, and where the fader landed. */
+export interface ApplyResult {
+  row: number
+  /** dB actually given, after the fader's own ends. */
+  applied_db: number
+  from_db: number
+  db: number
+  preset?: string | null
+  position?: number
+  limited_by?: 'range'
+  short_by_db?: number
+  knob_limit_db?: number
+  error?: string
+}
+
+/** One of the riffs the bench brings itself. */
+export interface Riff {
+  name: string
+  why: string
+  seconds: number
+  path: string
+  rendered: boolean
+}
+
+export interface RiffList {
+  riffs: Riff[]
+  /** Which one is currently the reference, if it is one of ours. */
+  loaded: string | null
+  /** There is a reference riff and it was recorded, not chosen. */
+  recorded: boolean
+  error?: string
+}
+
+export interface ReportResult {
+  target: number
+  metric: string
+  rows: ReportRow[]
+  spread: number | null
+  /** The run stopped early because Stop was pressed. */
+  cancelled?: boolean
+}
+
 export type LevelEvent =
-  | { event: 'meter'; at: number; outputs: Record<string, MeterOutput> }
+  | {
+      event: 'meter'; at: number; outputs: Record<string, MeterOutput>
+      /** One flag for both headphone channels, not one each. */
+      hp_limit?: boolean
+    }
   | { event: 'stopped'; error: string | null }
   | { event: 'fatal'; error: string }
+  | { event: 'autolevel'; row: number; step: AutoStep }
+  | { event: 'measuring'; index: number; name: string; total: number }
+  | { event: 'measured'; row: ReportRow }
+  | { event: 'cancelled'; done: number; total: number }
+  | { event: 'play'; done?: boolean; error?: string }
+  | { event: 'scene_measuring'; scene: number }
+  | { event: 'scene_measured'; row: SceneRow }
+
+/** One measure->correct pass of the automatic loop. */
+export interface AutoStep {
+  n: number
+  /** LUFS, or relative sones when levelling by perceived loudness. */
+  measured: number | null
+  /** How far off target this reading was, in dB. */
+  delta_db: number | null
+  true_peak_dbtp: number | null
+  /** The trim written after this reading; null on the first, measure-only pass. */
+  wrote_db: number | null
+  limited_by?: 'true_peak'
+  backed_off_to_db?: number
+}
+
+/** What one capture measured. Everything is null when it could not be measured. */
+export interface Measurement {
+  duration_s: number
+  silent: boolean
+  sample_peak_dbfs: number | null
+  lufs_integrated?: number | null
+  true_peak_dbtp?: number | null
+  rms_dbfs?: number | null
+  zwicker_n5_rel?: number | null
+  /** Present when the capture cannot be trusted — silence, below the gate, too short. */
+  error?: string
+}
+
+export interface AutoResult {
+  target: number
+  metric: string
+  iterations: AutoStep[]
+  written: boolean
+  converged?: boolean
+  limited?: boolean
+  final_delta_db?: number | null
+  final_trim_db?: number | null
+  suggested_db?: number
+  trim_block?: { row: number; knob: string; column?: number; added?: boolean }
+  error?: string
+}
+
+/** The reference riff the measured half plays into every preset. */
+export interface SampleState {
+  state: 'idle' | 'armed' | 'recording' | 'done'
+  seconds_recorded: number
+  input_dbfs: number | null
+  threshold_dbfs: number
+  max_seconds: number
+  silence_seconds: number
+  error?: string | null
+  /** Peak envelope of the take, 0..1 — what the waveform draws. The audio itself
+   *  runs to tens of megabytes and this crosses a socket on every poll. */
+  peaks?: number[]
+  /** Set once the take is kept. */
+  path?: string
+  duration_s?: number
+  peak_dbfs?: number | null
+  lufs?: number | null
+}
+
+/** Whether the optional audio extra is installed, and what it can see. */
+export interface AudioState {
+  available: boolean
+  error?: string
+  hint?: string
+  quadCortex: { index: number; name: string; inputs: number; outputs: number } | null
+  /** Path of the stored reference riff, or null when none has been recorded. */
+  sample: string | null
+}
 
 export type LogDirection = 'tx' | 'rx' | 'sys' | 'err'
 
@@ -259,6 +438,11 @@ export interface Api {
 
   setClients(ids: string[]): Promise<Snapshot>
 
+  /** Decide a plan from what is true, run it. The one entry point for the button. */
+  connect(): Promise<Snapshot>
+  disconnect(): Promise<Snapshot>
+  /** End the session the lock names, then connect. */
+  takeOver(): Promise<Snapshot>
   daemonStart(): Promise<Snapshot>
   daemonStop(): Promise<Snapshot>
   setMode(mode: Mode): Promise<Snapshot>
@@ -304,6 +488,37 @@ export interface Api {
     save(name?: string): Promise<{ name: string; position: number }>
     meter(on: boolean): Promise<boolean>
     onEvent(cb: (e: LevelEvent) => void): () => void
+
+    /** The measured half. Needs the optional audio extra; `audio()` says whether. */
+    audio(): Promise<AudioState>
+    sampleArm(o?: { thresholdDbfs?: number; maxSeconds?: number }): Promise<SampleState>
+    sampleStatus(): Promise<SampleState>
+    sampleInfo(): Promise<SampleState>
+    sampleStop(): Promise<SampleState>
+    sampleDiscard(): Promise<SampleState>
+    measure(perceived?: boolean): Promise<Measurement>
+    autolevel(o?: { target?: number; tolerance?: number; dryRun?: boolean }): Promise<AutoResult>
+    /** Write ONE proposed correction, exactly as shown — relative to where the
+     *  fader is now, and recorded so Undo trims can put it back. */
+    /** Ask the running measurement to stop after the preset it is on. */
+    cancel(): Promise<{ cancelling: boolean }>
+    /** The riffs the bench ships, and which is loaded. */
+    riffs(): Promise<RiffList>
+    /** Make one of them the reference every measurement plays. */
+    useRiff(name: string): Promise<SampleState & { loaded?: string; why?: string }>
+    applyTrim(o: {
+      folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
+      row?: number; db: number
+    }): Promise<ApplyResult>
+    samplePlay(): Promise<{ playing: boolean; seconds: number }>
+    sampleStopPlay(): Promise<void>
+    revertLevels(): Promise<{ reverted: { row: number; db: number }[] }>
+    measureMany(
+      presets: { folder_key: string; position: number; name: string; cloud_id?: string }[],
+      o?: { target?: number; metric?: string; }
+    ): Promise<ReportResult>
+    measureScenes(o?: { target?: number; scenes?: number[] }): Promise<{ rows: SceneRow[] }>
+    levelScenes(o?: { target?: number; scenes?: number[] }): Promise<unknown>
   }
 
   window: {

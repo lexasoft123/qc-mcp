@@ -131,6 +131,9 @@ function handlers(): void {
   }
 
   ipcMain.handle('session:connect', () => pursue('connect'))
+  // Ending somebody else's session is its own verb, never a side effect of
+  // pressing Connect.
+  ipcMain.handle('session:takeOver', () => pursue('take-over'))
   ipcMain.handle('session:disconnect', () => pursue('disconnect'))
   ipcMain.handle('session:plan', (_e, goal: Goal, mode?: Mode) => session.preview(goal, mode))
 

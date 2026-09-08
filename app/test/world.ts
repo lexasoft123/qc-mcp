@@ -20,7 +20,21 @@ export type World = Facts & {
 }
 
 export const MODES: Mode[] = ['auto', 'bridge', 'direct']
-export const GOALS: Goal[] = ['connect', 'disconnect', 'show-app']
+export const GOALS: Goal[] = ['connect', 'disconnect', 'show-app', 'take-over']
+
+/** Every shape the session lock can take, including nobody. */
+export const HOLDERS: Facts['heldBy'][] = [
+  null,
+  { owner: 'daemon', mode: 'bridge', ours: true, adoptable: true },
+  { owner: 'daemon', mode: 'direct', ours: true, adoptable: true },
+  { owner: 'daemon', mode: 'shared', ours: true, adoptable: true },
+  { owner: 'daemon', mode: 'bridge', ours: false, adoptable: true },
+  { owner: 'daemon', mode: 'direct', ours: false, adoptable: true },
+  { owner: 'daemon', mode: 'shared', ours: false, adoptable: true },
+  { owner: 'mcp', mode: 'direct', ours: false, adoptable: false },
+  { owner: 'mcp', mode: 'bridge', ours: false, adoptable: false },
+  { owner: 'bench', mode: 'bridge', ours: false, adoptable: false }
+]
 
 /**
  * Worlds that can actually exist. Enumerating the raw cross product produces
@@ -49,6 +63,25 @@ export function coherent(f: Facts): boolean {
   // direct means the daemon holds the device alone
   if (f.daemonSession === 'direct' && f.cortexRunning) return false
   if (f.daemonRunning && !f.devicePresent) return false
+
+  // --- the lock has to agree with the rest of the world -------------------
+  const h = f.heldBy
+  // a session we are serving is a session somebody holds, and vice versa for
+  // the daemon case: the daemon writes the lock when it opens the device
+  if (f.daemonRunning && !h) return false
+  if (h && h.owner === 'daemon' && h.ours && !f.daemonRunning) return false
+  if (f.daemonRunning && h && h.owner === 'daemon' && h.ours && h.mode !== f.daemonSession) return false
+  // A foreign daemon CAN be serving us: joining one is adoption, and then the
+  // session is running while the lock still names them. Anything else foreign
+  // cannot coexist with a daemon of ours.
+  if (f.daemonRunning && h && !h.ours &&
+      !(h.owner === 'daemon' && h.adoptable && h.mode === f.daemonSession)) return false
+  if (h && h.mode === 'direct' && f.cortexRunning) return false
+  if (h && h.mode === 'bridge' && !f.bridgeReady) return false
+  if (h && h.mode === 'shared' && !f.cortexRunning) return false
+  if (h && f.platform === 'win' && h.mode === 'bridge') return false
+  if (h && f.platform === 'mac' && h.mode === 'shared') return false
+  if (h && !f.devicePresent) return false
   return true
 }
 
@@ -64,21 +97,25 @@ export function allWorlds(): Facts[] {
           for (const cortexInstrumented of bools)
             for (const instrumentedBuilt of bools)
               for (const bridgeReady of bools)
-                for (const daemonSession of sessions) {
-                  const f: Facts = {
-                    platform, devicePresent, cortexInstalled, cortexRunning,
-                    cortexInstrumented, instrumentedBuilt, bridgeReady,
-                    daemonRunning: daemonSession !== null, daemonSession
+                for (const daemonSession of sessions)
+                  for (const heldBy of HOLDERS) {
+                    const f: Facts = {
+                      platform, devicePresent, cortexInstalled, cortexRunning,
+                      cortexInstrumented, instrumentedBuilt, bridgeReady,
+                      daemonRunning: daemonSession !== null, daemonSession,
+                      heldBy: heldBy && { ...heldBy }
+                    }
+                    if (coherent(f)) out.push(f)
                   }
-                  if (coherent(f)) out.push(f)
-                }
   return out
 }
 
 export const say = (f: Facts): string =>
   `${f.platform} device=${f.devicePresent ? 'y' : 'n'} cc=${
     f.cortexRunning ? (f.cortexInstrumented ? 'instrumented' : 'stock') : 'closed'
-  } built=${f.instrumentedBuilt ? 'y' : 'n'} bridge=${f.bridgeReady ? 'y' : 'n'} session=${f.daemonSession ?? '-'}`
+  } built=${f.instrumentedBuilt ? 'y' : 'n'} bridge=${f.bridgeReady ? 'y' : 'n'} session=${
+    f.daemonSession ?? '-'} lock=${
+    f.heldBy ? `${f.heldBy.owner}/${f.heldBy.mode}${f.heldBy.ours ? '/ours' : ''}` : '-'}`
 
 /** Operations that move the world, and refuse what the real ones refuse. */
 export function ops(w: World, log: string[] = []): SessionOps & { log: string[] } {
@@ -87,12 +124,33 @@ export function ops(w: World, log: string[] = []): SessionOps & { log: string[] 
     log,
     async stopDaemon() {
       log.push('stop-daemon')
+      assert.ok(!w.heldBy || w.heldBy.ours,
+        'stopped a session belonging to somebody else without taking over')
       w.daemonRunning = false
       w.daemonSession = null
+      w.heldBy = null
+    },
+    async takeOver() {
+      log.push('take-over')
+      if (broke('takeOver')) return 'the other session would not stop'
+      w.daemonRunning = false
+      w.daemonSession = null
+      w.heldBy = null
+      return null
     },
     async startDaemon(session) {
       log.push(`start-daemon:${session}`)
       if (broke('startDaemon')) return 'the daemon refused to start'
+      // A daemon already serving what we want is JOINED, not started again —
+      // the socket is the join, and the lock keeps naming whoever owns it.
+      if (w.heldBy && !w.heldBy.ours) {
+        if (w.heldBy.owner === 'daemon' && w.heldBy.adoptable && w.heldBy.mode === session) {
+          w.daemonRunning = true
+          w.daemonSession = session
+          return null
+        }
+        return 'the Quad Cortex is already held by another session'
+      }
       // The real refusals, in the real words.
       if (session === 'direct' && w.cortexRunning) {
         return 'Cortex Control is holding the device, so it cannot be seized.'
@@ -104,8 +162,10 @@ export function ops(w: World, log: string[] = []): SessionOps & { log: string[] 
         return 'bridge mode needs Cortex Control running'
       }
       if (!w.devicePresent) return 'no Quad Cortex found'
+      assert.equal(w.heldBy, null, 'opened a session while somebody still held the device')
       w.daemonRunning = true
       w.daemonSession = session
+      w.heldBy = { owner: 'daemon', mode: session, ours: true, adoptable: true }
       return null
     },
     async quitCortex() {

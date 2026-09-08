@@ -158,6 +158,22 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   other's frames and reads silently return `None` (telemetry still flows, so it
   looks like a dead session). `disconnect` the MCP before driving the device from
   a script.
+- **The session lock is the single source of truth for who holds the device.**
+  `~/Library/Application Support/qc-mcp/session.json` (next to the socket;
+  `%LOCALAPPDATA%\qc-mcp\` on Windows) — `{pid, owner, mode, socket, firmware,
+  launched_by, app_pid}`. The daemon writes it after the device is open (never
+  before, so it cannot claim a session that failed to start) and releases it on
+  exit; a bare `qc-mcp` MCP server writes one too, because a stdio server that
+  opened the device itself was the contender nothing could see. **`pid` is the
+  liveness test** — a stale record reads as no owner, so a SIGKILLed daemon
+  leaves no lasting lie. Starting a daemon over a live owner raises
+  `lockfile.Held` with a sentence naming who, which pid and what mode; pass
+  `--takeover` only after actually stopping them. `--launched-by patchbay` is
+  what lets a reader tell our session from somebody else's: Patchbay stops what
+  it started and *evicts* (a named step, never a side effect) what it did not.
+  Do NOT go back to inferring this from `pgrep`, FIFO existence or a socket
+  probe — those three could each be true about a different world, which is what
+  the lock exists to end.
 - **CorOS version matters.** `connect`/`device_info` report `firmware` +
   `protocol_generation`; 4.1-only tools gate on `P.require(...)`. The device's
   human version is in `Version.zenos_git_hash` — `app_fw_version` is a build hash.

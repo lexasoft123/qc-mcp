@@ -102,9 +102,29 @@ def _conn():
             except Exception:
                 if bridge or share:   # app not really there — fall back to seizing
                     _qc = QuadCortex(bridge=False).open(handshake=True)
+                    bridge = share = False
                 else:
                     raise
+            _claim(bridge, share)
         return _qc
+
+
+def _claim(bridge, share):
+    """Say in the session lock that this MCP server holds the device.
+
+    A stdio MCP server opening the device itself is the contender nothing could
+    see: Patchbay reported "no daemon" while the device was plainly in use, and
+    the daemon's own failure to start read as a mystery. It costs one small file
+    to make it visible, and it must never be the reason a tool call fails —
+    a lock that cannot be written is a lock that is merely absent.
+    """
+    from . import lockfile
+    try:
+        lockfile.acquire("mcp", "bridge" if bridge else "shared" if share else "direct",
+                         takeover=True, firmware=getattr(_qc, "firmware", None),
+                         launched_by="mcp-client")
+    except Exception:
+        pass
 
 
 def _disconnect():
@@ -113,6 +133,11 @@ def _disconnect():
         if _qc is not None:
             _qc.close()
             _qc = None
+            from . import lockfile
+            try:
+                lockfile.release()
+            except Exception:
+                pass
 
 
 def _repo_root():
@@ -2077,6 +2102,12 @@ def main(argv=None):
                     help="daemon endpoint (default: %(default)s)")
     ap.add_argument("--mode", default="auto", choices=("auto", "bridge", "direct"),
                     help="how the daemon opens the device (--daemon only)")
+    ap.add_argument("--takeover", action="store_true",
+                    help="claim the device even though the session lock names "
+                         "somebody else (--daemon only; stop them first)")
+    ap.add_argument("--launched-by", default=None, metavar="WHO",
+                    help="recorded in the session lock, so a reader can tell a "
+                         "daemon Patchbay started from one started by hand")
     args = ap.parse_args(argv)
 
     if sum((args.daemon, args.attach, args.leveling)) > 1:
@@ -2084,7 +2115,8 @@ def main(argv=None):
 
     if args.daemon:
         from .daemon import serve
-        return serve(args.socket, mode=args.mode)
+        return serve(args.socket, mode=args.mode, takeover=args.takeover,
+                     launched_by=args.launched_by)
 
     if args.leveling:
         from .leveling import serve as serve_leveling

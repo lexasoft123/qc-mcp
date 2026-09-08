@@ -41,6 +41,12 @@ export const isLinked = (s: Snapshot): boolean =>
  */
 export function modeFacts(s: Snapshot): Facts {
   return {
+    heldBy: s.lock && {
+      owner: s.lock.owner,
+      mode: s.lock.mode,
+      ours: s.lock.launchedBy === 'patchbay',
+      adoptable: s.lock.owner === 'daemon' && Boolean(s.lock.socket)
+    },
     platform: s.platform,
     devicePresent: s.device.present,
     cortexInstalled: s.cortex.installed,
@@ -130,6 +136,20 @@ export function cleanError(raw: string | null): string | null {
   // "qc_mcp.backend.BridgeError: Cortex Control is holding…" -> the sentence
   const m = line.match(/^[\w.]*(?:Error|Exception):\s*(.+)$/)
   return (m ? m[1] : line).trim()
+}
+
+/**
+ * Who holds the device, said plainly — for the strip that offers to take over.
+ * Null when it is nobody, or us.
+ */
+export function heldByOther(s: Snapshot): string | null {
+  const l = s.lock
+  if (!l || l.launchedBy === 'patchbay') return null
+  const who = l.owner === 'mcp' ? 'An MCP client' : l.owner === 'bench' ? 'The leveling bench' : 'A daemon'
+  const how = l.mode === 'direct' ? 'holding the device on its own'
+    : l.mode === 'shared' ? 'sharing the device with Cortex Control'
+      : "riding Cortex Control's session"
+  return `${who} started outside Patchbay is ${how}.`
 }
 
 /** Which Cortex Control is up, if any — the stock app or the instrumented copy. */

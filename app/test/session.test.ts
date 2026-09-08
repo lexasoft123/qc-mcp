@@ -30,9 +30,13 @@ test(`the state space is complete (${WORLDS.length} coherent worlds)`, () => {
   // 26 on macOS and 9 on Windows — every arrangement of device, app build,
   // bridge and session that the machine can actually be in. Pinned, so that
   // widening the facts without widening the enumeration is caught here.
-  assert.equal(WORLDS.length, 35)
-  assert.equal(WORLDS.filter((f) => f.platform === 'mac').length, 26)
-  assert.equal(WORLDS.filter((f) => f.platform === 'win').length, 9)
+  assert.equal(WORLDS.length, 63)
+  assert.equal(WORLDS.filter((f) => f.platform === 'mac').length, 46)
+  assert.equal(WORLDS.filter((f) => f.platform === 'win').length, 17)
+  assert.ok(WORLDS.some((f) => f.heldBy?.owner === 'mcp'), 'no MCP-held world')
+  assert.ok(WORLDS.some((f) => f.heldBy && !f.heldBy.ours), 'no foreign-owner world')
+  assert.ok(WORLDS.some((f) => f.heldBy?.ours), 'no world we own')
+  assert.ok(WORLDS.some((f) => f.heldBy === null), 'no unheld world')
   for (const s of ['bridge', 'shared', 'direct'] as const) {
     assert.ok(WORLDS.some((f) => f.daemonSession === s), `no ${s} session in the space`)
   }
@@ -125,9 +129,12 @@ test('a shared session never quits the app it is about to share', () => {
 test('bridge without an instrumented copy is refused, not attempted', () => {
   each((f) => {
     if (f.platform !== 'mac' || f.instrumentedBuilt) return
-    const p = planFor('connect', 'bridge', f)
     if (!f.devicePresent) return
+    const p = planFor('connect', 'bridge', f)
     assert.ok(p.blocked, 'planned a bridge with nothing to bridge through')
+    // Somebody else holding the device is the nearer obstacle and is named
+    // first; the missing copy is what the take-over would then run into.
+    if (f.heldBy && !f.heldBy.ours) return
     assert.match(p.blocked, /instrumented/i)
   })
 })
@@ -237,13 +244,27 @@ test('disconnect stops what is running and nothing else', () => {
   each((f) => {
     for (const quitApp of [false, true]) {
       const steps = stepNames(planFor('disconnect', 'auto', f, quitApp))
-      assert.equal(steps.includes('stop-daemon'), f.daemonRunning)
+      const ends = steps.includes('stop-daemon') || steps.includes('take-over')
+      assert.equal(ends, f.daemonRunning)
       assert.equal(steps.includes('quit-cortex'), quitApp && f.cortexRunning)
-      if (steps.includes('quit-cortex')) {
-        assert.ok(!f.daemonRunning || steps.indexOf('stop-daemon') < steps.indexOf('quit-cortex'),
-          'quit the app before the session riding it')
+      if (steps.includes('quit-cortex') && f.daemonRunning) {
+        const first = Math.max(steps.indexOf('stop-daemon'), steps.indexOf('take-over'))
+        assert.ok(first < steps.indexOf('quit-cortex'), 'quit the app before the session riding it')
       }
     }
+  })
+})
+
+test("disconnecting somebody else's session is named an eviction", () => {
+  // Not 'stop-daemon'. The step that ends a session Patchbay did not start says
+  // so, in the plan and in the progress line, so it can never be mistaken for
+  // ordinary housekeeping.
+  each((f) => {
+    if (!f.daemonRunning) return
+    const steps = stepNames(planFor('disconnect', 'auto', f))
+    const foreign = Boolean(f.heldBy && !f.heldBy.ours)
+    assert.equal(steps.includes('take-over'), foreign, say(f))
+    assert.equal(steps.includes('stop-daemon'), !foreign, say(f))
   })
 })
 
@@ -456,7 +477,8 @@ test('the stock app is never opened on top of the instrumented one — the repor
   const live: Facts = {
     platform: 'mac', devicePresent: true, cortexInstalled: true, cortexRunning: true,
     cortexInstrumented: true, instrumentedBuilt: true, bridgeReady: true,
-    daemonRunning: true, daemonSession: 'bridge'
+    daemonRunning: true, daemonSession: 'bridge',
+    heldBy: { owner: 'daemon', mode: 'bridge', ours: true, adoptable: true }
   }
   for (const mode of MODES) {
     const r = await play(live, 'show-app', mode)

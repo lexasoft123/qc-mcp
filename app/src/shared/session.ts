@@ -32,10 +32,28 @@ export interface Facts {
   daemonRunning: boolean
   /** What the running daemon reported it opened. */
   daemonSession: SessionMode | null
+  /**
+   * The session lock: who holds the device, from the record they wrote.
+   *
+   * This is the fact the others used to be guessed from. `ours` distinguishes a
+   * session Patchbay started from one it merely found — a daemon somebody ran
+   * by hand, or an MCP server that opened the device itself, which is the
+   * contender nothing could see before.
+   */
+  heldBy: {
+    owner: 'daemon' | 'mcp' | 'bench'
+    mode: SessionMode
+    ours: boolean
+    /** A serving daemon can simply be joined; an MCP server cannot. */
+    adoptable: boolean
+  } | null
 }
 
 export type Step =
   | { do: 'stop-daemon' }
+  /** End somebody else's session, by the pid in the lock. Only ever from an
+   *  explicit take-over — never a side effect of pressing Connect. */
+  | { do: 'take-over' }
   | { do: 'quit-cortex' }
   | { do: 'launch-bridge' }
   | { do: 'launch-stock' }
@@ -54,7 +72,8 @@ export interface Plan {
   satisfied: boolean
 }
 
-export type Goal = 'connect' | 'disconnect' | 'show-app'
+/** `take-over` is `connect` with permission to end somebody else's session. */
+export type Goal = 'connect' | 'disconnect' | 'show-app' | 'take-over'
 
 /**
  * Which session a mode opens, given what is running.
@@ -120,7 +139,13 @@ function build(session: SessionMode, f: Facts): Plan {
 export function planFor(goal: Goal, mode: Mode, f: Facts, quitApp = false): Plan {
   if (goal === 'disconnect') {
     const steps: Step[] = []
-    if (f.daemonRunning) steps.push({ do: 'stop-daemon' })
+    // Disconnecting a session Patchbay did not start is an eviction, and is
+    // named as one. It used to be planned as an ordinary stop, which is how a
+    // daemon somebody else was running got killed by our Disconnect button
+    // without anything ever saying so.
+    if (f.daemonRunning) {
+      steps.push(f.heldBy && !f.heldBy.ours ? { do: 'take-over' } : { do: 'stop-daemon' })
+    }
     if (quitApp && f.cortexRunning) steps.push({ do: 'quit-cortex' })
     return { session: null, steps, blocked: null, satisfied: steps.length === 0 }
   }
@@ -151,7 +176,7 @@ export function planFor(goal: Goal, mode: Mode, f: Facts, quitApp = false): Plan
     return { session: null, steps: [{ do: 'launch-stock' }], blocked: null, satisfied: false }
   }
 
-  // connect
+  // connect (and take-over, which is connect with permission to evict)
   if (!f.devicePresent) {
     return { session: null, steps: [], blocked: 'Plug the Quad Cortex in over USB.', satisfied: false }
   }
@@ -159,11 +184,30 @@ export function planFor(goal: Goal, mode: Mode, f: Facts, quitApp = false): Plan
   if (f.daemonRunning && f.daemonSession === want) {
     return { session: want, steps: [], blocked: null, satisfied: true }
   }
+
+  // Somebody else's session. A serving daemon in the mode we want is simply
+  // joined; anything else has to end first, and ending it is a decision, not a
+  // side effect of pressing Connect.
+  const held = f.heldBy
+  const evict = held && !held.ours && !(held.adoptable && held.mode === want)
+  if (evict && goal !== 'take-over') {
+    return {
+      session: want, steps: [], satisfied: false,
+      blocked: held.owner === 'mcp'
+        ? `An MCP server is holding the Quad Cortex in ${held.mode} mode. ` +
+          'Take over to end it and connect, or quit that client.'
+        : `A ${held.mode} session started outside Patchbay is holding the Quad Cortex. ` +
+          'Take over to end it and connect.'
+    }
+  }
+
   const rest = build(want, f)
   if (rest.blocked) return rest
   // A session that is open but wrong is torn down first — the mode selector
   // used to change only the preference, so it claimed a session nobody had.
-  const teardown: Step[] = f.daemonRunning ? [{ do: 'stop-daemon' }] : []
+  const teardown: Step[] = []
+  if (evict) teardown.push({ do: 'take-over' })
+  else if (f.daemonRunning) teardown.push({ do: 'stop-daemon' })
   return { ...rest, steps: [...teardown, ...rest.steps] }
 }
 

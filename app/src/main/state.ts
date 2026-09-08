@@ -5,6 +5,7 @@ import * as logs from './logs.js'
 import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
 import { IS_MAC, PLATFORM, findRepo, pathsFor } from './paths.js'
+import * as lock from './lock.js'
 import { cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
 import { exists } from './util.js'
 
@@ -159,6 +160,9 @@ export async function refresh(deep = false): Promise<Snapshot> {
   snapshot = {
     platform: PLATFORM,
     paths,
+    // The one record that says who holds the device. Everything that used to be
+    // inferred — is a daemon up, in what mode, did we start it — is read here.
+    lock: lock.read(paths.socket),
     checks: checksFrom(python, clang, cortex, device, targets),
     clients: targets,
     daemon: info,

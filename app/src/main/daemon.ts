@@ -3,6 +3,7 @@ import { connect } from 'node:net'
 import { mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { DaemonInfo, Mode, Paths, SessionMode } from '../shared/types.js'
+import { read as readLock } from './lock.js'
 import { IS_MAC } from './paths.js'
 import { exists, lastErrorLine, sleep } from './util.js'
 
@@ -32,16 +33,10 @@ function portFor(socketPath: string): number {
   }
 }
 
-/** SIGTERM every `qc-mcp --daemon` on this machine — the adopted-daemon case,
- *  where there is no child handle to kill. */
-async function killStrayDaemons(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const cmd = IS_MAC
-      ? spawn('pkill', ['-f', 'qc-mcp --daemon'], { stdio: 'ignore' })
-      : spawn('taskkill', ['/IM', 'qc-mcp.exe', '/F'], { stdio: 'ignore' })
-    cmd.on('exit', () => resolve())
-    cmd.on('error', () => resolve())
-  })
+/** Who the lock says holds the device, in the shape evict() wants. */
+const lockOwner = (socket: string): { pid: number; owner: string } | null => {
+  const l = readLock(socket)
+  return l ? { pid: l.pid, owner: l.owner } : null
 }
 
 export class Daemon {
@@ -166,7 +161,11 @@ export class Daemon {
     const socketPath = this.paths.socket
     this.liveSocket = socketPath
     let stderr = ''
-    const child = spawn(this.paths.bin, ['--daemon', '--socket', socketPath, '--mode', this.mode], {
+    // --launched-by is what makes the lock able to say "ours": everything else
+    // on this machine that opens the device is somebody's to take over, not
+    // ours to stop.
+    const child = spawn(this.paths.bin,
+      ['--daemon', '--socket', socketPath, '--mode', this.mode, '--launched-by', 'patchbay'], {
       cwd: this.paths.repo,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false
@@ -222,6 +221,32 @@ export class Daemon {
   }
 
   /**
+   * End the session the lock names — somebody else's.
+   *
+   * By PID, from the record they wrote. The old code reached for
+   * `pkill -f 'qc-mcp --daemon'`, which is both too broad (every daemon on the
+   * machine) and too narrow (it never matched an MCP server that had opened the
+   * device itself). Returns a sentence if it will not go.
+   */
+  async evict(owner: { pid: number; owner: string } | null): Promise<string | null> {
+    if (!owner) return null
+    if (owner.pid === process.pid) return null
+    try {
+      process.kill(owner.pid, 'SIGTERM')
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      if (code === 'ESRCH') return null                 // already gone
+      if (code === 'EPERM') return `The ${owner.owner} holding the device belongs to another user.`
+      return `Could not stop the ${owner.owner} holding the device: ${String(e)}`
+    }
+    for (let i = 0; i < 40; i++) {
+      try { process.kill(owner.pid, 0) } catch { return null }
+      await sleep(250)
+    }
+    return `The ${owner.owner} holding the device (pid ${owner.pid}) did not stop.`
+  }
+
+  /**
    * Stop it — including one we only adopted.
    *
    * This used to kill `child` and then unlink the socket unconditionally. For an
@@ -244,8 +269,11 @@ export class Daemon {
       try { child.kill('SIGTERM') } catch { /* already gone */ }
       setTimeout(() => { try { child.kill('SIGKILL') } catch { /* already gone */ } }, 2000)
     } else if (wasExternal) {
-      await killStrayDaemons()
-      // it owned the socket, so it cleans up after itself; wait for the endpoint
+      // Adopted: no child to kill, so use the pid in the lock. `pkill -f
+      // 'qc-mcp --daemon'` used to stand in for this — every daemon on the
+      // machine, and never the MCP server that had opened the device itself.
+      await this.evict(lockOwner(this.paths.socket))
+      // it owns the socket, so it cleans up after itself; wait for the endpoint
       // to actually close rather than deleting the file and calling it stopped
       for (let i = 0; i < 25 && (await this.endpointUp()); i++) await sleep(200)
       this.liveSocket = null

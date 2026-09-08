@@ -63,6 +63,28 @@ export interface CortexInfo {
   needsRebuild: boolean
 }
 
+/**
+ * The session lock — who holds the Quad Cortex, and how.
+ *
+ * Written by whoever opened the device (qc_mcp/lockfile.py), read by everyone.
+ * It is the answer to "what is running", replacing three inferences that could
+ * each be true about a different world.
+ */
+export interface SessionLock {
+  pid: number
+  /** 'daemon' serves clients; 'mcp' is a stdio server that opened the device
+   *  itself; 'bench' is the leveling service. */
+  owner: 'daemon' | 'mcp' | 'bench'
+  mode: SessionMode
+  socket: string
+  startedAt: number | null
+  firmware: string | null
+  /** 'patchbay' for one we started — anything else is somebody else's. */
+  launchedBy: string | null
+  /** The Cortex Control a bridge or shared session rides, when there is one. */
+  appPid: number | null
+}
+
 export interface DaemonInfo {
   state: DaemonState
   pid: number | null
@@ -124,6 +146,8 @@ export interface Snapshot {
   checks: Check[]
   clients: ClientTarget[]
   daemon: DaemonInfo
+  /** Who holds the device, from the record they wrote. Null when nobody does. */
+  lock: SessionLock | null
   cortex: CortexInfo
   device: DeviceInfo
   prefs: Prefs
@@ -348,6 +372,8 @@ export interface Api {
   /** Decide a plan from what is true, run it. The one entry point for the button. */
   connect(): Promise<Snapshot>
   disconnect(): Promise<Snapshot>
+  /** End the session the lock names, then connect. */
+  takeOver(): Promise<Snapshot>
   daemonStart(): Promise<Snapshot>
   daemonStop(): Promise<Snapshot>
   setMode(mode: Mode): Promise<Snapshot>

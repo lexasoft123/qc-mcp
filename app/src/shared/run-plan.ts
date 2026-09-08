@@ -13,6 +13,9 @@ import type { Plan, Step } from './session.js'
 
 export interface SessionOps {
   stopDaemon(): Promise<void>
+  /** End whoever the session lock names. Resolves to an error sentence when it
+   *  will not go — never pretend a stubborn owner is gone. */
+  takeOver(): Promise<string | null>
   /** Resolves to an error sentence, or null when the daemon is serving. */
   startDaemon(session: SessionMode): Promise<string | null>
   quitCortex(): Promise<void>
@@ -35,6 +38,7 @@ export interface Outcome {
 
 const LABEL: Record<Step['do'], string> = {
   'stop-daemon': 'Closing the current session',
+  'take-over': 'Ending the session that holds the device',
   'quit-cortex': 'Quitting Cortex Control',
   'launch-bridge': 'Opening the instrumented Cortex Control',
   'launch-stock': 'Opening Cortex Control',
@@ -54,6 +58,7 @@ const LABEL: Record<Step['do'], string> = {
  */
 export const STEP_TIMEOUT_MS: Record<Step['do'], number> = {
   'stop-daemon': 30_000,
+  'take-over': 30_000,
   'quit-cortex': 30_000,
   'launch-bridge': 30_000,
   'launch-stock': 30_000,
@@ -92,6 +97,12 @@ export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
         const call = step.do === 'stop-daemon' ? ops.stopDaemon()
           : step.do === 'quit-cortex' ? ops.quitCortex() : ops.focusCortex()
         if ((await guard(step, call)) === TIMED_OUT) return fail(overran(step))
+        break
+      }
+      case 'take-over': {
+        const err = await guard(step, ops.takeOver())
+        if (err === TIMED_OUT) return fail(overran(step))
+        if (err) return fail(err)
         break
       }
       case 'launch-bridge':

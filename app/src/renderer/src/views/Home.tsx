@@ -3,7 +3,8 @@ import { Button } from '@singz/ui'
 import type { Mode, Snapshot } from '@shared/types'
 import { modeSwitch } from '@shared/session'
 import {
-  cleanError, isLinked, isMac, modeFacts, modePlan, sessionMode, sessionWords, setupPending
+  cleanError, heldByOther, isLinked, isMac, modeFacts, modePlan, sessionMode,
+  sessionWords, setupPending
 } from '../derive.js'
 import { act, publish, say, useProgress } from '../store.js'
 import { SignalPath } from '../components/SignalPath.js'
@@ -209,6 +210,19 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
         )}
 
         <div className="home-warn">
+          {/* Somebody else holds the device. Name them, and offer the one thing
+              that resolves it — as a decision, not as a hidden step in Connect. */}
+          {!busy && heldByOther(snap) && (
+            <Strip>
+              <span className="grow">
+                {heldByOther(snap)} Patchbay can end it and connect in its place.
+              </span>
+              <Button size="sm" variant="danger"
+                      onClick={() => void act(() => window.patchbay.takeOver())}>
+                Take over
+              </Button>
+            </Strip>
+          )}
           {!busy && !mac && linked && snap.cortex.running && (
             <Strip>
               <span className="grow">

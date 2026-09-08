@@ -27,6 +27,16 @@ test('the sentence, not the wreckage above it', () => {
   assert.ok(!out!.includes('BridgeError'))
 })
 
+test('the session lock speaks for itself', () => {
+  // Held is not spelled …Error, and its message is the whole point of it.
+  const out = lastErrorLine(`Traceback (most recent call last):
+  File "/x/daemon.py", line 438, in serve
+    raise lockfile.Held(other)
+qc_mcp.lockfile.Held: the Quad Cortex is already held by daemon (pid 19175) in direct mode, started by patchbay`)
+  assert.equal(out,
+    'the Quad Cortex is already held by daemon (pid 19175) in direct mode, started by patchbay')
+})
+
 test('a bare message survives untouched', () => {
   assert.equal(lastErrorLine('no such option: --daemon'), 'no such option: --daemon')
 })

@@ -65,7 +65,11 @@ export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeou
 export function lastErrorLine(stderr: string): string | null {
   const lines = stderr.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim())
   for (let i = lines.length - 1; i >= 0; i--) {
-    const m = /^\s*(?:[\w.]+\.)?(\w*(?:Error|Exception|Interrupt)):\s*(.+)$/.exec(lines[i])
+    // Any dotted exception class, not only the ones spelled …Error: the
+    // session lock raises `qc_mcp.lockfile.Held`, whose whole point is that its
+    // message is the sentence a person should read.
+    const m = /^\s*(?:[\w]+\.)+([A-Z]\w*):\s*(.+)$/.exec(lines[i])
+      ?? /^\s*(\w*(?:Error|Exception|Interrupt)):\s*(.+)$/.exec(lines[i])
     if (m) {
       // a message that wrapped onto following lines carries on until the next frame
       const tail = lines.slice(i + 1).filter((l) => !/^\s*(File "|\s{2,}|Traceback)/.test(l))

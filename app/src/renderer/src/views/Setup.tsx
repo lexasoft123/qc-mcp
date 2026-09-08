@@ -30,6 +30,8 @@ export function Setup({ snap }: { snap: Snapshot }): React.JSX.Element {
     <div className="view">
       <div className="setup-head">
         <h1>{t('setup.title')}</h1>
+        {/* Say what Patchbay is before asking to install things for it. */}
+        <p className="fine setup-what">{t('setup.what')}</p>
         <p className="fine">
           {t('setup.intro', { count: count(snap.checks.length) })}{' '}
           <T k={isMac(snap) ? 'setup.introMac' : 'setup.introWin'} />

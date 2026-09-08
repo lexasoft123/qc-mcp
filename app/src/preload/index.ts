@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  Api, CheckId, LevelEvent, LogLine, Mode, Prefs, PresetFolder, PresetState, Progress, Snapshot,
-  UpdateState
+  Api, ApplyResult, AudioState, AutoResult, CheckId, LevelEvent, LogLine, Measurement, Mode,
+  Prefs, PresetFolder, PresetState, Progress, ReportResult, RiffList, SampleState, SceneRow,
+  Snapshot, UpdateState
 } from '../shared/types.js'
 
 /** Subscribe to a main-process push; returns the unsubscribe. */
@@ -20,6 +21,12 @@ const api: Api = {
   runSetup: (ids?: CheckId[]) => ipcRenderer.invoke('setup:run', ids) as Promise<Snapshot>,
 
   setClients: (ids: string[]) => ipcRenderer.invoke('clients:set', ids) as Promise<Snapshot>,
+
+  // One press, one plan. The renderer no longer sequences launch-then-start
+  // itself — that sequence lives in shared/session.ts, where the tests read it.
+  connect: () => ipcRenderer.invoke('session:connect') as Promise<Snapshot>,
+  disconnect: () => ipcRenderer.invoke('session:disconnect') as Promise<Snapshot>,
+  takeOver: () => ipcRenderer.invoke('session:takeOver') as Promise<Snapshot>,
 
   daemonStart: () => ipcRenderer.invoke('daemon:start') as Promise<Snapshot>,
   daemonStop: () => ipcRenderer.invoke('daemon:stop') as Promise<Snapshot>,
@@ -64,6 +71,37 @@ const api: Api = {
     save: (name?: string) =>
       ipcRenderer.invoke('leveling:save', name) as Promise<{ name: string; position: number }>,
     meter: (on: boolean) => ipcRenderer.invoke('leveling:meter', on) as Promise<boolean>,
+    audio: () => ipcRenderer.invoke('leveling:audio') as Promise<AudioState>,
+    sampleArm: (o?: { thresholdDbfs?: number; maxSeconds?: number }) =>
+      ipcRenderer.invoke('leveling:sampleArm', o) as Promise<SampleState>,
+    sampleStatus: () => ipcRenderer.invoke('leveling:sampleStatus') as Promise<SampleState>,
+    sampleInfo: () => ipcRenderer.invoke('leveling:sampleInfo') as Promise<SampleState>,
+    sampleStop: () => ipcRenderer.invoke('leveling:sampleStop') as Promise<SampleState>,
+    sampleDiscard: () =>
+      ipcRenderer.invoke('leveling:sampleDiscard') as Promise<SampleState>,
+    measure: (perceived?: boolean) =>
+      ipcRenderer.invoke('leveling:measure', perceived) as Promise<Measurement>,
+    cancel: () => ipcRenderer.invoke('leveling:cancel') as Promise<{ cancelling: boolean }>,
+    riffs: () => ipcRenderer.invoke('leveling:riffs') as Promise<RiffList>,
+    useRiff: (name: string) => ipcRenderer.invoke('leveling:useRiff', name),
+    applyTrim: (o: {
+      folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
+      row?: number; db: number
+    }) => ipcRenderer.invoke('leveling:applyTrim', o) as Promise<ApplyResult>,
+    autolevel: (o?: { target?: number; tolerance?: number; dryRun?: boolean }) =>
+      ipcRenderer.invoke('leveling:autolevel', o) as Promise<AutoResult>,
+    samplePlay: () =>
+      ipcRenderer.invoke('leveling:samplePlay') as Promise<{ playing: boolean; seconds: number }>,
+    sampleStopPlay: () => ipcRenderer.invoke('leveling:sampleStopPlay') as Promise<void>,
+    revertLevels: () =>
+      ipcRenderer.invoke('leveling:revertLevels') as Promise<{
+        reverted: { row: number; db: number }[]
+      }>,
+    measureMany: (presets, o) =>
+      ipcRenderer.invoke('leveling:measureMany', presets, o) as Promise<ReportResult>,
+    measureScenes: (o) =>
+      ipcRenderer.invoke('leveling:measureScenes', o) as Promise<{ rows: SceneRow[] }>,
+    levelScenes: (o) => ipcRenderer.invoke('leveling:levelScenes', o) as Promise<unknown>,
     onEvent: (cb) => on<LevelEvent>('leveling:event', cb)
   },
 

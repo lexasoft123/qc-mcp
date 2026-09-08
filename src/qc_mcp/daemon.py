@@ -421,12 +421,21 @@ def attach(socket_path: str):
     return qc.open(handshake=False)
 
 
-def serve(socket_path: str, mode: str = "auto") -> int:
+def serve(socket_path: str, mode: str = "auto", takeover: bool = False,
+          launched_by: str = None) -> int:
     """Open the device the way `mode` asks, then serve clients until killed."""
     from .transport import QuadCortex
     from .backend import bridge_supported
+    from . import lockfile
 
     from .server import _bridge_running, _cortex_running
+
+    # Whoever is already holding the device says so in the lock, and says how.
+    # Refusing here — before touching the USB endpoint — is the difference
+    # between a clear sentence and two processes fighting over one interface.
+    other = lockfile.read(socket_path)
+    if other and not takeover:
+        raise lockfile.Held(other)
 
     bridge = share = False
     if mode in ("auto", "bridge"):
@@ -452,17 +461,37 @@ def serve(socket_path: str, mode: str = "auto") -> int:
                 "(interceptor/run-bridge.sh)")
 
     if not bridge and not share and _cortex_running() and sys.platform != "win32":
-        raise BridgeError(
-            "Cortex Control is holding the device, so it cannot be seized. Quit "
-            "it, or launch the instrumented build and start the daemon in bridge "
-            "mode.")
+        # `auto` used to stop here and tell the user to go and launch the bridge
+        # themselves — a dead end asking a human to do the one thing the code was
+        # about to refuse to do. If the instrumented build is there, start it.
+        if mode == "auto" and bridge_supported():
+            from .server import _launch_bridge
+            err = _launch_bridge()
+            if err:
+                raise BridgeError(
+                    "Cortex Control is holding the device and the bridge could not "
+                    "be started: %s. Quit Cortex Control to use direct mode." % err)
+            bridge = True
+        else:
+            raise BridgeError(
+                "Cortex Control is holding the device, so it cannot be seized. Quit "
+                "it, or launch the instrumented build and start the daemon in bridge "
+                "mode.")
 
+    resolved = "bridge" if bridge else "shared" if share else "direct"
     qc = QuadCortex(bridge=bridge, share=share).open(handshake=True)
-    daemon = Daemon(qc, socket_path, mode="bridge" if bridge else "shared" if share else "direct")
+    daemon = Daemon(qc, socket_path, mode=resolved)
+
+    # The record goes in AFTER the device is open, so it never claims a session
+    # that failed to start, and carries the firmware once the handshake knows it.
+    lockfile.acquire("daemon", resolved, socket_path, takeover=takeover,
+                     launched_by=launched_by, firmware=qc.firmware,
+                     app_pid=_cortex_pid() if resolved in ("bridge", "shared") else None)
 
     import signal
 
     def _bye(*_):
+        lockfile.release(socket_path)
         daemon.close()
         sys.exit(0)
 
@@ -472,5 +501,23 @@ def serve(socket_path: str, mode: str = "auto") -> int:
         except (ValueError, OSError):
             pass
 
-    daemon.serve_forever()
+    try:
+        daemon.serve_forever()
+    finally:
+        lockfile.release(socket_path)
     return 0
+
+
+def _cortex_pid():
+    """The Cortex Control this session rides, so a reader can tell whether the
+    app going away has taken the session with it."""
+    import subprocess
+    try:
+        if sys.platform == "win32":
+            return None
+        out = subprocess.run(["pgrep", "-f", "Contents/MacOS/Cortex Control"],
+                             capture_output=True, text=True, timeout=5).stdout
+        pids = [int(x) for x in out.split() if x.strip().isdigit()]
+        return pids[0] if pids else None
+    except Exception:
+        return None

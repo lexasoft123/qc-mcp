@@ -122,14 +122,17 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
             </Badge>
             <span className="grow" />
             <div className="acts">
+              {/* Locked while a session is open — the mode decides how one is
+                  opened, so changing it under a live one is a reconnect, and
+                  that is asked for with Stop, not with a selector. */}
               <SegmentedControl
                 options={modes()}
                 value={snap.prefs.mode}
                 aria-label={t('aria.mode')}
-                onChange={(m) => {
-                  void act(() => window.patchbay.setMode(m))
-                  if (m === 'direct' && snap.cortex.running) say(t('console.directNeedsApp'), true)
-                }}
+                // Locked while a session is open: changing the mode under a
+                // live one is a reconnect, asked for with Stop, not a selector.
+                disabled={snap.daemon.state !== 'stopped'}
+                onChange={(m) => { void act(() => window.patchbay.setMode(m)) }}
               />
               <Button
                 variant={live ? 'danger' : 'primary'}
@@ -167,11 +170,37 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
                 <div className="u">{t('console.rps')}</div>
               </div>
             </div>
+            {/* The lock, said plainly. It is the only thing here that answers
+                "who holds the device" rather than "what did we start". */}
+            {snap.lock && snap.lock.launchedBy !== 'patchbay' && (
+              <Strip bad={!live}>
+                <span className="grow">
+                  <T k="console.lockNames" vars={{
+                    owner: snap.lock.owner, pid: String(snap.lock.pid), mode: snap.lock.mode
+                  }} />{' '}
+                  {snap.lock.launchedBy && t('console.lockStartedBy', { by: snap.lock.launchedBy })}{' '}
+                  {live ? t('console.lockJoined') : t('console.lockNotOurs')}
+                </span>
+                <Button variant="danger" size="sm"
+                        onClick={() => void act(() => window.patchbay.takeOver())}>
+                  {t('takeOver')}
+                </Button>
+              </Strip>
+            )}
             <Facts
               rows={[
                 [t('fact.status'), live ? t('fact.pidUp', { pid: snap.daemon.pid ?? '', uptime: uptime(snap.daemon.startedAt) }) : t('fact.notRunning'), live ? '' : 'off'],
                 [mac ? t('fact.socket') : t('fact.pipe'), snap.paths.show.socket, live ? 'muted' : 'off'],
                 [t('fact.session'), live ? sessionFact(snap) : '—', live ? '' : 'off'],
+                // The lock, said plainly. The only row here that answers "who
+                // holds the device" rather than "what did we start".
+                [t('fact.holder'),
+                  snap.lock
+                    ? `${snap.lock.owner} · pid ${snap.lock.pid} · ${snap.lock.mode}` +
+                      (snap.lock.launchedBy ? ` · ${snap.lock.launchedBy}` : '') +
+                      (live ? '' : ` · ${t('fact.notAnswering')}`)
+                    : t('fact.nobody'),
+                  snap.lock ? (live ? 'muted' : '') : 'off'],
                 [t('fact.clients'), live ? (snap.daemon.clients.join(', ') || t('fact.none')) : '—', live ? 'muted' : 'off']
               ]}
             />

@@ -1,0 +1,31 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Reference sampler" },
+    { "id": "page-2", "name": "Leveling" },
+    { "id": "page-3", "name": "Help" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html", "title": "Sampler / idle", "x": 0, "y": 0, "w": 1120, "h": 660, "page": "page-1" },
+    { "file": "SamplerArmed.dc.html", "title": "Armed", "x": 1240, "y": 0, "w": 680, "h": 360, "page": "page-1" },
+    { "file": "SamplerRecording.dc.html", "title": "Recording", "x": 1240, "y": 500, "w": 680, "h": 335, "page": "page-1" },
+    { "file": "SamplerDone.dc.html", "title": "Recorded", "x": 1240, "y": 890, "w": 680, "h": 480, "page": "page-1" },
+    { "file": "OutputMeter.dc.html", "title": "Output meter / states", "x": 0, "y": 760, "w": 1120, "h": 660, "page": "page-1" },
+    { "file": "LevelReport.dc.html", "title": "Level report", "x": 0, "y": 0, "w": 1120, "h": 840, "page": "page-2" },
+    { "file": "LevelRunning.dc.html", "title": "Leveling run", "x": 1240, "y": 0, "w": 1120, "h": 960, "page": "page-2" },
+    { "file": "SceneLeveling.dc.html", "title": "Leveling by scene", "x": 0, "y": 960, "w": 1120, "h": 720, "page": "page-2" },
+    { "file": "Help.dc.html", "title": "How this works", "x": 0, "y": 0, "w": 1120, "h": 880, "page": "page-3" }
+  ],
+  "annotations": [
+    { "id": "note-glass", "x": 0, "y": -150, "w": 470, "page": "page-1",
+      "text": "Glass surfaces are the mac build. The Windows build drops backdrop-filter and raises the panel to 92% opacity - same layout, solid fills." },
+    { "id": "note-pedal", "x": 1240, "y": -150, "w": 470, "page": "page-1",
+      "text": "One control, four states: arm, listening, recording, recorded. Nothing starts or stops by clock - the playing does it. The pedal is a footswitch, so the space bar is the foot: space arms, cancels while listening, and stops while recording. Every state shows the keycap, so the shortcut is never hidden." },
+    { "id": "note-corr", "x": 0, "y": -150, "w": 470, "page": "page-2",
+      "text": "Correction bars use one hue. Direction and the signed number carry up-or-down, so nothing reads as good-versus-bad." },
+    { "id": "note-scenes", "x": 0, "y": 770, "w": 470, "page": "page-2",
+      "text": "Leveling by scene writes to the Gain block's per-scene values, which only exist once the parameter is assigned to scenes - so the panel states that plainly rather than hiding it behind a switch that silently does nothing." },
+    { "id": "note-help", "x": 0, "y": -150, "w": 470, "page": "page-3",
+      "text": "Reached from 'How this works' in the report header. It uses the app's own modal and step components, so it is the same furniture as the setup flow." }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}

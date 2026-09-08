@@ -6,6 +6,7 @@ import * as logs from './logs.js'
 import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
 import { IS_MAC, PLATFORM, QC_PIDS, QC_VID, findRepo, pathsFor } from './paths.js'
+import * as lock from './lock.js'
 import { cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
 import { clear as clearUpdate, version } from './updater.js'
 import { exists } from './util.js'
@@ -33,6 +34,10 @@ interface Slow {
 }
 let slow: Slow | null = null
 let inflight: Promise<Snapshot> | null = null
+/** A plan is running. Set by session.pursue; the poll and the views read it. */
+let busy = false
+
+export const setBusy = (b: boolean): void => { busy = b }
 
 /**
  * The machine's languages, most preferred first, as BCP-47 tags — macOS gives
@@ -165,12 +170,24 @@ export async function refresh(deep = false): Promise<Snapshot> {
   const [present, proc] = await Promise.all([readDevice(false), cortexPid(paths.repo)])
   const python = slow.python
   const clang = slow.clang
-  const cortex = { ...slow.cortex, running: proc.pid !== null, pid: proc.pid }
+  // runningInstrumented is LIVE, not slow: it flips the moment run-bridge.sh
+  // swaps the stock app for the instrumented one, and leaving it on the deep
+  // probe's stale value made the whole interface describe the wrong build.
+  const cortex = {
+    ...slow.cortex,
+    running: proc.pid !== null,
+    pid: proc.pid,
+    runningInstrumented: proc.instrumented
+  }
   const device = { ...slow.device, present: present.present }
   const targets = clients.list()
   daemon.setClients(targets.filter((c) => c.installed).map((c) => c.name))
 
   const info = daemon.info()
+  // A plan in flight IS the session starting, even while its last step — the
+  // daemon itself — has not been reached. Reporting 'stopped' through twenty
+  // seconds of launching is what let the poll re-enter and start a second one.
+  if (busy && info.state === 'stopped') info.state = 'starting'
   info.reportsPerSecond = info.state === 'running' || cortex.running ? logs.rate(paths.logPath) : 0
 
   snapshot = {
@@ -182,6 +199,9 @@ export async function refresh(deep = false): Promise<Snapshot> {
     locale: getLocale(),
     systemLocale: systemLocale(),
     paths,
+    // The one record that says who holds the device. Everything that used to be
+    // inferred — is a daemon up, in what mode, did we start it — is read here.
+    lock: lock.read(paths.socket),
     checks: checksFrom(python, clang, cortex, device, targets),
     clients: targets,
     daemon: info,

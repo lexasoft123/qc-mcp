@@ -46,3 +46,20 @@ export const Device = (): React.JSX.Element => (
     <circle cx="14.5" cy="12" r="1.4" /><circle cx="18.5" cy="12" r="1.4" />
   </svg>
 )
+
+/** Cortex Control — an app window, for when the route runs through it. */
+export const AppWindow = (): React.JSX.Element => (
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="2.5" y="4" width="19" height="16" rx="2.5" />
+    <path d="M2.5 8.5h19" />
+    <circle cx="6" cy="6.2" r="0.9" fill="currentColor" stroke="none" />
+  </svg>
+)
+
+/** A key cap, for the shortcuts sheet. */
+export const Keyboard = (): React.JSX.Element => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="2" y="6" width="20" height="12" rx="2.5" />
+    <path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8" />
+  </svg>
+)

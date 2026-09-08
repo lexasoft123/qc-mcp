@@ -1,0 +1,156 @@
+import type { Goal, Facts, Plan } from '../shared/session.js'
+import type { Outcome, SessionOps } from '../shared/run-plan.js'
+import type { Mode, SessionLock, Snapshot } from '../shared/types.js'
+import { planFor } from '../shared/session.js'
+import { runPlan } from '../shared/run-plan.js'
+import { singleFlight } from '../shared/once.js'
+import * as cortex from './cortex.js'
+import { read as readLock } from './lock.js'
+import * as state from './state.js'
+import { IS_MAC, PLATFORM } from './paths.js'
+import { sleep } from './util.js'
+import { t } from '../shared/i18n/index.js'
+
+/**
+ * Wiring the decision table to the machine.
+ *
+ * Everything here is effects. The choosing is in shared/session.ts, where both
+ * the renderer and the tests can reach it, so an interface that says "this will
+ * share Cortex Control's session" and a main process that then seizes the
+ * device cannot happen: they are reading the same function.
+ */
+
+/** Facts from a snapshot — the renderer's view and this one agree by construction. */
+export function factsFrom(s: Snapshot, bridgeReady: boolean, serving = false): Facts {
+  return {
+    heldBy: heldFrom(s.lock, serving),
+    platform: s.platform,
+    devicePresent: s.device.present,
+    cortexInstalled: s.cortex.installed,
+    cortexRunning: s.cortex.running,
+    cortexInstrumented: Boolean(s.cortex.runningInstrumented),
+    instrumentedBuilt: Boolean(s.cortex.instrumented?.built),
+    bridgeReady,
+    daemonRunning: s.daemon.state === 'running',
+    daemonSession: s.daemon.session
+  }
+}
+
+/**
+ * The lock, as the planner wants it.
+ *
+ * `ours` is the whole point: a session Patchbay started is one it may stop, and
+ * anything else belongs to somebody — a daemon run by hand, an MCP server that
+ * opened the device itself — and ending it is a decision, not a side effect.
+ */
+export function heldFrom(lock: SessionLock | null, serving = false): Facts['heldBy'] {
+  if (!lock) return null
+  return {
+    owner: lock.owner,
+    mode: lock.mode,
+    ours: lock.launchedBy === 'patchbay',
+    serving,
+    // Only a daemon serves a socket others can join — and only if it answers.
+    // A live daemon with a dead endpoint holds the device and serves nobody.
+    adoptable: lock.owner === 'daemon' && serving
+  }
+}
+
+export async function facts(): Promise<Facts> {
+  const snap = await state.refresh()
+  const ready = IS_MAC ? await cortex.bridgeReady(state.getPaths().repo) : snap.cortex.running
+  // Ask the endpoint, do not assume it from the file: a socket outlives the
+  // process that made it, and a process can outlive its socket.
+  const serving = snap.lock ? await state.getDaemon().reachable() : false
+  return factsFrom(snap, ready, serving)
+}
+
+/** What would happen, without doing it. Used for the plan the interface shows. */
+export async function preview(goal: Goal, mode?: Mode): Promise<Plan> {
+  const f = await facts()
+  return planFor(goal, mode ?? state.getPrefs().mode, f, state.getPrefs().quitApp)
+}
+
+function opsWith(note: (label: string) => void): SessionOps {
+  const paths = (): ReturnType<typeof state.getPaths> => state.getPaths()
+  return {
+    note,
+    stopDaemon: async () => { await state.getDaemon().stop(); await state.push() },
+    takeOver: async () => {
+      // Read the lock NOW, not from the snapshot the plan was made against: a
+      // pid is being sent a signal, and the record could be seconds old — long
+      // enough for that owner to have exited and the number to have been
+      // reused by something innocent.
+      const err = await state.getDaemon().evict(readLock(paths().socket))
+      await state.push()
+      return err
+    },
+    startDaemon: async (session) => {
+      const d = state.getDaemon()
+      // The daemon resolves `auto` itself; hand it the session we decided on so
+      // the two cannot disagree about what was opened.
+      d.setMode(session === 'shared' ? 'bridge' : session)
+      await d.start(() => void state.push())
+      const info = d.info()
+      if (info.state !== 'running') return info.error ?? t('step.daemonNoStart')
+      return null
+    },
+    quitCortex: async () => { await cortex.quit(paths().repo); await state.push() },
+    launchBridge: async () => cortex.launch(paths()),
+    launchStock: async () => cortex.launchStock(paths()),
+    // `await-bridge` only ever follows a `launch-bridge` (the plan pairs them),
+    // so the boot-storm settle always applies exactly where the app is new.
+    awaitBridge: async () => cortex.waitForBridge(paths().repo, 60000, cortex.BOOT_SETTLE_MS),
+    awaitCortex: async () => {
+      for (let i = 0; i < 60; i++) {
+        if ((await cortex.cortexPid(paths().repo)).pid !== null) return true
+        await sleep(500)
+      }
+      return false
+    },
+    focusCortex: async () => {
+      const { pid } = await cortex.cortexPid(paths().repo)
+      await cortex.focus(pid)
+    }
+  }
+}
+
+/**
+ * Decide, then do it. The one entry point every button goes through — and one
+ * at a time, because the steps ahead of `start-daemon` take twenty seconds and
+ * the poll behind them runs every two.
+ */
+export const pursue = singleFlight(async (
+  goal: Goal,
+  mode: Mode | undefined,
+  note: (label: string) => void
+): Promise<Outcome> => {
+  state.setBusy(true)
+  const started = Date.now()
+  const at = (m: string): void => console.log(`[session] ${goal}: ${m} (+${Date.now() - started}ms)`)
+  try {
+    const prefs = state.getPrefs()
+    const f = await facts()
+    const plan = planFor(goal, mode ?? prefs.mode, f, prefs.quitApp)
+    at(plan.blocked ? `blocked: ${plan.blocked}`
+       : plan.satisfied ? 'already satisfied'
+       : `plan ${plan.steps.map((s2) => s2.do).join(' -> ')}`)
+    if (plan.satisfied) return { ok: true, error: null, ran: [] }
+    await state.push()
+    const out = await runPlan(plan, opsWith((label) => { at(label); note(label) }))
+    at(out.ok ? 'done' : `failed: ${out.error}`)
+    return out
+  } finally {
+    state.setBusy(false)
+    await state.push(true)
+  }
+},
+// Two calls are the same request when they ask for the same thing. The poll
+// asking for `connect` again joins the connect in flight; a person pressing
+// Disconnect during it waits for it and then actually disconnects.
+(goal, mode) => `${goal}:${mode ?? ''}`)
+
+/** Is a plan running? The poll must not start a second one behind it. */
+export const busy = (): boolean => pursue.busy()
+
+export const platform = PLATFORM

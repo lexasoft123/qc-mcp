@@ -140,6 +140,21 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   `.` as a key-PATH separator, so `com.apple.security.cs.*` parses as five
   nested dicts and every insert fails with "Key path not found" — which strips
   exactly the entitlements injection depends on.
+- **One block per Grid UPDATE** — a chain message carrying several models only
+  places the first. But that one block may carry ALL its params with all 8
+  scene values + `scene_mode` flags at once (strings too). Lane sub-blocks
+  (input/output control, splitter, mixer) take ONE value per message; their
+  scene params need assign (`scene_mode:true`) + write per active scene.
+- **The bypass param index is the block's param count**, not always 4 (4 for a
+  4-param pedal, 7 for a capture — index 4 there is VOLUME). Bypass-map
+  row/column are array positions in a read, like everything else.
+- **`default_scene` = the scene active at save time.** Set the scene, then
+  File CREATE. A Grid UPDATE with `default_scene` is a no-op.
+- **File ops** (copy/delete/rename/setlist create, author rules): see
+  `docs/DIRECTORY.md` "File operations". Always send `type` explicitly.
+- **Never "rebuild" a preset from `describe()`** — it is a summary. A rebuild
+  verified only against it silently dropped the preset's MIDI out. Diff the
+  raw `BinaryPreset` (every field) before trusting a clone.
 - **Captures**: block hash 14000(V1)/14001(V2) + param[5] `file_name`=`<64hex key><name>`;
   also list the key in the preset's `factory_/product_dependencies`.
 - **Loading Downloads/Plugin presets** uses `key_in_downloads` (cloud_id) / plugin key, not

@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { SHORTCUTS, grouped, matches, typing } from '../src/renderer/src/keys.ts'
+import { t } from '../src/shared/i18n/index.ts'
 
 /**
  * The legend and the handlers used to be written separately, and had already
@@ -16,7 +17,8 @@ const ev = (init: Partial<KeyboardEvent> & { key: string }): KeyboardEvent =>
 test('every shortcut has a cap, a description and a group', () => {
   for (const s of SHORTCUTS) {
     assert.ok(s.cap.length > 0, JSON.stringify(s))
-    assert.ok(s.does.length > 8, `${s.cap}: "${s.does}" says too little`)
+    assert.ok(t(s.does).length > 4, `${s.cap}: "${s.does}" resolves to nothing`)
+    assert.ok(t(s.short).length > 1, `${s.cap}: no short label`)
     assert.ok(s.group.length > 0, s.cap)
     assert.ok(s.local || s.keys.length > 0, `${s.cap} claims a binding with no keys`)
   }
@@ -29,9 +31,9 @@ test('the keys a player actually needs are all bound', () => {
     assert.ok(caps.includes(need), `${need} is not bound: ${caps.join(' ')}`)
   }
   const play = SHORTCUTS.find((s) => s.cap === 'P')!
-  assert.match(play.does, /play/i)
+  assert.match(t(play.does), /play/i)
   const rec = SHORTCUTS.find((s) => s.cap === 'space')!
-  assert.match(rec.does, /record/i)
+  assert.match(t(rec.does), /record/i)
 })
 
 test('space is in the list the legend is generated from', () => {
@@ -65,8 +67,8 @@ test('a modified key never fires an unmodified binding', () => {
 })
 
 test('shift is respected where a binding asks for it', () => {
-  const saveAll = SHORTCUTS.find((s) => s.does.startsWith('Save every'))!
-  const saveOne = SHORTCUTS.find((s) => s.does.startsWith('Save the open'))!
+  const saveAll = SHORTCUTS.find((s) => s.does === 'keys.saveAll')!
+  const saveOne = SHORTCUTS.find((s) => s.does === 'keys.saveOne')!
   const withShift = ev({ key: 's', metaKey: true, ctrlKey: true, shiftKey: true })
   const without = ev({ key: 's', metaKey: true, ctrlKey: true })
   assert.equal(matches(withShift, saveAll), true)

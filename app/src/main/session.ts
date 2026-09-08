@@ -9,6 +9,7 @@ import { read as readLock } from './lock.js'
 import * as state from './state.js'
 import { IS_MAC, PLATFORM } from './paths.js'
 import { sleep } from './util.js'
+import { t } from '../shared/i18n/index.js'
 
 /**
  * Wiring the decision table to the machine.
@@ -91,7 +92,7 @@ function opsWith(note: (label: string) => void): SessionOps {
       d.setMode(session === 'shared' ? 'bridge' : session)
       await d.start(() => void state.push())
       const info = d.info()
-      if (info.state !== 'running') return info.error ?? 'The daemon did not start.'
+      if (info.state !== 'running') return info.error ?? t('step.daemonNoStart')
       return null
     },
     quitCortex: async () => { await cortex.quit(paths().repo); await state.push() },

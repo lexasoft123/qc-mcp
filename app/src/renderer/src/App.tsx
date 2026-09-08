@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Button, SegmentedControl, StatusDot, WindowButtons } from '@singz/ui'
-import { isMac, railText, regCount, sessionMode } from './derive.js'
-import { useSnapshot, useToast } from './store.js'
+import { isMac, railText, regCount, sessionWord } from './derive.js'
+import { useSnapshot, useToast, useUpdate } from './store.js'
+import { t, tn } from './i18n.js'
 import { Gear, Keyboard } from './components/Icons.js'
+import { UpdateChip } from './components/Bits.js'
+import { Language } from './components/Language.js'
 import { Home } from './views/Home.js'
 import { Console } from './views/Console.js'
 import { Setup } from './views/Setup.js'
@@ -14,17 +17,19 @@ import { SHORTCUTS, matches, typing } from './keys.js'
 
 type View = 'home' | 'console' | 'leveling' | 'setup' | 'logs'
 
-const VIEWS: { value: View; label: string }[] = [
-  { value: 'home', label: 'Home' },
-  { value: 'console', label: 'Console' },
-  { value: 'leveling', label: 'Leveling' },
-  { value: 'setup', label: 'Setup' },
-  { value: 'logs', label: 'Logs' }
+/** Built per render: the labels follow the language. */
+const views = (): { value: View; label: string }[] => [
+  { value: 'home', label: t('view.home') },
+  { value: 'console', label: t('view.console') },
+  { value: 'leveling', label: t('view.leveling') },
+  { value: 'setup', label: t('view.setup') },
+  { value: 'logs', label: t('view.logs') }
 ]
 
 export function App(): React.JSX.Element {
   const snap = useSnapshot()
   const toast = useToast()
+  const update = useUpdate()
   const [view, setView] = useState<View>('home')
   const [prefs, setPrefs] = useState(false)
   const [keysOpen, setKeysOpen] = useState(false)
@@ -39,13 +44,13 @@ export function App(): React.JSX.Element {
       SHORTCUTS.find((s) => s.cap === cap)!
     const jump = SHORTCUTS.find((s) => s.scope === 'app' && s.does.startsWith('Home,'))!
     const sheet = byCap('?')
-    const settings = SHORTCUTS.find((s) => s.does === 'Preferences')!
+    const settings = SHORTCUTS.find((s) => s.does === 'prefs.open')!
 
     const onKey = (e: KeyboardEvent): void => {
       if (typing(e)) return
       if (matches(e, jump)) {
         e.preventDefault()
-        setView(VIEWS[Number(e.key) - 1].value)
+        setView(views()[Number(e.key) - 1].value)
       } else if (matches(e, sheet)) {
         e.preventDefault()
         setKeysOpen((v) => !v)
@@ -87,24 +92,27 @@ export function App(): React.JSX.Element {
     <div className="app">
       <div className="titlebar">
         <span className="logo">Patch<span>bay</span></span>
-        <SegmentedControl options={VIEWS} value={view} onChange={setView} aria-label="View" />
+        <SegmentedControl options={views()} value={view} onChange={setView} aria-label={t('aria.view')} />
         <span className="grow" />
         <div className="tb-status">
           <StatusDot tone={live ? 'ok' : 'idle'} />
           <span>
             {live
-              ? `${sessionMode(snap)} · ${n} ${n === 1 ? 'client' : 'clients'}` +
-                (snap.cortex.running ? ' · CC open' : '')
+              ? t('tb.session', { mode: sessionWord(snap), clients: tn('clients', n) })
               : snap.daemon.state === 'starting'
-                ? 'connecting…'
-                : 'not connected'}
+                ? t('tb.connecting')
+                : t('tb.stopped')}
           </span>
         </div>
-        <Button size="sm" icon title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"
+        {/* The flag alone, beside the gear: the one control someone who cannot
+            read the window needs to find, on every screen, without opening a
+            dialog whose title they cannot read either. */}
+        <Language snap={snap} compact />
+        <Button size="sm" icon title={t('keys.open')} aria-label={t('keys.open')}
                 onClick={() => setKeysOpen(true)}>
           <Keyboard />
         </Button>
-        <Button size="sm" icon title="Preferences" aria-label="Preferences" onClick={() => setPrefs(true)}>
+        <Button size="sm" icon title={t('prefs.open')} aria-label={t('prefs.open')} onClick={() => setPrefs(true)}>
           <Gear />
         </Button>
         {onWindows && <WindowButtons api={window.patchbay.window} />}
@@ -125,8 +133,9 @@ export function App(): React.JSX.Element {
           <span>{railText(snap)}</span>
         </div>
         <span className="grow" />
+        <UpdateChip update={update} />
         <span className="ver">
-          Patchbay 0.1.0 · {isMac(snap) ? 'macOS' : 'Windows'}
+          {t('rail.version', { version: snap.version, os: isMac(snap) ? 'macOS' : 'Windows' })}
         </span>
       </div>
 

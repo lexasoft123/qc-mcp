@@ -23,8 +23,10 @@ alongside it. One button.
 [![Patchbay connected — the signal path from Claude through Patchbay to a Quad Cortex, all three hops lit, sharing Cortex Control's live session](docs/patchbay/home.png)](app/README.md)
 
 Download it from [Releases](https://github.com/lexasoft123/qc-mcp/releases)
-(`.dmg` / `.exe`), or read **[app/README.md](app/README.md)**. Everything below
-is the server itself, and still works standalone.
+(`.dmg` / `.exe`), or read **[app/README.md](app/README.md)**. It speaks
+English and Simplified Chinese — 中文用户请看
+**[app/README.zh-CN.md](app/README.zh-CN.md)**. Everything below is the
+server itself, and still works standalone.
 
 ---
 
@@ -102,6 +104,16 @@ Other MCP clients — point them at the venv binary:
 ```
 
 (on Windows: `C:\path\to\qc-mcp\.venv\Scripts\qc-mcp.exe`)
+
+Codex reads TOML rather than JSON — the same entry, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.quad-cortex]
+command = "/absolute/path/qc-mcp/.venv/bin/qc-mcp"
+```
+
+Patchbay writes all of these for you, Codex included; the per-client table is
+in [app/README.md](app/README.md#connecting-an-ai-client).
 
 ## Two ways to connect
 

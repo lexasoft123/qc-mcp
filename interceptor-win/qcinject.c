@@ -53,7 +53,18 @@
 #define FLAG_LAST   0x80        // set on the final chunk of a message
 #define FLAG_SINGLE 0xC0
 
-static const wchar_t *QC_MATCH = L"vid_152a&pid_880a";
+// The vendor is shared across the family; the product id is what differs.
+// 880a = Quad Cortex, 892f = Quad Cortex Mini - same protocol, same interface.
+static const wchar_t *QC_VENDOR = L"vid_152a";
+static const wchar_t *QC_PIDS[] = { L"pid_880a", L"pid_892f", NULL };
+
+// Is this lowercased interface path one of our devices?
+static int qc_is_device(const wchar_t *low) {
+    if (!wcsstr(low, QC_VENDOR)) return 0;
+    for (int i = 0; QC_PIDS[i]; i++)
+        if (wcsstr(low, QC_PIDS[i])) return 1;
+    return 0;
+}
 
 static FILE *g_log;
 static int   g_verbose;
@@ -265,7 +276,7 @@ static HANDLE WINAPI my_CreateFileW(LPCWSTR name, DWORD access, DWORD share,
         // (our own winhid._probe does it too), then closes it. Those are NOT the
         // session: latching onto one and clearing g_dev when it closed made us
         // lose the real handle after two frames.
-        if (wcsstr(low, QC_MATCH) && (access & (GENERIC_READ | GENERIC_WRITE))) {
+        if (qc_is_device(low) && (access & (GENERIC_READ | GENERIC_WRITE))) {
             EnterCriticalSection(&g_mu);
             g_dev = h;
             wcsncpy(g_dev_path, name, 511);
@@ -273,7 +284,7 @@ static HANDLE WINAPI my_CreateFileW(LPCWSTR name, DWORD access, DWORD share,
             LeaveCriticalSection(&g_mu);
             qc_log("device handle %p opened for I/O (access=0x%08lx share=0x%08lx flags=0x%08lx)",
                    h, access, share, flags);
-        } else if (wcsstr(low, QC_MATCH) && g_verbose) {
+        } else if (qc_is_device(low) && g_verbose) {
             qc_log("  (ignoring probe open %p, access=0x%08lx)", h, access);
         }
     }

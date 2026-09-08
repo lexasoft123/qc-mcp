@@ -1,39 +1,30 @@
 import { useState } from 'react'
 import { Button } from '@singz/ui'
-import type { Mode, Snapshot } from '@shared/types'
+import type { Snapshot } from '@shared/types'
+import type { Mode } from '@shared/types'
 import { modeSwitch } from '@shared/session'
 import {
-  cleanError, heldButUnreachable, heldByOther, isLinked, isMac, modeFacts,
-  modePlan, sessionMode, sessionWords, setupPending
+  cleanError, heldButUnreachable, heldByOther, isLinked, isMac, modeFacts, modePlan,
+  sessionMode, sessionWords, setupPending, sharedWriters
 } from '../derive.js'
 import { act, publish, say, useProgress } from '../store.js'
+import { T, t } from '../i18n.js'
 import { SignalPath } from '../components/SignalPath.js'
 import { Strip } from '../components/Bits.js'
 
-/**
- * Auto is a decision, not a session, so the tile says what it decides FROM.
- * The other two say what they do, in the fewest words that stay true.
- */
-const MODES: { value: Mode; name: string; mac: string; win: string }[] = [
-  { value: 'auto', name: 'Auto',
-    mac: 'Whichever fits what is already running',
-    win: 'Whichever fits what is already running' },
-  { value: 'bridge', name: 'Bridge',
-    mac: "Through Cortex Control's own connection",
-    win: 'A second handle beside Cortex Control' },
-  { value: 'direct', name: 'Direct',
-    mac: 'Straight to the device, app closed',
-    win: 'Straight to the device, app closed' }
+const MODES: { value: Mode; key: 'auto' | 'bridge' | 'direct' }[] = [
+  { value: 'auto', key: 'auto' },
+  { value: 'bridge', key: 'bridge' },
+  { value: 'direct', key: 'direct' }
 ]
 
 /**
  * Which mode is selected, and what that means for the press about to happen.
  *
- * The mode lived only in Preferences, then briefly as a word in the header and
- * the same word in the footer — small, twice, and explaining nothing. Three
- * tiles carry it now, and the line under them resolves it the same way the two
- * places that actually make the call do: Home's connect() sequence, and
- * daemon.serve() (qc_mcp/daemon.py).
+ * The mode lived only in Preferences, so the front page offered one button and
+ * no way to know whether it was about to seize the device or share the app's
+ * session. `auto` made that worse by naming a decision instead of a session.
+ * Both lines here are the same resolution the connect sequence performs.
  */
 export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): React.JSX.Element {
   const mode = snap.prefs.mode
@@ -44,34 +35,31 @@ export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): R
   // purpose — Disconnect — not a side effect of touching a selector.
   const gate = modeSwitch(modeFacts(snap), snap.daemon.state !== 'stopped')
   const locked = !gate.allowed
-  // The chip belongs to the ROUTE, not the selection: it labels a sentence about
-  // the session, and it is the tie back to the colour running through the path.
+  // The chip belongs to the ROUTE, not the selection: it labels a sentence
+  // about the session, and ties back to the colour running through the path.
   const route = live ? sessionMode(snap) : p.will
 
   return (
     <div className={`home-mode r-${route}${p.blocked ? ' warn' : ''}`}>
-      <div className="hm-tiles" role="radiogroup" aria-label="Connection mode">
+      <div className="hm-tiles" role="radiogroup" aria-label={t('aria.mode')}>
         {MODES.map((m) => {
           const on = m.value === mode
           return (
             <button
-              key={m.value}
-              type="button"
-              role="radio"
-              aria-checked={on}
+              key={m.value} type="button" role="radio" aria-checked={on}
               className={`hm-tile m-${m.value}${on ? ' on' : ''}`}
               disabled={locked && !on}
               aria-disabled={locked || undefined}
               onClick={() => {
                 if (on) return
-                if (locked) { say(gate.why!, true); return }
+                if (locked) { say(t('mode.locked'), true); return }
                 // Nothing is running, so this changes a preference and the
                 // picture above it. No app is opened, no daemon is started.
                 void act(() => window.patchbay.setMode(m.value))
               }}
             >
-              <b><i className="dot" />{m.name}</b>
-              <span>{mac ? m.mac : m.win}</span>
+              <b><i className="dot" />{t(`mode.${m.key}` as Parameters<typeof t>[0])}</b>
+              <span>{t(`mode.${m.key}.${mac ? 'mac' : 'win'}` as Parameters<typeof t>[0])}</span>
             </button>
           )
         })}
@@ -79,33 +67,31 @@ export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): R
 
       <p className="hm-plan">
         {live
-          ? <><i>Open now</i> {sessionWords(snap, sessionMode(snap))}
-              {snap.daemon.external ? ' · adopted from a daemon started outside Patchbay' : ''}
-              <span className="hm-lock"> · disconnect to change it</span></>
+          ? <><i>{t('mode.openNow')}</i> {sessionWords(snap, sessionMode(snap))}
+              {snap.daemon.external ? ` · ${t('mode.adopted')}` : ''}
+              <span className="hm-lock"> · {t('mode.disconnectToChange')}</span></>
           : locked
-            ? <><i>Working</i> Opening the session.</>
-            : <><i>{p.blocked ? 'Cannot connect' : 'This press'}</i> {p.blocked ?? p.plan}</>}
+            ? <><i>{t('mode.workingLabel')}</i> {t('mode.opening')}</>
+            : <><i>{p.blocked ? t('mode.cannot') : t('mode.thisPress')}</i> {p.blocked ?? p.plan}</>}
       </p>
     </div>
   )
 }
 
 /**
- * One press, one plan.
- *
- * This used to be a sequence written here — run setup, maybe launch Cortex
- * Control, maybe start the daemon — decided from a snapshot the renderer read
- * itself. It disagreed with the daemon's own `auto` branch (it opened Cortex
- * Control unasked, so auto never once chose direct), and it could not see a
- * mode switch that needed the live session torn down first. Main plans it now,
- * from shared/session.ts, which is the same function the tiles below describe.
+ * The quick start: whatever is missing, in order. Each call returns the fresh
+ * snapshot, so the sequence never decides a step from stale state.
  */
 async function connect(): Promise<void> {
   let s = await window.patchbay.snapshot()
   if (setupPending(s)) s = await window.patchbay.runSetup()
+  // Main plans it now, from shared/session.ts, which is the same function the
+  // tiles below describe. This used to be a sequence written here, decided from
+  // a snapshot the renderer read itself — it disagreed with the daemon's own
+  // `auto` branch and could not see a mode switch needing a teardown first.
   s = await window.patchbay.connect()
   publish(s)
-  if (s.daemon.state === 'running') say('Connected — Claude can reach your Quad Cortex')
+  if (s.daemon.state === 'running') say(t('home.connectedToast'))
   else if (s.daemon.error) say(cleanError(s.daemon.error) ?? s.daemon.error, true)
 }
 
@@ -125,39 +111,47 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
   let second: [string, () => void] | null = null
 
   if (busy) {
-    title = 'Getting you connected'
-    lede = 'This part only happens once. Every step is listed under Setup if you want to watch.'
-    label = 'Working…'
+    title = t('home.busy.title')
+    lede = t('home.busy.lede')
+    label = t('home.working')
     disabled = true
   } else if (!snap.device.present) {
-    title = 'Plug in your Quad Cortex'
-    lede = 'Connect it to this computer with a USB cable and Patchbay will pick it up. Nothing else to do.'
-    label = 'Connect'
+    title = t('home.plug.title')
+    lede = t('home.plug.lede')
+    label = t('home.connect')
     disabled = true
   } else if (pending) {
-    title = 'One-time setup'
-    lede = mac
-      ? 'Patchbay installs qc-mcp, builds its own copy of Cortex Control, and registers the server with Claude. It never asks for your password.'
-      : 'Patchbay installs qc-mcp and registers the server with Claude. No copy to build on Windows, and it never asks for your password.'
-    label = 'Set up and connect'
-    second = ['See each step', () => goto('setup')]
+    title = t('home.setup.title')
+    lede = mac ? t('home.setup.ledeMac') : t('home.setup.ledeWin')
+    label = t('home.setup.label')
+    second = [t('home.setup.second'), () => goto('setup')]
   } else if (snap.daemon.state !== 'running') {
-    title = 'Ready when you are'
-    // The how depends on the mode, and the mode block below says it — repeating
-    // a fixed sentence here is what made "Connect" ambiguous in the first place.
-    lede = 'One press starts the daemon, so Claude can read and change presets on your Quad Cortex.'
-    label = 'Connect'
+    title = t('home.ready.title')
+    // The how depends on the mode, and the block below says it — repeating a
+    // fixed sentence here is what made "Connect" ambiguous in the first place.
+    lede = t('home.ready.lede')
+    label = t('home.connect')
   } else if (!linked) {
     // macOS only: bridge mode rides the app's session, so the app must be up
-    title = 'Almost there'
-    lede = "The daemon is up, but this is a bridge session — it rides Cortex Control's own connection, so the app has to be open too."
-    label = 'Open Cortex Control'
+    title = t('home.almost.title')
+    lede = t('home.almost.lede')
+    label = t('home.openApp')
   } else {
-    title = "You're connected"
-    lede = 'Ask Claude for a tone and it will build it on the Quad Cortex.'
-    label = 'Disconnect'
+    title = t('home.connected.title')
+    lede = t('home.connected.lede')
+    label = t('home.disconnect')
     action = 'disconnect'
-    second = ['Show Cortex Control', () => { void window.patchbay.cortexFocus() }]
+    // Launch/quit like the Console page's button, which is what makes this work
+    // on Windows at all — `cortexFocus` was `open -a` behind an IS_MAC guard, so
+    // the button did nothing there. But NOT quit on macOS: this branch is only
+    // reached with the app running, and in bridge mode the daemon rides that
+    // app's session, so quitting would silently drop the connection we just told
+    // the user they had. Raise it instead.
+    second = !snap.cortex.running
+      ? [t('home.openApp'), () => { void act(() => window.patchbay.cortexLaunch()) }]
+      : mac
+        ? [t('home.showApp'), () => { void act(() => window.patchbay.cortexFocus()) }]
+        : [t('home.quitApp'), () => { void act(() => window.patchbay.cortexQuit()) }]
   }
 
   const press = async (): Promise<void> => {
@@ -166,7 +160,7 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
       if (action === 'disconnect') {
         // quitApp is part of the plan now, so this is one call, not two.
         publish(await window.patchbay.disconnect())
-        say('Disconnected. Your presets are untouched.')
+        say(t('home.disconnectedToast'))
         return
       }
       await connect()
@@ -189,7 +183,7 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
                 style={{ width: `${progress && progress.total ? Math.round((progress.done / progress.total) * 100) : 8}%` }}
               />
             </span>
-            <div className="lbl">{progress?.label ?? 'Checking what is missing'}</div>
+            <div className="lbl">{progress?.label ?? t('home.checking')}</div>
           </div>
         )}
 
@@ -209,77 +203,65 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
           <ModeChoice snap={snap} live={linked} />
         )}
 
+        {/* What the connected state is FOR. The reward for finishing setup used
+            to be one sentence, for a product with two halves — the bench was
+            reachable only by clicking a tab nobody had a reason to press. */}
+        {!busy && linked && (
+          <div className="home-next">
+            <div className="nx">
+              <span className="eyebrow">{t('home.next.claude')}</span>
+              <p>{t('home.next.claudeBody')}</p>
+              <q>{t('home.next.claudeExample')}</q>
+            </div>
+            <button type="button" className="nx go" onClick={() => goto('leveling')}>
+              <span className="eyebrow">{t('home.next.level')}</span>
+              <p>{t('home.next.levelBody')}</p>
+              <span className="nx-cta">{t('home.next.levelCta')}</span>
+            </button>
+          </div>
+        )}
+
         <div className="home-warn">
           {/* Somebody else holds the device. Name them, and offer the one thing
-              that resolves it — as a decision, not as a hidden step in Connect. */}
+              that resolves it — as a decision, not a hidden step in Connect. */}
           {!busy && heldButUnreachable(snap) && (
             <Strip bad>
               <span className="grow">
-                A <b>{snap.lock!.mode}</b> daemon (pid {snap.lock!.pid}) is holding the Quad
-                Cortex and answering nobody — its socket is gone. Nothing can reach the device
-                until it stops.
+                <T k="lock.unreachable" vars={{
+                  mode: snap.lock!.mode, pid: String(snap.lock!.pid)
+                }} />
               </span>
               <Button size="sm" variant="danger"
                       onClick={() => void act(() => window.patchbay.takeOver())}>
-                Take over
+                {t('takeOver')}
               </Button>
             </Strip>
           )}
           {!busy && !heldButUnreachable(snap) && heldByOther(snap) && (
             <Strip>
-              <span className="grow">
-                {heldByOther(snap)} Patchbay can end it and connect in its place.
-              </span>
+              <span className="grow">{heldByOther(snap)} {t('lock.canEndIt')}</span>
               <Button size="sm" variant="danger"
                       onClick={() => void act(() => window.patchbay.takeOver())}>
-                Take over
+                {t('takeOver')}
               </Button>
             </Strip>
           )}
-          {!busy && !mac && linked && snap.cortex.running && (
+          {!busy && sharedWriters(snap) && (
             <Strip>
-              <span className="grow">
-                Cortex Control is open too. Both are writing to the same device — fine for ordinary
-                edits, but use <b>Direct</b> for heavy work.
-              </span>
+              <span className="grow"><T k="home.sharedWarn" /></span>
             </Strip>
           )}
           {!busy && mac && snap.device.present && !pending && snap.cortex.needsRebuild && (
             <Strip>
               <span className="grow">
-                Cortex Control updated to <b>{snap.cortex.version}</b>. Its instrumented copy is{' '}
-                {snap.cortex.instrumented?.version} — rebuild to stay in sync.
+                <T k="home.rebuildWarn" vars={{ version: snap.cortex.version ?? '', old: snap.cortex.instrumented?.version ?? '' }} />
               </span>
-              <Button size="sm" onClick={() => goto('console')}>Rebuild</Button>
+              <Button size="sm" onClick={() => goto('console')}>{t('home.rebuild')}</Button>
             </Strip>
           )}
         </div>
 
-        {/* What the connected state is FOR.
-            The reward for finishing setup used to be one sentence — "Ask Claude
-            for a tone" — for a product with two halves. The bench, the pedal,
-            the measured loop and the report were reachable only by clicking a
-            tab labelled with a word most guitarists associate with mixing
-            desks, and nothing had given them a reason to press it. */}
-        {!busy && linked && (
-          <div className="home-next">
-            <div className="nx">
-              <span className="eyebrow">Ask Claude</span>
-              <p>Describe a tone and it gets built on the grid — blocks, routing, scenes and all.</p>
-              <q>a Vox-style clean with a slow tape echo, and a lead scene 3 dB up</q>
-            </div>
-            <button type="button" className="nx go" onClick={() => goto('leveling')}>
-              <span className="eyebrow">Level your setlist</span>
-              <p>
-                Your presets are different loudnesses. This measures each one with the
-                same riff and tells you what it needs.
-              </p>
-              <span className="nx-cta">Open the bench →</span>
-            </button>
-          </div>
-        )}
-
-        {!busy && <p className="home-note">Every one of these has a detailed view under Console.</p>}
+        {!busy && <p className="home-note">{t('home.note')}</p>}
       </div>
     </div>
   )

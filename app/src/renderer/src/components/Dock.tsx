@@ -1,5 +1,6 @@
 import type { MeterOutput } from '@shared/types'
 import { FLOOR, CEIL, toDb } from './Meter.js'
+import { t } from '../i18n.js'
 
 /**
  * Every output at a glance, docked under the bench.
@@ -38,7 +39,7 @@ export function Dock({
 
   return (
     <div className={`dock${limiting ? ' bad' : ''}`}>
-      <span className="eyebrow">Outputs</span>
+      <span className="eyebrow">{t('dock.outputs')}</span>
       {PORTS.map(([key, label]) => {
         const o = outputs?.[key]
         const db = o ? toDb(o.level) : null
@@ -58,12 +59,12 @@ export function Dock({
           actually moving, so silence here is not a fault. */}
       <span className={`dock-state${limiting ? ' bad' : heard ? ' ok' : ''}`}>
         {limiting
-          ? 'limiting'
+          ? t('dock.limiting')
           : hpLimit
-            ? 'headphone limiter'
+            ? t('dock.hpLimiter')
             : heard
-              ? 'limiters clear'
-              : 'no reading — play something'}
+              ? t('dock.clear')
+              : t('dock.noReading')}
       </span>
     </div>
   )

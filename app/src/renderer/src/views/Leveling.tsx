@@ -7,6 +7,7 @@ import type {
 import { cleanError, slotId } from '../derive.js'
 import { MOD, SHORTCUTS, type Shortcut, matches, typing } from '../keys.js'
 import { act, say } from '../store.js'
+import { T, t } from '../i18n.js'
 import { Knob } from '../components/Knob.js'
 import { Meter, loudest } from '../components/Meter.js'
 import { PresetPicker } from '../modals/PresetPicker.js'
@@ -297,7 +298,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     void guard('save', async () => {
       const r = await window.patchbay.leveling.save(preset.name)
       mark(false)
-      say(`Saved ${r.name}`)
+      say(t('lvl.saved', { name: r.name }))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset, mark])
@@ -484,7 +485,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     if (!busyAll && auditing === null) return
     abort.current = true
     if (auditing !== null) void window.patchbay.leveling.sampleStopPlay().catch(() => undefined)
-    say('Stopping after this preset', false)
+    say(t('lvl.stopping'), false)
   }, [busyAll, auditing])
 
   // ── keyboard: the reason this tool exists ─────────────────────────────
@@ -531,12 +532,8 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     return (
       <div className="view">
         <div className="empty">
-          <h2>The bench needs a live session</h2>
-          <p className="fine">
-            Leveling reads and writes the preset on the device, so start the daemon from
-            Home first. Everything here rides that same session — Cortex Control and
-            Claude keep working alongside it.
-          </p>
+          <h2>{t('lvl.needSession')}</h2>
+          <p className="fine">{t('lvl.needSessionBody')}</p>
         </div>
       </div>
     )
@@ -546,39 +543,41 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     <div className="view lvl">
       <div className="lvl-bar">
         <div>
-          <h2>Leveling</h2>
-          <div className="fine">
-            Balance presets against each other on the <strong>lane output</strong> block —
-            the level that lives in the preset, so a save makes it permanent.
-          </div>
+          <h2>{t('lvl.title')}</h2>
+          <div className="fine"><T k="lvl.intro" /></div>
         </div>
         <span className="grow" />
-        <label className="lvl-auto" title="Write every level change straight into the preset file">
+        <label className="lvl-auto" title={t('lvl.autosaveTitle')}>
           <input
             type="checkbox"
             checked={autoSave}
             onChange={(e) => void act(() => window.patchbay.setPrefs({ benchAutoSave: e.target.checked }))}
           />
-          Auto-save
+          {t('lvl.autosave')}
         </label>
-        <Button size="sm" onClick={() => setHelping(true)}>How this works</Button>
+        <Button size="sm" onClick={() => setHelping(true)}>{t('lvl.howThisWorks')}</Button>
+        {/* A run you can watch and stop. Five presets used to be seventy-five
+            seconds of nothing you could do, with a name as the only sign of
+            life. */}
         {(busyAll || auditing !== null) && (
           <span className="lvl-run">
             <span className="lvl-run-dot" />
             {auditing !== null
-              ? 'Listening…'
+              ? t('lvl.listening')
               : runAt
-                ? `Measuring ${runAt.n} of ${runAt.total}${measuring ? ` · ${measuring}` : ''}`
-                : 'Working…'}
-            <button type="button" onClick={stopRun}>Stop</button>
+                ? t('lvl.measuringOf', {
+                    n: String(runAt.n), total: String(runAt.total),
+                    name: measuring ? ` · ${measuring}` : ''
+                  })
+                : t('lvl.working')}
+            <button type="button" onClick={stopRun}>{t('lvl.stop')}</button>
           </span>
         )}
         <Button size="sm" disabled={bench.length === 0 || busyAll}
-                onClick={audition}
-                title="Play the riff through each preset in turn (L)">
-          {auditing !== null ? 'Stop' : 'Listen to the set'}
+                onClick={audition} title={t('lvl.listenHint')}>
+          {auditing !== null ? t('lvl.stop') : t('lvl.listenToSet')}
         </Button>
-        <Button size="sm" onClick={() => setPicking(true)}>Add preset…</Button>
+        <Button size="sm" onClick={() => setPicking(true)}>{t('lvl.addPreset')}</Button>
       </div>
 
       <Measured
@@ -644,11 +643,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       />
 
       {/* Two tables that look alike and answer different questions. */}
-      <p className="lvl-divider fine">
-        Above: your presets against each other. Below: the scenes inside the one
-        preset in front of you — a different knob, because a lane has one output
-        level for the whole preset and a Gain block can hold eight.
-      </p>
+      <p className="lvl-divider fine">{t('lvl.divider')}</p>
 
       <Scenes
         rows={scenes}
@@ -678,19 +673,15 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       {error && (
         <div className="strip bad lvl-err">
           <span className="grow">{error}</span>
-          <Button size="sm" onClick={() => setError(null)}>Dismiss</Button>
+          <Button size="sm" onClick={() => setError(null)}>{t('lvl.dismiss')}</Button>
         </div>
       )}
 
       {bench.length === 0 ? (
         <div className="empty">
-          <h2>Nothing on the bench yet</h2>
-          <p className="fine">
-            Add the presets you want to balance. Patchbay loads one at a time on the
-            device — arrow keys walk the row, so you can A/B them without leaving the
-            keyboard — and remembers the scene each was left on.
-          </p>
-          <Button onClick={() => setPicking(true)}>Add preset…</Button>
+          <h2>{t('lvl.emptyTitle')}</h2>
+          <p className="fine">{t('lvl.emptyBody')}</p>
+          <Button onClick={() => setPicking(true)}>{t('lvl.addPreset')}</Button>
         </div>
       ) : (
         <div className="lvl-strip">
@@ -708,12 +699,12 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
                   <StatusDot tone={on ? 'ok' : 'idle'} />
                   <span className="lvl-name" title={b.name}>{b.name}</span>
                   <button className="lvl-x" onClick={(e) => { e.stopPropagation(); drop(i) }}
-                    aria-label={`Remove ${b.name} from the bench`}>×</button>
+                    aria-label={t('lvl.remove', { name: b.name })}>×</button>
                 </header>
 
                 <div className="lvl-db">
                   <span>{db === null ? <span className="off">—</span> : `${show(db)} dB`}</span>
-                  {on && dirty && <Badge className="attn">unsaved</Badge>}
+                  {on && dirty && <Badge className="attn">{t('lvl.unsaved')}</Badge>}
                 </div>
 
                 {/* meter beside the knob: stacked, a 150px meter plus a knob
@@ -732,25 +723,25 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
                     disabled={!on || !lanes.length || busy !== null}
                     onChange={(v) => applyLevel(v, false)}
                     onCommit={commit}
-                    label={`${b.name} level`}
+                    label={t('lvl.level', { name: b.name })}
                   />
                 </div>
 
                 <div className="lvl-lanes">
-                  {!p && <div className="lvl-lanes-hint">click to load</div>}
+                  {!p && <div className="lvl-lanes-hint">{t('lvl.clickToLoad')}</div>}
                   {p && Array.from({ length: LANE_SLOTS }, (_, k) => {
                     const l = p?.lanes[k]
                     if (!l) return <div key={k} className="lvl-lane empty" aria-hidden />
                     return (
                       <div key={l.row} className={l.active ? 'lvl-lane' : 'lvl-lane off'}>
                         <span className="lvl-out">{l.out}</span>
-                        <span className="mono">{l.active ? `${show(l.db)} dB` : 'silent'}</span>
+                        <span className="mono">{l.active ? `${show(l.db)} dB` : t('lvl.silent')}</span>
                         {l.active && (
                           <span className="lvl-trim">
                             <button onClick={(e) => { e.stopPropagation(); trim(l.row, -0.5) }}
-                              aria-label={`${l.out} down`}>−</button>
+                              aria-label={t('lvl.down', { out: l.out })}>−</button>
                             <button onClick={(e) => { e.stopPropagation(); trim(l.row, +0.5) }}
-                              aria-label={`${l.out} up`}>+</button>
+                              aria-label={t('lvl.up', { out: l.out })}>+</button>
                           </span>
                         )}
                       </div>
@@ -770,7 +761,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
                           (on && !used ? ' empty' : '')
                         }
                         disabled={!on}
-                        title={label || `Scene ${s}`}
+                        title={label || t('lvl.scene', { s })}
                         onClick={(e) => { e.stopPropagation(); pickScene(si) }}
                       >
                         <b>{s}</b>
@@ -785,15 +776,15 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
                   onClick={(e) => { e.stopPropagation(); save() }}
                   disabled={!on || !dirty || busy !== null}
                 >
-                  {busy === 'save' && on ? 'Saving…' : 'Save'}
+                  {busy === 'save' && on ? t('lvl.saving') : t('lvl.save')}
                 </Button>
               </article>
             )
           })}
 
-          <button className="lvl-add" onClick={() => setPicking(true)} aria-label="Add a preset">
+          <button className="lvl-add" onClick={() => setPicking(true)} aria-label={t('aria.addPreset')}>
             <span>+</span>
-            Add preset
+            {t('lvl.addPresetPlain')}
           </button>
         </div>
       )}
@@ -807,11 +798,11 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         {SHORTCUTS.filter((k) => k.scope === 'leveling' && !k.local).slice(0, 7).map((k) => (
           <span key={k.cap}>
             {k.cap.split(' ').map((c) => <kbd key={c}>{c}</kbd>)}
-            {' '}{k.does.split(' —')[0].split(' (')[0].toLowerCase()}
+            {' '}{t(k.short)}
           </span>
         ))}
         <button type="button" className="lvl-keys-all" onClick={() => setKeysOpen(true)}>
-          all shortcuts <kbd>?</kbd>
+          {t('keys.all')} <kbd>?</kbd>
         </button>
       </div>
 

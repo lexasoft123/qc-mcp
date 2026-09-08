@@ -1,5 +1,6 @@
 import { Button, Modal, ModalActions } from '@singz/ui'
 import { grouped } from '../keys.js'
+import { t } from '../i18n.js'
 
 /**
  * Every shortcut, from the same list the handlers read.
@@ -10,22 +11,19 @@ import { grouped } from '../keys.js'
  */
 export function Shortcuts({ onClose }: { onClose: () => void }): React.JSX.Element {
   return (
-    <Modal onClose={onClose} aria-label="Keyboard shortcuts" cardClassName="sc-card">
-      <h2>Keyboard</h2>
-      <p className="fine">
-        Everything below works with the mouse too — these are for when both hands
-        are holding a guitar.
-      </p>
+    <Modal onClose={onClose} aria-label={t('keys.title')} cardClassName="sc-card">
+      <h2>{t('keys.title')}</h2>
+      <p className="fine">{t('keys.lede')}</p>
 
       <div className="sc-groups">
         {grouped().map(([group, rows]) => (
           <div className="sc-group" key={group}>
-            <span className="eyebrow">{group}</span>
+            <span className="eyebrow">{t(group)}</span>
             <dl>
               {rows.map((r) => (
                 <div className="sc-row" key={`${group}-${r.cap}-${r.does}`}>
                   <dt>{r.cap.split(' ').map((c) => <kbd key={c}>{c}</kbd>)}</dt>
-                  <dd>{r.does}</dd>
+                  <dd>{t(r.does)}</dd>
                 </div>
               ))}
             </dl>
@@ -34,7 +32,7 @@ export function Shortcuts({ onClose }: { onClose: () => void }): React.JSX.Eleme
       </div>
 
       <ModalActions>
-        <Button variant="primary" onClick={onClose}>Got it</Button>
+        <Button variant="primary" onClick={onClose}>{t('gotIt')}</Button>
       </ModalActions>
     </Modal>
   )

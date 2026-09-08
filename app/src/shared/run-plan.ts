@@ -10,6 +10,7 @@
 
 import type { SessionMode } from './types.js'
 import type { Plan, Step } from './session.js'
+import { t, type Key } from './i18n/index.js'
 
 export interface SessionOps {
   stopDaemon(): Promise<void>
@@ -36,17 +37,18 @@ export interface Outcome {
   ran: Step[]
 }
 
-const LABEL: Record<Step['do'], string> = {
-  'stop-daemon': 'Closing the current session',
-  'take-over': 'Ending the session that holds the device',
-  'quit-cortex': 'Quitting Cortex Control',
-  'launch-bridge': 'Opening the instrumented Cortex Control',
-  'launch-stock': 'Opening Cortex Control',
-  'await-bridge': 'Waiting for the bridge',
-  'await-cortex': 'Waiting for Cortex Control',
-  'start-daemon': 'Starting the daemon',
-  'focus-cortex': 'Bringing Cortex Control forward'
+const LABEL_KEY: Record<Step['do'], Key> = {
+  'stop-daemon': 'step.stopDaemon',
+  'take-over': 'step.takeOver',
+  'quit-cortex': 'step.quitCortex',
+  'launch-bridge': 'step.launchBridge',
+  'launch-stock': 'step.launchStock',
+  'await-bridge': 'step.awaitBridge',
+  'await-cortex': 'step.awaitCortex',
+  'start-daemon': 'step.startDaemon',
+  'focus-cortex': 'step.focusCortex'
 }
+const LABEL = (d: Step['do']): string => t(LABEL_KEY[d])
 
 /**
  * Every step is bounded, and the whole plan is bounded again on top.
@@ -93,10 +95,8 @@ async function within<T>(
 const threw = (v: unknown): v is { [THREW]: unknown } =>
   typeof v === 'object' && v !== null && THREW in v
 
-const because = (step: Step, e: unknown): string => {
-  const msg = e instanceof Error ? e.message : String(e)
-  return `${LABEL[step.do]} failed: ${msg || 'no reason given'}`
-}
+const because = (step: Step, e: unknown): string =>
+  t('step.threw', { label: LABEL(step.do), why: e instanceof Error ? e.message : String(e) })
 
 export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
   if (plan.blocked) return { ok: false, error: plan.blocked, ran: [] }
@@ -106,7 +106,7 @@ export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
     within(STEP_TIMEOUT_MS[step.do], work)
 
   for (const step of plan.steps) {
-    ops.note?.(LABEL[step.do])
+    ops.note?.(LABEL(step.do))
     ran.push(step)
     switch (step.do) {
       case 'stop-daemon':
@@ -141,7 +141,7 @@ export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
         const ok = await guard(step, call)
         if (ok === TIMED_OUT) return fail(overran(step))
         if (threw(ok)) return fail(because(step, ok[THREW]))
-        if (!ok) return fail('Cortex Control did not open in time. Try again, or switch to Direct.')
+        if (!ok) return fail(t('step.appTimeout'))
         break
       }
       case 'start-daemon': {
@@ -157,5 +157,4 @@ export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
 }
 
 const overran = (step: Step): string =>
-  `${LABEL[step.do]} did not finish within ${Math.round(STEP_TIMEOUT_MS[step.do] / 1000)}s. ` +
-  'Nothing was left half-open; try again.'
+  t('step.overran', { label: LABEL(step.do), s: String(Math.round(STEP_TIMEOUT_MS[step.do] / 1000)) })

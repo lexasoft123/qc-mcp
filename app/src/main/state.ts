@@ -1,13 +1,18 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, app } from 'electron'
 import type { Check, ClientTarget, Prefs, Snapshot } from '../shared/types.js'
+import { getLocale, resolveLocale, setLocale, t } from '../shared/i18n/index.js'
 import * as clients from './clients.js'
 import * as logs from './logs.js'
 import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
-import { IS_MAC, PLATFORM, findRepo, pathsFor } from './paths.js'
+import { IS_MAC, PLATFORM, QC_PIDS, QC_VID, findRepo, pathsFor } from './paths.js'
 import * as lock from './lock.js'
 import { cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
+import { clear as clearUpdate, version } from './updater.js'
 import { exists } from './util.js'
+
+/** 0x880a — how the checklist prints a USB id. */
+const hex = (n: number): string => `0x${n.toString(16).padStart(4, '0')}`
 
 let prefs: Prefs = prefsStore.DEFAULTS
 let paths = pathsFor(process.cwd())
@@ -34,8 +39,33 @@ let busy = false
 
 export const setBusy = (b: boolean): void => { busy = b }
 
+/**
+ * The machine's languages, most preferred first, as BCP-47 tags — macOS gives
+ * `zh-Hans-CN`, Windows `zh-CN`. `getLocale()` alone is Chromium's single
+ * pick, which can be English on a machine whose owner reads Chinese second.
+ */
+function systemTags(): string[] {
+  // A testing hook, like the updater's PATCHBAY_FAKE_VERSION: comma-separated
+  // BCP-47 tags that stand in for the machine's list, so a localised build can
+  // be seen in the other language on a machine set to English.
+  const fake = process.env.PATCHBAY_FAKE_LANGUAGES
+  if (fake) return fake.split(',').map((tag) => tag.trim()).filter(Boolean)
+  try {
+    const list = app.getPreferredSystemLanguages()
+    if (list.length) return list
+  } catch { /* older Electron */ }
+  try { return [app.getLocale()] } catch { return [] }
+}
+
+const systemLocale = (): Snapshot['systemLocale'] => resolveLocale('system', systemTags())
+
+function applyLocale(): void {
+  setLocale(resolveLocale(prefs.language, systemTags()))
+}
+
 export function init(): void {
   prefs = prefsStore.load()
+  applyLocale()
   paths = pathsFor(findRepo(prefs.repo), prefs.cortex)
   daemon = new Daemon(paths)
   daemon.setMode(prefs.mode)
@@ -56,15 +86,15 @@ function checksFrom(
   const list: Check[] = [
     {
       id: 'python',
-      title: python.uv ? 'Python (bundled)' : 'Python 3.10 or newer',
+      title: python.uv ? t('check.python.bundled') : t('check.python'),
       detail: pythonDetail(python),
       status: python.ok ? 'ok' : 'missing',
       fixable: false
     },
     {
       id: 'venv',
-      title: 'Virtual environment',
-      detail: 'creates <code>.venv</code> and installs <code>qc-mcp</code> editable',
+      title: t('check.venv'),
+      detail: t('check.venv.detail'),
       status: exists(paths.bin) ? 'ok' : 'missing',
       fixable: true
     }
@@ -73,16 +103,18 @@ function checksFrom(
   if (IS_MAC) {
     list.push({
       id: 'clang',
-      title: 'Command line tools',
-      detail: '<code>clang</code> — compiles the interposer',
+      title: t('check.clang'),
+      detail: t('check.clang.detail'),
       status: clang ? 'ok' : 'missing',
       fixable: true
     })
   }
   list.push({
     id: 'app',
-    title: 'Cortex Control',
-    detail: `<code>${paths.show.cortex}</code>${cortex.version ? ` · ${cortex.version}` : ' — not installed'}`,
+    title: t('check.app'),
+    detail: cortex.version
+      ? t('check.app.detail', { path: paths.show.cortex, version: cortex.version })
+      : t('check.app.missing', { path: paths.show.cortex }),
     status: cortex.installed ? 'ok' : 'missing',
     fixable: false
   })
@@ -90,10 +122,10 @@ function checksFrom(
     const inst = cortex.instrumented
     list.push({
       id: 'instrumented',
-      title: 'Instrumented copy',
+      title: t('check.instrumented'),
       detail: inst?.built
-        ? `re-signed ad-hoc · hardened runtime ${inst.hardenedRuntimeOff ? 'off' : 'ON, injection is blocked'}`
-        : 'copies the app, re-signs ad-hoc, verifies injection is allowed',
+        ? t('check.instrumented.built', { state: t(inst.hardenedRuntimeOff ? 'check.hardened.off' : 'check.hardened.on') })
+        : t('check.instrumented.todo'),
       status: inst?.built && inst.hardenedRuntimeOff && inst.libraryValidationOff ? 'ok' : 'missing',
       fixable: true
     })
@@ -101,15 +133,17 @@ function checksFrom(
   list.push(
     {
       id: 'register',
-      title: 'Register with clients',
-      detail: 'writes the server entry into each MCP client config',
+      title: t('check.register'),
+      detail: t('check.register.detail'),
       status: targets.some((c) => c.installed) ? 'ok' : 'missing',
       fixable: true
     },
     {
       id: 'device',
-      title: 'Quad Cortex on USB',
-      detail: `vendor 0x152a · product 0x880a${device.serial ? ` · ${device.serial}` : ''}`,
+      title: t('check.device'),
+      detail: device.present
+        ? `${device.model ?? 'Quad Cortex'}${device.serial ? ` · ${device.serial}` : ''}`
+        : t('check.device.ids', { vid: hex(QC_VID), pids: Object.keys(QC_PIDS).map(Number).map(hex).join(' / ') }),
       status: device.present ? 'ok' : 'missing',
       fixable: false
     }
@@ -158,6 +192,12 @@ export async function refresh(deep = false): Promise<Snapshot> {
 
   snapshot = {
     platform: PLATFORM,
+    // the updater's, not app.getVersion() directly: one definition of "the
+    // running version", so PATCHBAY_FAKE_VERSION moves the rail and the check
+    // together instead of leaving them disagreeing
+    version: version(),
+    locale: getLocale(),
+    systemLocale: systemLocale(),
     paths,
     // The one record that says who holds the device. Everything that used to be
     // inferred — is a daemon up, in what mode, did we start it — is read here.
@@ -192,6 +232,12 @@ export function updatePrefs(patch: Partial<Prefs>): void {
   prefs = { ...prefs, ...patch }
   prefsStore.save(prefs)
   if (patch.mode) daemon.setMode(patch.mode)
+  // The checklist is rebuilt on every refresh, so the next push speaks the
+  // new language; the renderer switches on the snapshot's `locale`.
+  if (patch.language !== undefined) applyLocale()
+  // The preference promises to silence the rail chip, not merely to stop future
+  // checks — a cached 'available' would otherwise sit there for the session.
+  if (patch.updates === false) clearUpdate()
   // a new repo or app location invalidates everything cached about them
   if (patch.repo !== undefined || patch.cortex !== undefined) slow = null
 }

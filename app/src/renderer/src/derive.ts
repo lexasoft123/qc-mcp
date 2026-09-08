@@ -1,6 +1,7 @@
 import type { ClientTarget, Mode, SessionMode, Snapshot } from '@shared/types'
 import type { Facts } from '@shared/session'
 import { planFor, planWords, resolveSession } from '@shared/session'
+import { t } from '@shared/i18n'
 
 export const isMac = (s: Snapshot): boolean => s.platform === 'mac'
 
@@ -92,14 +93,13 @@ export function modePlan(s: Snapshot, mode: Mode = s.prefs.mode): ModePlan {
  * The mode alone will not do it here — `auto` is displayed as the selection, and
  * what it resolved to is the thing the user came to the front page to learn.
  */
+/** The one-word name of the open session, for the titlebar. */
+export const sessionWord = (s: Snapshot): string => t(`session.${sessionMode(s)}`)
+
 export const sessionWords = (s: Snapshot, m: SessionMode): string =>
   m === 'direct'
-    ? isMac(s)
-      ? 'direct — the daemon holds the USB device on its own'
-      : 'direct — an exclusive HID handle'
-    : m === 'shared'
-      ? 'shared — a second handle beside Cortex Control'
-      : "bridge — riding Cortex Control's own connection"
+    ? isMac(s) ? t('session.directMac') : t('session.directWin')
+    : m === 'shared' ? t('session.shared') : t('session.bridge')
 
 export const regCount = (s: Snapshot): number => s.clients.filter((c) => c.installed).length
 
@@ -118,7 +118,8 @@ export function uptime(startedAt: number | null): string {
   const secs = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
   const h = Math.floor(secs / 3600)
   const m = Math.floor((secs % 3600) / 60)
-  return `${h ? `${h}h ` : ''}${m}m ${String(secs % 60).padStart(2, '0')}s`
+  const s = String(secs % 60).padStart(2, '0')
+  return h ? t('uptime.hms', { h, m, s }) : t('uptime.ms', { m, s })
 }
 
 /**
@@ -149,11 +150,10 @@ export function cleanError(raw: string | null): string | null {
 export function heldByOther(s: Snapshot): string | null {
   const l = s.lock
   if (!l || l.launchedBy === 'patchbay') return null
-  const who = l.owner === 'mcp' ? 'An MCP client' : l.owner === 'bench' ? 'The leveling bench' : 'A daemon'
-  const how = l.mode === 'direct' ? 'holding the device on its own'
-    : l.mode === 'shared' ? 'sharing the device with Cortex Control'
-      : "riding Cortex Control's session"
-  return `${who} started outside Patchbay is ${how}.`
+  return t('lock.heldBy', {
+    who: t(`lock.owner.${l.owner}` as Parameters<typeof t>[0]),
+    how: t(`lock.how.${l.mode}` as Parameters<typeof t>[0])
+  })
 }
 
 /**
@@ -170,45 +170,36 @@ export function heldButUnreachable(s: Snapshot): boolean {
 
 /** Which Cortex Control is up, if any — the stock app or the instrumented copy. */
 export function cortexText(s: Snapshot): string {
-  if (!s.cortex.running) return 'Cortex Control closed'
+  if (!s.cortex.running) return t('cortexText.closed')
   return s.cortex.runningInstrumented
-    ? 'instrumented Cortex Control open'
-    : 'stock Cortex Control open'
+    ? t('cortexText.instrumented')
+    : t('cortexText.stock')
 }
 
 export function railText(s: Snapshot): string {
-  if (!s.device.present) return 'No Quad Cortex found on USB'
-  if (s.daemon.state === 'starting') return 'Opening the session…'
+  if (!s.device.present) return t('rail.noDevice')
+  if (s.daemon.state === 'starting') return t('rail.opening')
   // Somebody else's session comes first: it is why nothing else will work, and
   // it used to be the one thing nothing could see.
   if (heldButUnreachable(s)) {
-    return `A ${s.lock!.mode} daemon (pid ${s.lock!.pid}) is holding the device and answering nobody` +
-      ' — Take over on Home'
+    return t('rail.unreachable', { mode: s.lock!.mode, pid: String(s.lock!.pid) })
   }
   const other = heldByOther(s)
-  if (other && s.daemon.state !== 'running') return `${other} Take over on Home`
+  if (other && s.daemon.state !== 'running') return `${other} ${t('rail.takeOverHint')}`
   if (s.daemon.state !== 'running') {
     const why = cleanError(s.daemon.error)
-    return why
-      ? `Not connected — ${why}`
-      : 'Daemon stopped — no MCP client can reach the device'
+    return why ? t('rail.notConnected', { why }) : t('rail.daemonStopped')
   }
-  if (clash(s)) return 'Direct mode blocked — Cortex Control is still holding the device'
-  const who = s.daemon.external ? 'Adopted a daemon started outside Patchbay' : null
+  if (clash(s)) return t('rail.clash')
+  const who = s.daemon.external ? t('rail.adopted') : null
   const body = ((): string => {
     switch (sessionMode(s)) {
       case 'direct':
-        return isMac(s)
-          ? 'Direct session — the daemon holds the USB interface'
-          : 'Direct session — exclusive HID handle'
+        return isMac(s) ? t('rail.directMac') : t('rail.directWin')
       case 'shared':
-        return s.cortex.running
-          ? 'Sharing the device with Cortex Control · second HID handle'
-          : 'Daemon has the device · Cortex Control is closed'
+        return s.cortex.running ? t('rail.sharedApp') : t('rail.sharedNoApp')
       default:
-        return s.cortex.running
-          ? "Bridge session — sharing Cortex Control's own connection"
-          : 'Waiting for Cortex Control — bridge mode needs the instrumented app'
+        return s.cortex.running ? t('rail.bridgeApp') : t('rail.bridgeNoApp')
     }
   })()
   return `${who ? who + ' · ' : ''}${body} · ${cortexText(s)}`
@@ -217,11 +208,11 @@ export function railText(s: Snapshot): string {
 export const sessionFact = (s: Snapshot): string => {
   switch (sessionMode(s)) {
     case 'direct':
-      return isMac(s) ? 'direct · IOHIDDevice seized' : 'direct · exclusive HID handle'
+      return isMac(s) ? t('fact.directMac') : t('fact.directWin')
     case 'shared':
-      return 'shared · second HID handle, non-exclusive'
+      return t('fact.shared')
     default:
-      return 'bridge · /tmp/qc_inject ⇄ /tmp/qc_in'
+      return t('fact.bridge')
   }
 }
 

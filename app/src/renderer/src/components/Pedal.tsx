@@ -5,6 +5,7 @@
  * is on a clock — the first note starts the take and the silence after ends it,
  * so the control has three faces rather than a start and a stop button.
  */
+import { t } from '../i18n.js'
 
 const R = 72
 const CIRC = 2 * Math.PI * R
@@ -40,7 +41,7 @@ export function Pedal({
         type="button"
         className={`pedalbtn ${state}`}
         onClick={recording || armed ? onStop : onArm}
-        aria-label={recording ? 'Stop recording' : armed ? 'Cancel' : 'Arm the recorder'}
+        aria-label={recording ? t('pedal.stop') : armed ? t('pedal.cancel') : t('pedal.arm')}
       >
         {(recording || armed) && (
           <svg className="ring" viewBox="0 0 160 160" aria-hidden>

@@ -1,5 +1,7 @@
 # Patchbay
 
+**中文用户：**[简体中文上手指南 → README.zh-CN.md](README.zh-CN.md)
+
 Ask Claude for a tone and it builds it on your Quad Cortex. Patchbay is the
 launcher that makes that true: it installs [qc-mcp](../README.md), registers the
 server with your MCP clients, runs the daemon that owns the device, and opens
@@ -33,7 +35,12 @@ is 3.9.6, under the 3.10 the package needs, and Windows has none at all.
 - **One daemon, every client** — the daemon owns the device and fans
   device→host reports out to every attached MCP client, each with a disjoint
   `request_id` range so two can never mistake each other's replies. Claude Code,
-  Claude Desktop, Cursor and VS Code can all be attached at the same time.
+  Claude Desktop, Cursor, VS Code, Zed and Codex can all be attached at the
+  same time — see [Connecting an AI client](#connecting-an-ai-client).
+- **Speaks your language** — English and Simplified Chinese, following the
+  system language on first launch; Preferences has the switcher. Everything
+  switches at once: the views, the checklist, the progress lines, the update
+  messages. See [Language](#language).
 - **Setup that actually checks** — seven probes on macOS, five on Windows, each
   one a real measurement rather than a stored flag, with a fix for the ones
   Patchbay can perform. It never asks for your password.
@@ -79,6 +86,79 @@ selector switches auto / bridge / direct on a running daemon.
 
 ![The Logs view streaming HID reports with timestamps, direction, byte counts and hex, with failed writes highlighted](../docs/patchbay/logs.png)
 
+## Connecting an AI client
+
+Patchbay registers `quad-cortex` with every client it finds on the machine
+the first time setup runs, and **Console → Manage clients…** is where you
+change that later. Every entry is the same three words — the `qc-mcp` binary,
+`--attach`, and the daemon's socket — written into each client's own file, and
+the sheet shows what each client does with it once you press **Apply**.
+
+| client | config file | written how | then |
+|---|---|---|---|
+| Claude Code | `~/.claude.json` | `claude mcp add --scope user` when the CLI is on PATH, else a JSON merge | new sessions see it; `claude mcp list` confirms |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` · `%APPDATA%\Claude\…` | JSON merge under `mcpServers` | quit and reopen the app; it reads the file at launch |
+| Cursor | `~/.cursor/mcp.json` | JSON merge under `mcpServers` | Settings → MCP lists it; switch it on if it is off |
+| VS Code | `~/Library/Application Support/Code/User/mcp.json` · `%APPDATA%\Code\User\…` | JSON merge under `servers` | **MCP: List Servers** from the Command Palette, and start it |
+| Zed | `~/.config/zed/settings.json` · `%APPDATA%\Zed\…` | JSON merge under `context_servers` | restart Zed; the Agent panel's settings list it |
+| Codex | `~/.codex/config.toml` | its own `[mcp_servers.quad-cortex]` table, the rest of the file untouched | new sessions see it; `codex mcp list` confirms |
+
+A client that is not on this list gets the same entry by hand. JSON clients:
+
+```json
+{ "mcpServers": { "quad-cortex": {
+    "command": "/absolute/path/to/.venv/bin/qc-mcp",
+    "args": ["--attach", "--socket", "/absolute/path/to/daemon.sock"] } } }
+```
+
+and the TOML twin for Codex (or anything else that reads TOML):
+
+```toml
+[mcp_servers.quad-cortex]
+command = "/absolute/path/to/.venv/bin/qc-mcp"
+args = ["--attach", "--socket", "/absolute/path/to/daemon.sock"]
+```
+
+The real paths are in the sheet, filled in for your machine — Preferences →
+Locations shows where the repo is, and the socket lives under
+`~/Library/Application Support/qc-mcp/` on macOS and `%LOCALAPPDATA%\qc-mcp\`
+on Windows. `--attach` is what makes several clients share one device: an
+entry without it (the shape `install.sh` used to write) opens the device for
+itself and fails while the daemon holds it, which is what the amber
+**opens the device itself** in Console means. **Re-point** rewrites it.
+
+## Language
+
+Patchbay follows the system language: a Mac or PC set to Simplified Chinese
+gets a Chinese Patchbay on first launch, nothing to find first. Preferences
+has the switcher — the first group in the dialog, on purpose — with a
+*System* entry that says which language it currently resolves to, and each
+language listed by its own name.
+
+Both processes translate: the renderer for the views, and the main process
+for what it originates — the Setup checklist, the progress lines during an
+install, the daemon's errors — so a toast reads in the same language as the
+button that caused it. The dictionaries live in
+[`src/shared/i18n/`](src/shared/i18n/), typed against English, so a string
+missing from a translation is a compile error rather than an English line on a
+Chinese screen. `npm test` checks the placeholders and markup match too.
+
+Traditional Chinese (`zh-TW`, `zh-HK`) is deliberately not mapped onto the
+Simplified translation: it is one click away in the switcher, but nobody is
+handed it.
+
+The choice is stored in `prefs.json` and survives a restart. The default is
+`system`, resolved when Patchbay starts — change the machine's language and
+Patchbay follows it the next time it opens. To see the other language on a
+machine set to English:
+
+```bash
+PATCHBAY_FAKE_LANGUAGES=zh-Hans-CN,en-US npm run dev
+```
+
+That stands in for the machine's own list, the way `PATCHBAY_FAKE_VERSION`
+stands in for the running version.
+
 ## Install
 
 Download the installer for your platform from
@@ -104,8 +184,8 @@ Everything the main process reports is measured, not mocked:
 | clang | `clang --version` (macOS only) |
 | Cortex Control | `Info.plist` via `defaults read`, or the exe's `ProductVersion` |
 | instrumented copy | `codesign -dvvv` flags **and** the entitlements — both, because injection needs the hardened runtime off *and* library validation disabled |
-| registration | each client's own config file is read for the `quad-cortex` key |
-| device | `ioreg -p IOUSB` for vid `0x152a` / pid `0x880a`, or `Get-PnpDevice` |
+| registration | each client's own config file is read for the `quad-cortex` key — JSON, or Codex's `[mcp_servers.quad-cortex]` table |
+| device | `ioreg -p IOUSB` for vid `0x152a` / pid `0x880a` (Quad Cortex) or `0x892f` (Mini), or `Get-PnpDevice` |
 | reports/s | counted from the interposer's own millisecond stamps in the last 2 s |
 
 Installs are real too: `uv venv` + `uv pip install -e .` (or `python -m venv` +
@@ -157,6 +237,7 @@ reports its own platform and the UI follows.
 | Cortex Control module | maintained (build, verify, rebuild on drift) | observed; the daemon works with the app closed |
 | endpoint | unix socket | loopback port + a `.port` file |
 | backdrop blur | yes | **no** — a Windows iGPU pays a full-window re-raster per blurred surface, which is why the kit's own `chrome.css` already drops it from the scrim |
+| updates | checked, then you are handed the release page | downloaded in the background, installed on quit |
 
 Both paths are exercised on real hardware: the daemon, its tests and two
 concurrent attached clients have been run against a Quad Cortex on macOS and on
@@ -174,6 +255,7 @@ caution in the Console describes.
 npm install     # electron's postinstall must run — approve it if npm asks
 npm run dev     # the app, with HMR
 npm run build   # typecheck + bundle into out/
+npm test        # the updater's pure logic (node --test, no build step)
 npm run icons   # redraw build/icon.icns + .ico from build/icon/forge.html
 ```
 
@@ -191,6 +273,48 @@ npm run dist:win     # -> dist/*.exe  (nsis)
 `dist:*` fetches the pinned `uv` first. Tagging `v*` and pushing runs
 [.github/workflows/release.yml](../.github/workflows/release.yml), which gates on
 the offline Python suite, packages both platforms, and attaches the artifacts.
+
+## Updates
+
+Patchbay asks GitHub for the newest `v*` release every six hours (and three
+seconds after launch), compares it with its own version, and shows a chip in the
+rail when there is a newer one. Preferences has the switch that turns the
+automatic check off, a **Check now** button that ignores it, and the last
+result in words.
+
+What happens when you press the chip differs by platform, and the reason is
+packaging rather than trust:
+
+- **Windows** gets the real thing. `electron-updater` reads `latest.yml` off the
+  release, downloads the nsis installer in the background, and installs it the
+  next time Patchbay quits — or immediately, from *Restart to update*.
+- **macOS** gets a link to the release page. Squirrel.Mac installs from a `zip`
+  feed and this app builds `dmg` only; electron-builder does not even write a
+  `latest-mac.yml` for a dmg-only build. Giving macOS an in-place update means
+  adding a zip target and putting a third artifact through Apple's notary queue
+  on every release — worth doing, but its own piece of work.
+
+Nothing is ever installed without a press, on either platform. An unpackaged
+build never checks at all, since `app.getVersion()` there is whatever
+`package.json` says.
+
+Three environment variables exist for testing it:
+
+| variable | effect |
+|---|---|
+| `PATCHBAY_TEST_UPDATER` | check even when unpackaged, and take the GitHub path on Windows too |
+| `PATCHBAY_FAKE_VERSION` | the version to compare against, and what the rail shows |
+| `PATCHBAY_UPDATE_URL` | point `electron-updater` at a generic feed directory instead of GitHub |
+
+```bash
+PATCHBAY_TEST_UPDATER=1 PATCHBAY_FAKE_VERSION=0.0.1 npm run dev   # "Get <latest>"
+PATCHBAY_TEST_UPDATER=1 PATCHBAY_FAKE_VERSION=9.9.9 npm run dev   # "up to date"
+```
+
+`electron-updater` is the app's only runtime dependency, and it is a real one:
+it must stay unbundled so it can read the `app-update.yml` electron-builder
+packages beside it, which is why it sits in `dependencies` rather than
+`devDependencies` like everything else here.
 
 ## One caveat worth knowing
 

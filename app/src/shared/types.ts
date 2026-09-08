@@ -1,5 +1,7 @@
 /** The contract between the main process and the renderer. */
 
+import type { Language, Locale } from './i18n/rules.js'
+
 export type Platform = 'mac' | 'win'
 export type Mode = 'auto' | 'bridge' | 'direct'
 /**
@@ -36,6 +38,9 @@ export interface ClientTarget {
   found: boolean
   /** our server entry is present in its config */
   installed: boolean
+  /** How the config is written — Codex keeps TOML, the rest JSON. The clients
+   *  sheet shows the matching snippet. */
+  format: 'json' | 'toml'
   /** installed, but from before the daemon: it still opens the device itself,
    *  so it will fail while the daemon holds one */
   stale: boolean
@@ -104,6 +109,8 @@ export interface DaemonInfo {
 
 export interface DeviceInfo {
   present: boolean
+  /** which model answered - 'Quad Cortex' / 'Quad Cortex Mini' */
+  model: string | null
   serial: string | null
   firmware: string | null
 }
@@ -138,10 +145,20 @@ export interface Prefs {
   bench: BenchSlot[]
   /** Write each level change straight into the preset file. */
   benchAutoSave: boolean
+  /** Ask GitHub every few hours whether a newer Patchbay is out. */
+  updates: boolean
+  /** The UI language: a locale, or `system` to follow the machine. */
+  language: Language
 }
 
 export interface Snapshot {
   platform: Platform
+  /** The running app version, from the updater — see its `version()`. */
+  version: string
+  /** The locale in use, resolved from the preference and the system. */
+  locale: Locale
+  /** What `system` would pick right now — the switcher names it. */
+  systemLocale: Locale
   paths: Paths
   checks: Check[]
   clients: ClientTarget[]
@@ -392,6 +409,22 @@ export interface Progress {
   error?: string
 }
 
+/**
+ * Where the updater is, pushed on its own channel rather than folded into the
+ * Snapshot: a Windows download reports progress many times a second and the
+ * snapshot poll runs every two.
+ *
+ * `available` is macOS's terminal state — there the update is a link, not an
+ * install. See src/main/updater.ts.
+ */
+export type UpdateState =
+  | { state: 'none' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string; url: string }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'ready'; version: string }
+  | { state: 'error'; message: string }
+
 export interface Api {
   snapshot(): Promise<Snapshot>
   onSnapshot(cb: (s: Snapshot) => void): () => void
@@ -412,9 +445,9 @@ export interface Api {
   setMode(mode: Mode): Promise<Snapshot>
 
   cortexLaunch(): Promise<Snapshot>
+  cortexFocus(): Promise<Snapshot>
   cortexQuit(): Promise<Snapshot>
   /** Bring a running Cortex Control forward WITHOUT relaunching it. */
-  cortexFocus(): Promise<Snapshot>
   cortexRebuild(): Promise<Snapshot>
 
   readLog(limit: number): Promise<LogLine[]>
@@ -426,6 +459,18 @@ export interface Api {
 
   choosePath(what: 'repo' | 'cortex'): Promise<Snapshot>
   reveal(path: string): Promise<void>
+
+  update: {
+    /** Whatever the last check concluded, without starting a new one. */
+    state(): Promise<UpdateState>
+    /** Check now, regardless of the `updates` preference. */
+    check(): Promise<UpdateState>
+    /** Windows, `ready` only: quit and run the installer. */
+    install(): void
+    /** macOS: open the release page in the browser. */
+    download(): Promise<void>
+    onState(cb: (u: UpdateState) => void): () => void
+  }
 
   /** The preset-leveling bench. Every call rides the daemon's live session. */
   leveling: {

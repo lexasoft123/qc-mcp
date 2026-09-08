@@ -3,6 +3,7 @@ import { Badge, Button } from '@singz/ui'
 import type {
   AudioState, AutoResult, AutoStep, Measurement, RiffList, SampleState
 } from '@shared/types'
+import { T, t } from '../i18n.js'
 import { InputMeter, Pedal, Wave } from './Pedal.js'
 
 /**
@@ -223,36 +224,32 @@ export function Measured({
   return (
     <div className={`lvl-measured ${busyRecording ? 'live' : ''}`}>
       <div className="lvl-measured-head">
-        <span className="eyebrow">Reference riff</span>
-        {ready && <Badge className="live">Ready</Badge>}
-        {recording && <Badge className="attn">Recording</Badge>}
-        {armed && <Badge className="attn">Listening</Badge>}
+        <span className="eyebrow">{t('msd.riff')}</span>
+        {ready && <Badge className="live">{t('msd.ready')}</Badge>}
+        {recording && <Badge className="attn">{t('msd.recording')}</Badge>}
+        {armed && <Badge className="attn">{t('msd.listening')}</Badge>}
         <span className="fine">
-          {busyRecording
-            ? 'Recording starts on your first note and stops when you stop playing.'
-            : ready
-              ? 'Played into every preset, so they are all measured with the same signal.'
-              : 'Record one riff. It is played into every preset, so they are all measured with the same signal.'}
+          {busyRecording ? t('msd.hint.recording') : ready ? t('msd.hint.ready') : t('msd.hint.none')}
         </span>
         <span className="grow" />
         {ready && (
           <div className="lvl-measured-acts-head">
             <label className="lvl-measured-target">
-              <abbr title="Broadcast loudness standard (EBU R128). -18 LUFS leaves headroom for a band and matches most amp models' own output.">Target</abbr>
+              <abbr title={t('msd.targetHint')}>{t('msd.target')}</abbr>
               <select value={target} onChange={(e) => onTarget(Number(e.target.value))}
                       disabled={running}>
                 {TARGETS.map((t) => <option key={t} value={t}>{t} LUFS</option>)}
               </select>
             </label>
             <Button size="sm" disabled={busy !== null} onClick={() => void measure()}>
-              {busy === 'measure' ? 'Measuring…' : 'Measure'}
+              {busy === 'measure' ? t('msd.measuring') : t('msd.measure')}
             </Button>
             <Button size="sm" disabled={busy !== null} onClick={() => void run(true)}>
-              Suggest
+              {t('msd.suggest')}
             </Button>
             <Button size="sm" variant="primary" disabled={busy !== null}
                     onClick={() => void run(false)}>
-              {running ? 'Levelling…' : 'Level to target'}
+              {running ? t('msd.levelling') : t('msd.levelTo')}
             </Button>
           </div>
         )}
@@ -260,9 +257,7 @@ export function Measured({
 
       {!busyRecording && riffs && riffs.riffs.length > 0 && (
         <div className="riffs">
-          <span className="eyebrow">
-            {ready ? 'Or use one of ours' : 'No guitar to hand?'}
-          </span>
+          <span className="eyebrow">{ready ? t('msd.orOurs') : t('msd.noGuitar')}</span>
           <div className="riff-row">
             {riffs.riffs.map((r) => (
               <button
@@ -273,15 +268,14 @@ export function Measured({
                 onClick={() => void useRiff(r.name)}
               >
                 <b>{r.name}</b>
-                <span>{loadingRiff === r.name ? 'loading…' : `${r.seconds.toFixed(1)}s`}</span>
+                <span>{loadingRiff === r.name ? t('msd.loading') : `${r.seconds.toFixed(1)}s`}</span>
               </button>
             ))}
           </div>
           <p className="hint">
             {riffs.loaded
               ? riffs.riffs.find((r) => r.name === riffs.loaded)?.why
-              : 'Synthesised, always the same, and loud enough to measure with. '
-                + 'Recording your own is better — it is your playing — but these need no room and no guitar.'}
+              : t('msd.riffsHint')}
           </p>
         </div>
       )}
@@ -304,22 +298,20 @@ export function Measured({
                   {(sample?.seconds_recorded ?? 0).toFixed(1)}<em>s</em>
                 </span>
                 <span className="eyebrow">
-                  of {(sample?.max_seconds ?? 30).toFixed(0)} s max
+                  {t('msd.ofMax', { max: (sample?.max_seconds ?? 30).toFixed(0) })}
                 </span>
                 <span className="grow" />
                 {silenceLeft !== null && silenceLeft > 0 && (
-                  <span className="warn">stops in {silenceLeft.toFixed(1)} s</span>
+                  <span className="warn">{t('msd.stopsIn', { s: silenceLeft.toFixed(1) })}</span>
                 )}
-                <span className="lvl-measured-in">in {db(sample?.input_dbfs)} dBFS</span>
+                <span className="lvl-measured-in">{t('msd.inDbfs', { db: db(sample?.input_dbfs) })}</span>
               </div>
               {recording
                 ? <Wave peaks={peaks} live height={84} />
                 : <InputMeter dbfs={sample?.input_dbfs ?? null}
                               thresholdDbfs={sample?.threshold_dbfs ?? -40} />}
               {armed && (
-                <div className="hint">
-                  The dashed line is the start threshold — play above it to begin.
-                </div>
+                <div className="hint">{t('msd.threshold')}</div>
               )}
             </>
           ) : ready ? (
@@ -332,22 +324,22 @@ export function Measured({
                   ones tests/test_leveling_e2e.py holds the shipped riffs to. */}
               <Verdict peak={sample?.peak_dbfs ?? null} lufs={sample?.lufs ?? null} />
               <dl className="facts lvl-measured-facts">
-                <div className="fact"><dt>Duration</dt>
+                <div className="fact"><dt>{t('msd.duration')}</dt>
                   <dd>{(sample?.duration_s ?? 0).toFixed(2)} s</dd></div>
-                <div className="fact"><dt>Peak</dt>
+                <div className="fact"><dt>{t('msd.peak')}</dt>
                   <dd>{db(sample?.peak_dbfs)} dBFS</dd></div>
-                <div className="fact"><dt>Loudness</dt>
+                <div className="fact"><dt>{t('msd.loudness')}</dt>
                   <dd>{db(sample?.lufs)} LUFS</dd></div>
-                <div className="fact"><dt>Preset</dt>
-                  <dd className="muted">{presetName ?? 'none loaded'}</dd></div>
+                <div className="fact"><dt>{t('msd.preset')}</dt>
+                  <dd className="muted">{presetName ?? t('msd.noneLoaded')}</dd></div>
               </dl>
               <div className="lvl-measured-acts">
                 <Button size="sm" disabled={playing}
                         onClick={() => void (playing ? stopPlay() : play())}
-                        title="Hear the riff through this preset (P)">
-                  {playing ? 'Stop' : 'Play through preset'} <kbd>P</kbd>
+                        title={t('msd.playHint')}>
+                  {playing ? t('msd.stop') : t('msd.play')} <kbd>P</kbd>
                 </Button>
-                <Button size="sm" onClick={() => void arm()}>Re-record</Button>
+                <Button size="sm" onClick={() => void arm()}>{t('msd.reRecord')}</Button>
                 <span className="grow" />
                 {(reading || shown || result) && (
                   <span className="lvl-measured-out">
@@ -435,7 +427,7 @@ function Verdict({ peak, lufs }: { peak: number | null; lufs: number | null }): 
     return (
       <div className="verdict good">
         <span className="dot" />
-        Good to measure with — {peak.toFixed(1)} dBFS peak, plenty to hear through a preset.
+        {t('msd.verdict.good', { peak: peak.toFixed(1) })}
       </div>
     )
   }
@@ -443,11 +435,11 @@ function Verdict({ peak, lufs }: { peak: number | null; lufs: number | null }): 
     <div className="verdict bad">
       <span className="dot" />
       <span>
-        <b>Too quiet to measure with.</b>{' '}
+        <T k="msd.verdict.bad" />{' '}
         {quiet
-          ? `It peaks at ${peak.toFixed(1)} dBFS; -12 or hotter gives a preset something to work on.`
-          : `It averages ${lufs?.toFixed(1)} LUFS — mostly gaps, so the gaps get measured.`}{' '}
-        Play harder and re-record, or use one of the sample riffs.
+          ? t('msd.verdict.quiet', { peak: peak.toFixed(1) })
+          : t('msd.verdict.thin', { lufs: lufs?.toFixed(1) ?? '' })}{' '}
+        {t('msd.verdict.fix')}
       </span>
     </div>
   )

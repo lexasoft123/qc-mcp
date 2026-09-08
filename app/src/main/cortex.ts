@@ -3,6 +3,7 @@ import type { Paths } from '../shared/types.js'
 import { BRIDGE_FIFOS, IS_MAC, bridgeScript, instrumentedApp } from './paths.js'
 import { cortexPid } from './system.js'
 import { exists, ps, run, sleep } from './util.js'
+import { t } from '../shared/i18n/index.js'
 
 /**
  * Launch Cortex Control.
@@ -23,27 +24,13 @@ export async function launch(paths: Paths): Promise<string | null> {
       spawn(script, [], { cwd: paths.repo, detached: true, stdio: 'ignore' }).unref()
       return null
     }
-    if (!exists(paths.cortex)) return 'Cortex Control is not installed.'
+    if (!exists(paths.cortex)) return t('cortex.notInstalled')
     // no instrumented copy: the stock app still works, bridge mode will not
     spawn('open', ['-a', paths.cortex], { detached: true, stdio: 'ignore' }).unref()
     return null
   }
-  if (!exists(paths.cortex)) return 'Cortex Control is not installed.'
+  if (!exists(paths.cortex)) return t('cortex.notInstalled')
   spawn(paths.cortex, [], { detached: true, stdio: 'ignore' }).unref()
-  return null
-}
-
-/**
- * Launch the STOCK app, deliberately.
- *
- * Windows has no other kind, and on macOS this is the fallback when no
- * instrumented copy has been built — bridge mode will not work against it, and
- * the plan says so before getting here rather than discovering it later.
- */
-export async function launchStock(paths: Paths): Promise<string | null> {
-  if (!exists(paths.cortex)) return 'Cortex Control is not installed.'
-  if (IS_MAC) spawn('open', ['-a', paths.cortex], { detached: true, stdio: 'ignore' }).unref()
-  else spawn(paths.cortex, [], { detached: true, stdio: 'ignore' }).unref()
   return null
 }
 
@@ -52,12 +39,36 @@ export async function launchStock(paths: Paths): Promise<string | null> {
  * its own mode (server._bridge_running): both FIFOs present AND the
  * instrumented app alive.
  */
+/**
+ * Launch the STOCK app, deliberately.
+ *
+ * Windows has no other kind, and on macOS this is the fallback when no
+ * instrumented copy has been built — bridge mode will not work against it, and
+ * the plan says so before getting here rather than discovering it later.
+ */
+export async function launchStock(paths: Paths): Promise<string | null> {
+  if (!exists(paths.cortex)) return t('cortex.notInstalled')
+  if (IS_MAC) spawn('open', ['-a', paths.cortex], { detached: true, stdio: 'ignore' }).unref()
+  else spawn(paths.cortex, [], { detached: true, stdio: 'ignore' }).unref()
+  return null
+}
+
 export async function bridgeReady(repo: string): Promise<boolean> {
   if (!IS_MAC) return false
   if (!BRIDGE_FIFOS.every(exists)) return false
   return (await cortexPid(repo)).instrumented
 }
 
+/**
+ * Wait for it. launch() only spawns run-bridge.sh and returns, but the
+ * instrumented app takes ~20s cold to come up and open the FIFOs — and the
+ * daemon chooses bridge vs direct ONCE, at startup. Starting the daemon into a
+ * half-open bridge silently gets direct mode, which seizes the device and
+ * leaves the interposer we just built unused.
+ *
+ * Returns false on timeout rather than throwing: direct mode still works, so a
+ * slow launch should degrade, not fail.
+ */
 /**
  * The boot storm.
  *
@@ -101,6 +112,30 @@ export async function waitForBridge(
 }
 
 /**
+ * Bring the running app forward — BY PID, never by bundle path.
+ *
+ * `open -a "/Applications/.../Cortex Control.app"` was launching a SECOND,
+ * stock instance whenever the instrumented copy was the one up: two apps, two
+ * device handles, and a bridge session that then died under the daemon. Ask the
+ * window server to raise the process that is actually running instead.
+ */
+export async function focus(pid: number | null): Promise<void> {
+  if (pid === null) return
+  if (IS_MAC) {
+    await run('osascript', ['-e',
+      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`
+    ], { timeout: 5000 })
+    return
+  }
+  await ps(`(Get-Process -Id ${pid} -ErrorAction SilentlyContinue) | ForEach-Object {` +
+           ` Add-Type -AssemblyName Microsoft.VisualBasic;` +
+           ` [Microsoft.VisualBasic.Interaction]::AppActivate($_.Id) }`)
+}
+
+/** Is a Cortex Control up, and which build? Re-exported so the plan has one source. */
+export { cortexPid } from './system.js'
+
+/**
  * Ask it to quit, and only insist if asking did not work.
  *
  * This used to send the AppleScript quit and then SIGTERM the instrumented copy
@@ -127,27 +162,3 @@ export async function quit(repo: string): Promise<void> {
     await sleep(500)
   }
 }
-
-/**
- * Bring the running app forward — BY PID, never by bundle path.
- *
- * `open -a "/Applications/.../Cortex Control.app"` was launching a SECOND,
- * stock instance whenever the instrumented copy was the one up: two apps, two
- * device handles, and a bridge session that then died under the daemon. Ask the
- * window server to raise the process that is actually running instead.
- */
-export async function focus(pid: number | null): Promise<void> {
-  if (pid === null) return
-  if (IS_MAC) {
-    await run('osascript', ['-e',
-      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`
-    ], { timeout: 5000 })
-    return
-  }
-  await ps(`(Get-Process -Id ${pid} -ErrorAction SilentlyContinue) | ForEach-Object {` +
-           ` Add-Type -AssemblyName Microsoft.VisualBasic;` +
-           ` [Microsoft.VisualBasic.Interaction]::AppActivate($_.Id) }`)
-}
-
-/** Is a Cortex Control up, and which build? Re-exported so the plan has one source. */
-export { cortexPid } from './system.js'

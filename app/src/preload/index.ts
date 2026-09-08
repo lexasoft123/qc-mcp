@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  Api, ApplyResult, AudioState, AutoResult, CheckId, LevelEvent, LogLine, Measurement, Mode, Prefs,
-  PresetFolder, PresetState, Progress, ReportResult, RiffList, SampleState, SceneRow,
-  Snapshot
+  Api, ApplyResult, AudioState, AutoResult, CheckId, LevelEvent, LogLine, Measurement, Mode,
+  Prefs, PresetFolder, PresetState, Progress, ReportResult, RiffList, SampleState, SceneRow,
+  Snapshot, UpdateState
 } from '../shared/types.js'
 
 /** Subscribe to a main-process push; returns the unsubscribe. */
@@ -33,8 +33,8 @@ const api: Api = {
   setMode: (mode: Mode) => ipcRenderer.invoke('daemon:mode', mode) as Promise<Snapshot>,
 
   cortexLaunch: () => ipcRenderer.invoke('cortex:launch') as Promise<Snapshot>,
-  cortexQuit: () => ipcRenderer.invoke('cortex:quit') as Promise<Snapshot>,
   cortexFocus: () => ipcRenderer.invoke('cortex:focus') as Promise<Snapshot>,
+  cortexQuit: () => ipcRenderer.invoke('cortex:quit') as Promise<Snapshot>,
   cortexRebuild: () => ipcRenderer.invoke('cortex:rebuild') as Promise<Snapshot>,
 
   readLog: (limit: number) => ipcRenderer.invoke('logs:read', limit) as Promise<LogLine[]>,
@@ -46,6 +46,14 @@ const api: Api = {
 
   choosePath: (what) => ipcRenderer.invoke('path:choose', what) as Promise<Snapshot>,
   reveal: (p: string) => ipcRenderer.invoke('shell:reveal', p) as Promise<void>,
+
+  update: {
+    state: () => ipcRenderer.invoke('update:state') as Promise<UpdateState>,
+    check: () => ipcRenderer.invoke('update:check') as Promise<UpdateState>,
+    install: () => ipcRenderer.send('update:install'),
+    download: () => ipcRenderer.invoke('update:download') as Promise<void>,
+    onState: (cb) => on<UpdateState>('update', cb)
+  },
 
   leveling: {
     start: () => ipcRenderer.invoke('leveling:start') as Promise<void>,

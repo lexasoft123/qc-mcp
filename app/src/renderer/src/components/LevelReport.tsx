@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Badge, Button } from '@singz/ui'
 import type { BenchSlot, ReportRow } from '@shared/types'
+import { T, t } from '../i18n.js'
 
 /**
  * What every preset on the bench needs, in dB, side by side — as a PROPOSAL.
@@ -85,11 +86,11 @@ function Proposal({ db, edited, disabled, onChange, onNudge, onReset }: {
   return (
     <span className={`prop${edited ? ' edited' : ''}`}>
       <button type="button" className="nudge" disabled={disabled}
-              onClick={() => nudge(-STEP_DB)} aria-label="Half a dB quieter">−</button>
+              onClick={() => nudge(-STEP_DB)} aria-label={t('rep.quieter')}>−</button>
       <input
         type="text" inputMode="decimal" spellCheck={false} disabled={disabled}
         value={draft ?? db.toFixed(1)}
-        aria-label="Proposed correction in dB"
+        aria-label={t('rep.propAria')}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
@@ -103,10 +104,10 @@ function Proposal({ db, edited, disabled, onChange, onNudge, onReset }: {
         }}
       />
       <button type="button" className="nudge" disabled={disabled}
-              onClick={() => nudge(STEP_DB)} aria-label="Half a dB louder">+</button>
+              onClick={() => nudge(STEP_DB)} aria-label={t('rep.louder')}>+</button>
       {edited && (
         <button type="button" className="undo" disabled={disabled} onClick={onReset}
-                title="Back to the measured suggestion">↺</button>
+                title={t('rep.resetHint')}>↺</button>
       )}
     </span>
   )
@@ -163,37 +164,35 @@ export function LevelReport({
   return (
     <div className="rep">
       <div className="rep-head">
-        <h3>What each preset needs</h3>
+        <h3>{t('rep.title')}</h3>
         {spread !== null && (
           <Badge className={spread > 3 ? 'attn' : 'live'}>
-            {spread.toFixed(1)} dB spread
+            {t('rep.spread', { db: spread.toFixed(1) })}
           </Badge>
         )}
         {unsaved.length > 0 && (
-          <Badge className="attn"><i className="dot-unsaved" />{unsaved.length} unsaved</Badge>
+          <Badge className="attn"><i className="dot-unsaved" />{t('rep.unsaved', { n: String(unsaved.length) })}</Badge>
         )}
-        <span className="fine">
-          A proposal, not a change. Adjust any of them before applying.
-        </span>
+        <span className="fine">{t('rep.lede')}</span>
         <span className="grow" />
         {Object.keys(applied).length > 0 && (
           <Button size="sm" onClick={onRevert}>
-            Undo trims ({Object.keys(applied).length})
+            {t('rep.undoTrims', { n: String(Object.keys(applied).length) })}
           </Button>
         )}
         <Button size="sm" disabled={busy} onClick={onMeasure}
-                title="Play the riff into every selected preset (M)">
-          {busy ? `Measuring ${progress ?? ''}…` : 'Measure all'} <kbd>M</kbd>
+                title={t('rep.measureHint')}>
+          {busy ? t('rep.measuring', { name: progress ?? '' }) : t('rep.measureAll')} <kbd>M</kbd>
         </Button>
         <Button size="sm" variant="primary"
                 disabled={busy || selected.length === 0 || measured.length === 0}
                 onClick={onApply}
-                title="Moves faders on the device. Undoable, and it does not touch the preset files.">
-          Apply to {selected.length} · undoable
+                title={t('rep.applyHint')}>
+          {t('rep.apply', { n: String(selected.length) })}
         </Button>
         {unsaved.length > 0 && (
           <Button size="sm" variant="primary" disabled={busy} onClick={onSave}>
-            Save {unsaved.length} to presets
+            {t('rep.saveN', { n: String(unsaved.length) })}
           </Button>
         )}
       </div>
@@ -201,13 +200,13 @@ export function LevelReport({
       <div className="rep-table">
         <div className="rep-row rep-th">
           <span />
-          <span>Preset</span>
+          <span>{t('rep.col.preset')}</span>
           <span className="right">{metric === 'perceived' ? 'N5 rel' : 'LUFS'}</span>
           <span className="right">
-            <abbr title="True peak in dBTP — the highest level between samples, which is what actually clips a converter. Above -1 is trouble.">True pk</abbr>
+            <abbr title={t('rep.col.truePeakHint')}>{t('rep.col.truePeak')}</abbr>
           </span>
-          <span className="right">Correction</span>
-          <span className="right">Proposed&nbsp;dB</span>
+          <span className="right">{t('rep.col.correction')}</span>
+          <span className="right">{t('rep.col.proposed')}</span>
         </div>
         {slots.map((s) => {
           const r = rows[s.position]
@@ -220,7 +219,7 @@ export function LevelReport({
                  className={`rep-row${on ? '' : ' skip'}${live ? ' now' : ''}${isUnsaved ? ' unsaved' : ''}`}>
               <button type="button" className={`selbox${on ? ' on' : ''}`}
                       onClick={() => onToggle(s.position)}
-                      aria-label={on ? `Exclude ${s.name}` : `Include ${s.name}`}>
+                      aria-label={on ? t('rep.exclude', { name: s.name }) : t('rep.include', { name: s.name })}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
                      stroke="currentColor" strokeWidth="3.4" strokeLinecap="round"
                      strokeLinejoin="round" aria-hidden>
@@ -232,13 +231,13 @@ export function LevelReport({
                     trim lives in the device and not in the preset file. */}
                 {isUnsaved && (
                   <i className="dot-unsaved"
-                     title={`${fmt(wrote)} dB on the device, not saved to the preset`} />
+                     title={t('rep.dotHint', { db: fmt(wrote) })} />
                 )}
                 {s.name}
-                {saved.includes(s.position) && <Badge className="live">saved</Badge>}
+                {saved.includes(s.position) && <Badge className="live">{t('rep.saved')}</Badge>}
                 {isUnsaved && (
-                  <button type="button" className="rowundo" title="Put this one fader back"
-                          onClick={() => onUndoOne(s.position)}>undo</button>
+                  <button type="button" className="rowundo" title={t('rep.undoOneHint')}
+                          onClick={() => onUndoOne(s.position)}>{t('rep.undoOne')}</button>
                 )}
               </span>
               <span className="num">
@@ -264,11 +263,10 @@ export function LevelReport({
 
       <p className="hint rep-foot">
         {measured.length === 0
-          ? `Measure all plays the riff into each preset in turn and reports how far it is from ${target}${unit}. Nothing is written.`
+          ? t('rep.foot.unmeasured', { target: `${target}${unit}` })
           : unsaved.length > 0
-            ? <>Applied trims are on the device and <strong>not in the presets</strong> — the
-              yellow dot marks them. Reloading a preset loses its trim; Save writes it in.</>
-            : 'Apply moves the lane output fader by the proposed amount. It does not touch the preset file until you save.'}
+            ? <T k="rep.foot.unsaved" />
+            : t('rep.foot.applied')}
       </p>
     </div>
   )

@@ -1,5 +1,6 @@
 import { Badge, Button } from '@singz/ui'
 import type { SceneRow } from '@shared/types'
+import { T, t } from '../i18n.js'
 
 /**
  * Levelling the scenes of one preset against each other.
@@ -39,20 +40,17 @@ export function Scenes({
   return (
     <div className="scn">
       <div className="scn-head">
-        <h3>{presetName ? `${presetName} · scenes` : 'Scenes'}</h3>
-        {measured.length > 0 && <Badge className="live">{measured.length} measured</Badge>}
-        <span className="fine">
-          Each scene measured on its own, because a clean and a lead in one preset
-          drift apart just like two presets do.
-        </span>
+        <h3>{presetName ? t('scn.titleOf', { name: presetName }) : t('scn.title')}</h3>
+        {measured.length > 0 && <Badge className="live">{t('scn.measured', { n: String(measured.length) })}</Badge>}
+        <span className="fine">{t('scn.lede')}</span>
         <span className="grow" />
         <Button size="sm" disabled={busy} onClick={onMeasure}>
-          {busy ? `Measuring ${progress !== null ? LETTERS[progress] : ''}…` : 'Measure scenes'}
+          {busy ? t('scn.measuring', { at: progress !== null ? LETTERS[progress] : '' }) : t('scn.measure')}
         </Button>
         <Button size="sm" variant="primary"
                 disabled={busy || measured.length === 0 || selected.length === 0}
                 onClick={onApply}>
-          Apply to {selected.length} scenes
+          {t('scn.apply', { n: String(selected.length) })}
         </Button>
       </div>
 
@@ -66,10 +64,10 @@ export function Scenes({
             <div key={letter} className={`scn-cell${dead ? ' dead' : ''}${live ? ' now' : ''}`}>
               <button type="button" className={`chip${on ? ' active' : ''}`}
                       disabled={dead} onClick={() => onToggle(i)}
-                      aria-label={`Scene ${letter}`}>
+                      aria-label={t('scn.sceneN', { letter })}>
                 {letter}
               </button>
-              <span className="scn-name">{r?.name ?? (dead ? 'undefined' : '—')}</span>
+              <span className="scn-name">{r?.name ?? (dead ? t('scn.undefined') : '—')}</span>
               <span className="scn-lufs">{live ? '…' : fmt(r?.measured)}</span>
               <span className="scn-corr">
                 <span className="scn-track">
@@ -88,18 +86,15 @@ export function Scenes({
                 </span>
                 <b>{fmt(r?.correction_db)}</b>
               </span>
-              {r?.limited && <Badge className="bad">held</Badge>}
+              {r?.limited && <Badge className="bad">{t('scn.held')}</Badge>}
             </div>
           )
         })}
       </div>
 
       <p className="hint">
-        Per-scene trims go to a <strong>Gain block</strong>, not the lane fader: a lane
-        has one output level for the whole preset, while a Gain block&rsquo;s LEVEL can
-        hold a value per scene. The block is added to the measured lane if it is not
-        already there. Scenes with no data of their own are left alone
-        {defined.length > 0 && ` — ${8 - defined.length} of 8 here`}.
+        <T k="scn.hint" />
+        {defined.length > 0 && t('scn.hintCount', { n: String(8 - defined.length) })}
       </p>
     </div>
   )

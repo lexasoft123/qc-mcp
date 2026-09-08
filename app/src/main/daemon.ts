@@ -6,6 +6,7 @@ import type { DaemonInfo, Mode, Paths, SessionMode } from '../shared/types.js'
 import { read as readLock } from './lock.js'
 import { IS_MAC } from './paths.js'
 import { exists, lastErrorLine, sleep } from './util.js'
+import { t } from '../shared/i18n/index.js'
 
 /**
  * Supervises the long-lived qc-mcp daemon — the process that owns the device
@@ -148,7 +149,7 @@ export class Daemon {
   private async begin(onChange: () => void): Promise<void> {
     if (await this.probe()) { this.adopt(onChange); return }
     if (!exists(this.paths.bin)) {
-      this.error = `qc-mcp is not installed at ${this.paths.bin} — run setup first.`
+      this.error = t('daemon.notInstalled', { bin: this.paths.bin })
       onChange()
       return
     }
@@ -193,8 +194,7 @@ export class Daemon {
       this.startedAt = null
       if (this.state !== 'stopped') {
         this.state = 'stopped'
-        this.error = (lastErrorLine(stderr) ?? '').slice(0, 400)
-          || 'The daemon exited immediately.'
+        this.error = (lastErrorLine(stderr) ?? '').slice(0, 400) || t('daemon.exited')
         // an immediate exit with an argument error means this build has no daemon
         if (/unrecognized arguments|no such option|--daemon/i.test(stderr)) this.supported = false
         onChange()
@@ -217,9 +217,7 @@ export class Daemon {
     // A timeout is not proof the entry point is missing — only an argument
     // error is (handled on 'exit'). Leave `supported` alone so one slow start
     // does not disable autoconnect for the rest of the session.
-    this.error =
-      `${socketPath} never opened, 30s after starting ${this.paths.bin} --daemon. ` +
-      'Check Logs, then try again.'
+    this.error = t('daemon.timeout', { socket: socketPath, bin: this.paths.bin })
     this.stop()
     onChange()
   }
@@ -240,14 +238,14 @@ export class Daemon {
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code
       if (code === 'ESRCH') return null                 // already gone
-      if (code === 'EPERM') return `The ${owner.owner} holding the device belongs to another user.`
-      return `Could not stop the ${owner.owner} holding the device: ${String(e)}`
+      if (code === 'EPERM') return t('lock.evictForeign', { owner: owner.owner })
+      return t('lock.evictFailed', { owner: owner.owner, why: String(e) })
     }
     for (let i = 0; i < 40; i++) {
       try { process.kill(owner.pid, 0) } catch { return null }
       await sleep(250)
     }
-    return `The ${owner.owner} holding the device (pid ${owner.pid}) did not stop.`
+    return t('lock.evictStuck', { owner: owner.owner, pid: String(owner.pid) })
   }
 
   /**

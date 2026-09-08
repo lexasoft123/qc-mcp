@@ -1,5 +1,6 @@
 import type { Snapshot } from '@shared/types'
 import { isLinked, modePlan, regCount, sessionMode } from '../derive.js'
+import { t, tn } from '../i18n.js'
 import { AppWindow, Bubble, Device, PatchCable } from './Icons.js'
 
 /**
@@ -12,6 +13,9 @@ import { AppWindow, Bubble, Device, PatchCable } from './Icons.js'
  * not, and Windows' shared handle says it runs beside the app rather than
  * through it. Before a session exists the shape comes from what the selected
  * mode WILL open, so pressing Connect holds no surprise.
+ *
+ * The route also carries a colour, and it is the same colour its tile wears
+ * below: green where the device is shared, coral where Patchbay takes it alone.
  */
 
 function Node({ tone, cap, sub, children, onClick }: {
@@ -55,30 +59,27 @@ export function SignalPath({ snap }: { snap: Snapshot }): React.JSX.Element {
     <div className={`flow route-${route}`}>
       <Node
         tone={n && live ? 'on' : ''}
-        cap="Claude"
-        sub={n ? `${n} ${n === 1 ? 'client' : 'clients'}` : 'none yet'}
+        cap={t('path.claude')}
+        sub={n ? tn('clients', n) : t('path.noneYet')}
       >
         <Bubble />
       </Node>
       <Link lit={live && n > 0} />
       <Node
         tone={live || starting ? 'on' : ''}
-        cap="Patchbay"
-        sub={live ? 'running' : starting ? 'starting…' : 'stopped'}
+        cap={t('path.patchbay')}
+        sub={live ? t('path.running') : starting ? t('path.starting') : t('path.stopped')}
       >
         <PatchCable />
       </Node>
 
       {through && (
         <>
-          <Link lit={linked} label="through" />
+          <Link lit={linked} label={t('path.through')} />
           <Node
             tone={`cc${appUp ? ' on' : ''}`}
-            cap="Cortex Control"
-            sub={appUp ? 'session shared' : 'not open yet'}
-            // Clickable ONLY when it is really there. When bridge is merely
-            // selected this node is a drawing of a plan, and pressing a picture
-            // was launching the app — which is not what changing a mode means.
+            cap={t('path.cortex')}
+            sub={appUp ? t('path.sessionShared') : t('path.notOpenYet')}
             onClick={appUp ? () => { void window.patchbay.cortexFocus() } : undefined}
           >
             <AppWindow />
@@ -88,12 +89,12 @@ export function SignalPath({ snap }: { snap: Snapshot }): React.JSX.Element {
 
       <Link
         lit={linked}
-        label={through ? undefined : beside ? 'beside the app' : 'direct'}
+        label={through ? undefined : beside ? t('path.beside') : t('path.direct')}
       />
       <Node
         tone={!snap.device.present ? 'bad' : linked ? 'filled' : ''}
-        cap="Quad Cortex"
-        sub={!snap.device.present ? 'not plugged in' : linked ? 'connected' : 'waiting'}
+        cap={t('path.device')}
+        sub={!snap.device.present ? t('path.notPlugged') : linked ? t('path.connected') : t('path.waiting')}
       >
         <Device />
       </Node>

@@ -15,6 +15,7 @@
  */
 
 import type { Mode, SessionMode } from './types.js'
+import { t } from './i18n/index.js'
 
 /** Everything a decision here is allowed to depend on. */
 export interface Facts {
@@ -114,7 +115,7 @@ function build(session: SessionMode, f: Facts): Plan {
   }
 
   if (session === 'shared') {
-    if (!f.cortexInstalled) return no('Cortex Control is not installed.')
+    if (!f.cortexInstalled) return no(t('plan.noCortex'))
     // Windows needs no interposer — the app just has to be up, and the daemon
     // opens its own non-exclusive handle beside it.
     const steps: Step[] = []
@@ -125,11 +126,9 @@ function build(session: SessionMode, f: Facts): Plan {
 
   // bridge
   if (!f.instrumentedBuilt) {
-    return no(f.cortexRunning
-      // auto lands here too: the app holds the device and there is nothing to
-      // share it through, which is the same dead end daemon.serve() reports.
-      ? 'Cortex Control is holding the device and there is no instrumented copy to share it through — quit the app, or build the copy in Setup.'
-      : 'Bridge mode needs the instrumented copy of Cortex Control — build it in Setup.')
+    // auto lands here too: the app holds the device and there is nothing to
+    // share it through, which is the same dead end daemon.serve() reports.
+    return no(t(f.cortexRunning ? 'plan.noInstrumentedHeld' : 'plan.noInstrumented'))
   }
   // run-bridge.sh replaces a stock instance itself, so a bridge that is not yet
   // ready is one step whether or not the stock app is in the way.
@@ -173,21 +172,21 @@ export function planFor(goal: Goal, mode: Mode, f: Facts, quitApp = false): Plan
     if (f.daemonSession === 'direct') {
       return {
         session: null, steps: [], satisfied: false,
-        blocked: 'The daemon is holding the Quad Cortex on its own, and Cortex Control cannot start into a device it has no access to. Disconnect first, or switch to Bridge.'
+        blocked: t('plan.showAppDirect')
       }
     }
     if (f.platform === 'mac' && mode !== 'direct' && f.instrumentedBuilt) {
       return { session: null, steps: [{ do: 'launch-bridge' }, { do: 'await-bridge' }], blocked: null, satisfied: false }
     }
     if (!f.cortexInstalled) {
-      return { session: null, steps: [], blocked: 'Cortex Control is not installed.', satisfied: false }
+      return { session: null, steps: [], blocked: t('plan.noCortex'), satisfied: false }
     }
     return { session: null, steps: [{ do: 'launch-stock' }], blocked: null, satisfied: false }
   }
 
   // connect (and take-over, which is connect with permission to evict)
   if (!f.devicePresent) {
-    return { session: null, steps: [], blocked: 'Plug the Quad Cortex in over USB.', satisfied: false }
+    return { session: null, steps: [], blocked: t('plan.noDevice'), satisfied: false }
   }
   const want = resolveSession(mode, f)
   if (f.daemonRunning && f.daemonSession === want) {
@@ -202,11 +201,8 @@ export function planFor(goal: Goal, mode: Mode, f: Facts, quitApp = false): Plan
   if (evict && goal !== 'take-over') {
     return {
       session: want, steps: [], satisfied: false,
-      blocked: held.owner === 'mcp'
-        ? `An MCP server is holding the Quad Cortex in ${held.mode} mode. ` +
-          'Take over to end it and connect, or quit that client.'
-        : `A ${held.mode} session started outside Patchbay is holding the Quad Cortex. ` +
-          'Take over to end it and connect.'
+      blocked: t(held.owner === 'mcp' ? 'plan.heldByMcp' : 'plan.heldByOther',
+                 { mode: held.mode })
     }
   }
 
@@ -231,7 +227,7 @@ export function planFor(goal: Goal, mode: Mode, f: Facts, quitApp = false): Plan
  */
 export function modeSwitch(f: Facts, daemonBusy = false): { allowed: boolean; why: string | null } {
   if (f.daemonRunning || daemonBusy) {
-    return { allowed: false, why: 'Disconnect first — the mode decides how the session is opened.' }
+    return { allowed: false, why: t('mode.locked') }
   }
   return { allowed: true, why: null }
 }
@@ -241,34 +237,25 @@ export function planWords(goal: Goal, mode: Mode, f: Facts, p: Plan): string {
   if (p.blocked) return p.blocked
   if (goal === 'disconnect') {
     return p.satisfied
-      ? 'Nothing is connected.'
-      : p.steps.some((s) => s.do === 'quit-cortex')
-        ? 'Stops the daemon and quits Cortex Control.'
-        : 'Stops the daemon. Cortex Control is left alone.'
+      ? t('plan.nothing')
+      : t(p.steps.some((s) => s.do === 'quit-cortex')
+          ? 'plan.disconnectQuit' : 'plan.disconnectOnly')
   }
-  if (goal === 'show-app') {
-    return f.cortexRunning ? 'Brings Cortex Control forward.' : 'Opens Cortex Control.'
-  }
-  if (p.satisfied) return 'Already connected this way.'
+  if (goal === 'show-app') return t(f.cortexRunning ? 'plan.showFocus' : 'plan.showOpen')
+  if (p.satisfied) return t('plan.satisfied')
 
-  const swap = p.steps.some((s) => s.do === 'stop-daemon')
+  const swap = p.steps.some((s) => s.do === 'stop-daemon' || s.do === 'take-over')
   const quit = p.steps.some((s) => s.do === 'quit-cortex')
   const opens = p.steps.some((s) => s.do === 'launch-bridge' || s.do === 'launch-stock')
   const mac = f.platform === 'mac'
 
   const body = p.session === 'direct'
-    ? quit
-      ? 'quits Cortex Control and takes the device.'
-      : 'takes the device on its own.'
+    ? t(quit ? 'plan.quitsAndTakes' : 'plan.takesDevice')
     : p.session === 'shared'
-      ? opens
-        ? 'opens Cortex Control and takes a second handle beside it.'
-        : 'takes a second handle beside Cortex Control.'
+      ? t(opens ? 'plan.opensShared' : 'plan.beside')
       : opens
-        ? mac
-          ? 'opens the instrumented Cortex Control and shares its session — about twenty seconds.'
-          : 'opens Cortex Control and shares its session.'
-        : "shares the Cortex Control session that is already open."
+        ? t(mac ? 'plan.opensBridgeMac' : 'plan.opensBridge')
+        : t('plan.sharesOpen')
 
-  return `${swap ? 'Closes the current session, then ' : 'Patchbay '}${body}`
+  return `${swap ? t('plan.swap') : t('plan.patchbay')}${body}`
 }

@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron'
 import { join } from 'node:path'
 import type { CheckId, Mode, Prefs, Progress, Snapshot } from '../shared/types.js'
 import type { Goal } from '../shared/session.js'
@@ -9,9 +9,11 @@ import * as install from './install.js'
 import * as logs from './logs.js'
 import * as session from './session.js'
 import * as state from './state.js'
+import * as updater from './updater.js'
 import { Leveling } from './leveling.js'
 import { IS_MAC } from './paths.js'
 import { findPython } from './system.js'
+import { t } from '../shared/i18n/index.js'
 
 let win: BrowserWindow | null = null
 let ticker: NodeJS.Timeout | null = null
@@ -39,7 +41,15 @@ function create(): void {
     minWidth: 720,
     minHeight: 520,
     show: false,
-    backgroundColor: '#12100d',
+    // macOS gets an opaque ground under its native frame. Windows is frameless
+    // and the KIT draws the window shape itself (`body.win .app`: 12px radius +
+    // a 1px rim, squared again when maximized), so the window has to be
+    // transparent for those corners to exist at all - an opaque backgroundColor
+    // paints square corners straight over them, which is what shipped. Windows
+    // 11 rounds frameless windows itself via DWM; Windows 10 does not, so
+    // without this the 12px is invisible there.
+    backgroundColor: IS_MAC ? '#12100d' : '#00000000',
+    transparent: !IS_MAC,
     // frameless with the traffic lights inset, so the kit's .titlebar can own
     // the top strip and stay draggable
     titleBarStyle: IS_MAC ? 'hiddenInset' : 'hidden',
@@ -54,9 +64,35 @@ function create(): void {
   })
 
   win.on('ready-to-show', () => win?.show())
-  const notify = (): void => emit('window:maximized', Boolean(win?.isMaximized()))
+  // `emit` guards on null, which only helps if something nulls it. On macOS
+  // `window-all-closed` deliberately does not quit, so without this `win` keeps
+  // pointing at a DESTROYED window and `win?.webContents` throws — optional
+  // chaining does not catch that. Harmless while every emit() came from a
+  // renderer call, fatal once the updater started pushing on a timer.
+  win.on('closed', () => { win = null })
+  // The renderer squares the window's corners off when this is true. Aero Snap
+  // never fires 'maximize', but a snapped window is just as flush against the
+  // work area — and now that the window is transparent, leaving it rounded shows
+  // the desktop through four notches at the screen edge. So judge by the bounds,
+  // and watch resize/move as well.
+  const flush = (): boolean => {
+    if (!win) return false
+    if (win.isMaximized()) return true
+    const b = win.getBounds()
+    const wa = screen.getDisplayMatching(b).workArea
+    return b.y <= wa.y && b.y + b.height >= wa.y + wa.height
+  }
+  let was: boolean | null = null
+  const notify = (): void => {
+    const now = flush()
+    if (now === was) return // resize/move fire continuously; only edges matter
+    was = now
+    emit('window:maximized', now)
+  }
   win.on('maximize', notify)
   win.on('unmaximize', notify)
+  win.on('resize', notify)
+  win.on('move', notify)
 
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
@@ -103,7 +139,7 @@ function handlers(): void {
         return state.push(true)
       }
     }
-    emit('progress', { label: notice ?? 'Done', done, total, finished: true })
+    emit('progress', { label: notice ?? t('prog.done'), done, total, finished: true })
     return state.push(true)
   })
 
@@ -189,7 +225,7 @@ function handlers(): void {
   ipcMain.handle('cortex:rebuild', async () => {
     await cortex.quit(state.getPaths().repo)
     const err = await install.buildInstrumented(state.getPaths(), (p) => emit('progress', p))
-    emit('progress', { label: err ?? 'Rebuilt', done: 1, total: 1, finished: true, error: err ?? undefined })
+    emit('progress', { label: err ?? t('prog.rebuilt'), done: 1, total: 1, finished: true, error: err ?? undefined })
     return state.push(true)
   })
 
@@ -208,14 +244,19 @@ function handlers(): void {
 
   ipcMain.handle('path:choose', async (_e, what: 'repo' | 'cortex') => {
     const r = await dialog.showOpenDialog(win!, {
-      title: what === 'repo' ? 'Choose the qc-mcp folder' : 'Choose Cortex Control',
+      title: what === 'repo' ? t('dialog.chooseRepo') : t('dialog.chooseApp'),
       properties: what === 'repo' ? ['openDirectory'] : IS_MAC ? ['openFile', 'treatPackageAsDirectory'] : ['openFile'],
-      filters: what === 'cortex' && !IS_MAC ? [{ name: 'Application', extensions: ['exe'] }] : undefined
+      filters: what === 'cortex' && !IS_MAC ? [{ name: t('dialog.application'), extensions: ['exe'] }] : undefined
     })
     if (!r.canceled && r.filePaths[0]) state.updatePrefs({ [what]: r.filePaths[0] } as Partial<Prefs>)
     return state.push(true)
   })
   ipcMain.handle('shell:reveal', (_e, p: string) => { shell.showItemInFolder(p) })
+
+  ipcMain.handle('update:state', () => updater.state())
+  ipcMain.handle('update:check', () => updater.check())
+  ipcMain.handle('update:download', () => updater.openDownload())
+  ipcMain.on('update:install', () => { updater.install() })
 
   // ── the leveling bench ────────────────────────────────────────────────
   ipcMain.handle('leveling:start', () => { bench().start() })
@@ -326,6 +367,8 @@ void app.whenReady().then(async () => {
   ticker = setInterval(() => { void tick() }, 2000)
   void tick()
 
+  updater.start((u) => emit('update', u), () => state.getPrefs().updates)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) create()
   })
@@ -337,6 +380,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (ticker) clearInterval(ticker)
+  updater.stop()
   leveling?.stop()
   state.getDaemon()?.stop()
   if (state.getPrefs().quitApp) void cortex.quit(state.getPaths().repo)

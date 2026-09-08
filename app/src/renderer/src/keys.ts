@@ -8,6 +8,8 @@
  * read cannot say one thing and do another.
  */
 
+import type { Key } from '@shared/i18n'
+
 export type Scope = 'app' | 'leveling'
 
 export interface Shortcut {
@@ -18,9 +20,13 @@ export interface Shortcut {
   shift?: boolean
   /** How it is drawn in the sheet. */
   cap: string
-  does: string
+  /** What it does, as a string key — the sheet and the legend both read it, so
+   *  a shortcut cannot be described in one language and listed in another. */
+  does: Key
+  /** The two or three words the bottom-of-screen legend uses. */
+  short: Key
   scope: Scope
-  group: string
+  group: Key
   /** Shown in the sheet but handled by the control itself, not the map. */
   local?: boolean
 }
@@ -31,53 +37,37 @@ export const MOD = IS_MAC ? '⌘' : 'Ctrl'
 export const SHORTCUTS: Shortcut[] = [
   // ── getting around ────────────────────────────────────────────────────
   { keys: ['1', '2', '3', '4', '5'], mod: true, cap: `${MOD}1–${MOD}5`,
-    does: 'Home, Console, Leveling, Setup, Logs', scope: 'app', group: 'Getting around' },
-  { keys: ['?', '/'], cap: '?', does: 'This list', scope: 'app', group: 'Getting around' },
-  { keys: [','], mod: true, cap: `${MOD},`, does: 'Preferences', scope: 'app', group: 'Getting around' },
+    does: 'keys.views', short: 'keys.views.short', scope: 'app', group: 'keys.group.around' },
+  { keys: ['?', '/'], cap: '?', does: 'keys.thisList', short: 'keys.thisList', scope: 'app', group: 'keys.group.around' },
+  { keys: [','], mod: true, cap: `${MOD},`, does: 'prefs.open', short: 'prefs.open', scope: 'app', group: 'keys.group.around' },
 
   // ── the recorder ──────────────────────────────────────────────────────
-  { keys: [' '], cap: 'space', does: 'Arm · stop · discard the recorder',
-    scope: 'leveling', group: 'The riff' },
-  { keys: ['p'], cap: 'P', does: 'Play the riff through this preset — again to stop',
-    scope: 'leveling', group: 'The riff' },
+  { keys: [' '], cap: 'space', does: 'keys.record', short: 'keys.record.short', scope: 'leveling', group: 'keys.group.riff' },
+  { keys: ['p'], cap: 'P', does: 'keys.play', short: 'keys.play.short', scope: 'leveling', group: 'keys.group.riff' },
 
   // ── the bench ─────────────────────────────────────────────────────────
-  { keys: ['arrowleft', 'arrowright'], cap: '← →', does: 'Previous / next preset',
-    scope: 'leveling', group: 'The bench' },
+  { keys: ['arrowleft', 'arrowright'], cap: '← →', does: 'keys.preset', short: 'keys.preset', scope: 'leveling', group: 'keys.group.bench' },
   { keys: ['1', '2', '3', '4', '5', '6', '7', '8', '9'], cap: '1–9',
-    does: 'Jump straight to a bench slot', scope: 'leveling', group: 'The bench' },
-  { keys: ['arrowup', 'arrowdown'], cap: '↑ ↓', does: 'Scene down / up',
-    scope: 'leveling', group: 'The bench' },
-  { keys: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], cap: 'A–H', does: 'Jump to a scene',
-    scope: 'leveling', group: 'The bench' },
-  { keys: ['-', '_', '=', '+'], cap: '− +', does: 'Lane level ∓0.5 dB (⇧ for 0.1)',
-    scope: 'leveling', group: 'The bench' },
-  { keys: ['n'], mod: true, cap: `${MOD}N`, does: 'Add a preset to the bench',
-    scope: 'leveling', group: 'The bench' },
+    does: 'keys.slot', short: 'keys.slot.short', scope: 'leveling', group: 'keys.group.bench' },
+  { keys: ['arrowup', 'arrowdown'], cap: '↑ ↓', does: 'keys.scene', short: 'keys.scene', scope: 'leveling', group: 'keys.group.bench' },
+  { keys: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], cap: 'A–H', does: 'keys.jump', short: 'keys.jump', scope: 'leveling', group: 'keys.group.bench' },
+  { keys: ['-', '_', '=', '+'], cap: '− +', does: 'keys.levelFull', short: 'keys.level', scope: 'leveling', group: 'keys.group.bench' },
+  { keys: ['n'], mod: true, cap: `${MOD}N`, does: 'keys.addPreset', short: 'keys.addPreset.short', scope: 'leveling', group: 'keys.group.bench' },
 
   // ── measuring ─────────────────────────────────────────────────────────
-  { keys: ['m'], cap: 'M', does: 'Measure every preset on the bench',
-    scope: 'leveling', group: 'Measuring' },
-  { keys: ['escape'], cap: 'esc', does: 'Stop after the preset being measured',
-    scope: 'leveling', group: 'Measuring' },
-  { keys: ['l'], cap: 'L', does: 'Listen to the set, one preset after another',
-    scope: 'leveling', group: 'Measuring' },
+  { keys: ['m'], cap: 'M', does: 'keys.measure', short: 'keys.measure.short', scope: 'leveling', group: 'keys.group.measuring' },
+  { keys: ['escape'], cap: 'esc', does: 'keys.stopRun', short: 'keys.stopRun.short', scope: 'leveling', group: 'keys.group.measuring' },
+  { keys: ['l'], cap: 'L', does: 'keys.listen', short: 'keys.listen.short', scope: 'leveling', group: 'keys.group.measuring' },
 
   // ── writing ───────────────────────────────────────────────────────────
-  { keys: ['enter'], mod: true, cap: `${MOD}↵`, does: 'Apply the proposals to the device',
-    scope: 'leveling', group: 'Writing' },
-  { keys: ['z'], mod: true, cap: `${MOD}Z`, does: 'Undo every trim this session',
-    scope: 'leveling', group: 'Writing' },
-  { keys: ['s'], mod: true, cap: `${MOD}S`, does: 'Save the open preset',
-    scope: 'leveling', group: 'Writing' },
-  { keys: ['s'], mod: true, shift: true, cap: `${MOD}⇧S`, does: 'Save every unsaved trim',
-    scope: 'leveling', group: 'Writing' },
+  { keys: ['enter'], mod: true, cap: `${MOD}↵`, does: 'keys.apply', short: 'keys.apply.short', scope: 'leveling', group: 'keys.group.writing' },
+  { keys: ['z'], mod: true, cap: `${MOD}Z`, does: 'keys.undo', short: 'keys.undo.short', scope: 'leveling', group: 'keys.group.writing' },
+  { keys: ['s'], mod: true, cap: `${MOD}S`, does: 'keys.saveOne', short: 'keys.save', scope: 'leveling', group: 'keys.group.writing' },
+  { keys: ['s'], mod: true, shift: true, cap: `${MOD}⇧S`, does: 'keys.saveAll', short: 'keys.saveAll.short', scope: 'leveling', group: 'keys.group.writing' },
 
   // ── in a field ────────────────────────────────────────────────────────
-  { keys: [], cap: '↑ ↓', does: 'Nudge a proposal ±0.5 dB', scope: 'leveling',
-    group: 'In the report', local: true },
-  { keys: [], cap: '↵ esc', does: 'Commit / cancel an edit', scope: 'leveling',
-    group: 'In the report', local: true }
+  { keys: [], cap: '↑ ↓', does: 'keys.nudge', short: 'keys.nudge', scope: 'leveling', group: 'keys.group.report', local: true },
+  { keys: [], cap: '↵ esc', does: 'keys.commit', short: 'keys.commit', scope: 'leveling', group: 'keys.group.report', local: true }
 ]
 
 /** Does this event mean that shortcut? */
@@ -104,8 +94,8 @@ export function typing(e: KeyboardEvent): boolean {
 }
 
 /** The sheet's shape: groups in declaration order, each with its rows. */
-export function grouped(scope?: Scope): [string, Shortcut[]][] {
-  const out: [string, Shortcut[]][] = []
+export function grouped(scope?: Scope): [Key, Shortcut[]][] {
+  const out: [Key, Shortcut[]][] = []
   for (const s of SHORTCUTS) {
     if (scope && s.scope !== scope && s.scope !== 'app') continue
     const found = out.find(([g]) => g === s.group)

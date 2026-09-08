@@ -1,16 +1,13 @@
 import { Button, Modal, ModalActions, SegmentedControl } from '@singz/ui'
-import type { Mode, Prefs as P, Snapshot } from '@shared/types'
+import type { Prefs as P, Snapshot, UpdateState } from '@shared/types'
 import { isMac } from '../derive.js'
-import { act, say } from '../store.js'
+import { act, checkForUpdates, say, useUpdate } from '../store.js'
+import { t } from '../i18n.js'
+import { modes } from '../views/Console.js'
 import { Check } from '../components/Icons.js'
+import { Language } from '../components/Language.js'
 
-type Flag = 'login' | 'autoconnect' | 'quitApp' | 'verbose' | 'autoRebuild'
-
-const MODES: { value: Mode; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'bridge', label: 'Bridge' },
-  { value: 'direct', label: 'Direct' }
-]
+type Flag = 'login' | 'autoconnect' | 'quitApp' | 'verbose' | 'autoRebuild' | 'updates'
 
 function Toggle({ on, name, desc, onToggle }: {
   readonly on: boolean
@@ -29,8 +26,24 @@ function Toggle({ on, name, desc, onToggle }: {
   )
 }
 
+/** The one place a check that found nothing — or failed — is worth saying. */
+function updateLine(u: UpdateState, mac: boolean): string {
+  switch (u.state) {
+    case 'checking': return t('upd.checking')
+    case 'available': return mac ? t('upd.availableMac', { version: u.version }) : t('upd.available', { version: u.version })
+    // progress can arrive without a preceding update-available (a resumed
+    // download), and then there is no version to name
+    case 'downloading': return u.version ? t('upd.downloadingV', { version: u.version, percent: u.percent }) : t('upd.downloading', { percent: u.percent })
+    case 'ready': return t('upd.ready', { version: u.version })
+    case 'error': return t('upd.error', { message: u.message })
+    default: return t('upd.upToDate')
+  }
+}
+
 export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }): React.JSX.Element {
   const mac = isMac(snap)
+  const os = mac ? 'macOS' : 'Windows'
+  const update = useUpdate()
   const p = snap.prefs
   const set = (patch: Partial<P>): void => { void act(() => window.patchbay.setPrefs(patch)) }
 
@@ -41,92 +54,125 @@ export function Prefs({ snap, onClose }: { snap: Snapshot; onClose: () => void }
   })
 
   return (
-    <Modal onClose={onClose} cardClassName="prefs-card" aria-label="Preferences">
-      <h2>Preferences</h2>
+    <Modal onClose={onClose} cardClassName="prefs-card" aria-label={t('prefs.title')}>
+      <h2>{t('prefs.title')}</h2>
+
+      {/* First, and above the fold: the one group someone who cannot read the
+          rest of this dialog is looking for. */}
+      <div className="pref-group">
+        <span className="eyebrow">{t('prefs.language')}</span>
+        <div className="pref-row">
+          <div className="meta">
+            <div className="n">{t('prefs.language')}</div>
+            <div className="d">{t('prefs.languageDesc', { os })}</div>
+          </div>
+          <Language snap={snap} />
+        </div>
+      </div>
 
       <div className="pref-group">
-        <span className="eyebrow">Startup</span>
+        <span className="eyebrow">{t('prefs.startup')}</span>
         <div className="tog-list">
           <Toggle
             {...flag('login')}
-            name={`Start Patchbay ${mac ? 'when I log in' : 'when I sign in'}`}
-            desc="It waits out of the way and connects nothing until you ask."
+            name={mac ? t('prefs.loginMac') : t('prefs.loginWin')}
+            desc={t('prefs.loginDesc')}
           />
           <Toggle
             {...flag('autoconnect')}
-            name="Connect as soon as the Quad Cortex is plugged in"
-            desc={mac ? 'Starts the daemon and opens Cortex Control for you.' : 'Starts the daemon, so Claude can reach the device right away.'}
+            name={t('prefs.autoconnect')}
+            desc={mac ? t('prefs.autoconnectMac') : t('prefs.autoconnectWin')}
           />
         </div>
       </div>
 
       <div className="pref-group">
-        <span className="eyebrow">Connection</span>
+        <span className="eyebrow">{t('prefs.connection')}</span>
         <div className="pref-row">
           <div className="meta">
-            <div className="n">Connection mode</div>
-            <div className="d">
-              {mac
-                ? "Auto shares Cortex Control's session when the app is open, and takes the device directly when it is not."
-                : 'Auto opens a shared handle beside Cortex Control, and takes the device exclusively when the app is closed.'}
-            </div>
+            <div className="n">{t('prefs.mode')}</div>
+            <div className="d">{mac ? t('prefs.modeMac') : t('prefs.modeWin')}</div>
           </div>
-          <SegmentedControl options={MODES} value={p.mode} onChange={(mode) => set({ mode })} aria-label="Connection mode" />
+          <SegmentedControl options={modes()} value={p.mode} onChange={(mode) => set({ mode })} aria-label={t('aria.mode')} />
         </div>
         <div className="tog-list">
-          <Toggle {...flag('quitApp')} name="Quit Cortex Control when Patchbay quits" desc="Leave this off if you also use the app on its own." />
+          <Toggle {...flag('quitApp')} name={t('prefs.quitApp')} desc={t('prefs.quitAppDesc')} />
         </div>
       </div>
 
       <div className="pref-group">
-        <span className="eyebrow">Diagnostics</span>
+        <span className="eyebrow">{t('prefs.diagnostics')}</span>
         <div className="tog-list">
-          <Toggle
-            {...flag('verbose')}
-            name="Write the frame log"
-            desc="Records every report to and from the device. The Logs screen reads it, and bug reports need it."
-          />
+          <Toggle {...flag('verbose')} name={t('prefs.verbose')} desc={t('prefs.verboseDesc')} />
           {/* nothing to rebuild on Windows — there is no instrumented copy */}
           {mac && (
-            <Toggle
-              {...flag('autoRebuild')}
-              name="Rebuild after a Cortex Control update"
-              desc="Runs the rebuild on its own, and quits the app first."
-            />
+            <Toggle {...flag('autoRebuild')} name={t('prefs.autoRebuild')} desc={t('prefs.autoRebuildDesc')} />
           )}
         </div>
         <div className="pref-row">
           <div className="meta">
-            <div className="n">Frame log</div>
-            <div className="d"><code>{p.verbose ? snap.paths.show.logPath : 'not being written'}</code></div>
+            <div className="n">{t('prefs.frameLog')}</div>
+            <div className="d"><code>{p.verbose ? snap.paths.show.logPath : t('prefs.notWritten')}</code></div>
           </div>
-          <Button size="sm" disabled={!p.verbose} onClick={() => { void window.patchbay.clearLog(); say('Frame log cleared') }}>
-            Clear
+          <Button size="sm" disabled={!p.verbose} onClick={() => { void window.patchbay.clearLog(); say(t('prefs.cleared')) }}>
+            {t('prefs.clear')}
           </Button>
         </div>
       </div>
 
       <div className="pref-group">
-        <span className="eyebrow">Locations</span>
+        <span className="eyebrow">{t('prefs.updates')}</span>
+        <div className="tog-list">
+          <Toggle
+            {...flag('updates')}
+            name={t('prefs.updatesAuto')}
+            desc={mac ? t('prefs.updatesMac') : t('prefs.updatesWin')}
+          />
+        </div>
+        <div className="pref-row">
+          <div className="meta">
+            <div className="n">Patchbay {snap.version}</div>
+            <div className="d">{updateLine(update, mac)}</div>
+          </div>
+          {update.state === 'available' && (
+            <Button size="sm" variant="primary" onClick={() => { void window.patchbay.update.download() }}>
+              {mac ? t('prefs.getIt') : t('prefs.releaseNotes')}
+            </Button>
+          )}
+          {update.state === 'ready' && (
+            <Button size="sm" variant="primary" onClick={() => window.patchbay.update.install()}>
+              {t('prefs.restartInstall')}
+            </Button>
+          )}
+          {update.state !== 'available' && update.state !== 'ready' && (
+            <Button size="sm" disabled={update.state === 'checking' || update.state === 'downloading'} onClick={() => { void checkForUpdates() }}>
+              {t('prefs.checkNow')}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="pref-group">
+        <span className="eyebrow">{t('prefs.locations')}</span>
         <div className="pref-row">
           <div className="meta"><div className="n">qc-mcp</div><div className="d"><code>{snap.paths.show.repo}</code></div></div>
-          <Button size="sm" onClick={() => void act(() => window.patchbay.choosePath('repo'))}>Change…</Button>
+          <Button size="sm" onClick={() => void act(() => window.patchbay.choosePath('repo'))}>{t('prefs.change')}</Button>
         </div>
         <div className="pref-row">
           <div className="meta"><div className="n">Cortex Control</div><div className="d"><code>{snap.paths.show.cortex}</code></div></div>
-          <Button size="sm" onClick={() => void act(() => window.patchbay.choosePath('cortex'))}>Change…</Button>
+          <Button size="sm" onClick={() => void act(() => window.patchbay.choosePath('cortex'))}>{t('prefs.change')}</Button>
         </div>
       </div>
 
       <ModalActions>
-        <Button variant="primary" onClick={onClose}>Done</Button>
+        <Button variant="primary" onClick={onClose}>{t('prefs.done')}</Button>
         <span className="grow" />
         <Button
           variant="danger"
           size="sm"
-          onClick={() => { void act(() => window.patchbay.setClients([])); say('Removed qc-mcp from every client. Nothing else was deleted.') }}
+          onClick={() => { void act(() => window.patchbay.setClients([])); say(t('prefs.removedAll')) }}
         >
-          Remove from all clients
+          {t('prefs.removeAll')}
         </Button>
       </ModalActions>
     </Modal>

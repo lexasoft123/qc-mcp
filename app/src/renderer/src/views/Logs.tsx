@@ -3,14 +3,15 @@ import { Button, SegmentedControl } from '@singz/ui'
 import type { LogDirection, LogLine, Snapshot } from '@shared/types'
 import { isMac } from '../derive.js'
 import { say } from '../store.js'
+import { T, t } from '../i18n.js'
 
 type Filter = 'all' | LogDirection
 
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'tx', label: 'Sent' },
-  { value: 'rx', label: 'Received' },
-  { value: 'err', label: 'Errors' }
+const filters = (): { value: Filter; label: string }[] => [
+  { value: 'all', label: t('logs.all') },
+  { value: 'tx', label: t('logs.sent') },
+  { value: 'rx', label: t('logs.received') },
+  { value: 'err', label: t('logs.errors') }
 ]
 
 const mb = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -34,40 +35,36 @@ export function Logs({ snap }: { snap: Snapshot }): React.JSX.Element {
 
   const rows = lines.filter((l) => filter === 'all' || l.dir === filter)
   const glyph = (d: LogDirection): string => (d === 'tx' ? '→' : d === 'rx' ? '←' : d === 'err' ? 'err' : 'sys')
+  const mac = isMac(snap)
 
   return (
     <div className="view">
       <div className="log-bar">
         <SegmentedControl
-          options={FILTERS}
+          options={filters()}
           value={filter}
           onChange={setFilter}
           disabled={!snap.prefs.verbose}
-          aria-label="Log filter"
+          aria-label={t('aria.logFilter')}
         />
         <span className="grow" />
         <span className="fine mono">
-          {snap.prefs.verbose ? `${snap.paths.show.logPath} · ${mb(size)}` : 'frame log is off'}
+          {snap.prefs.verbose ? `${snap.paths.show.logPath} · ${mb(size)}` : t('logs.off')}
         </span>
         <Button
           size="sm"
           disabled={!snap.prefs.verbose}
-          onClick={() => { void window.patchbay.reveal(snap.paths.logPath); say(isMac(snap) ? 'Revealed in Finder' : 'Opened in Explorer') }}
+          onClick={() => { void window.patchbay.reveal(snap.paths.logPath); say(mac ? t('logs.revealedMac') : t('logs.revealedWin')) }}
         >
-          {isMac(snap) ? 'Reveal in Finder' : 'Show in Explorer'}
+          {mac ? t('logs.revealMac') : t('logs.revealWin')}
         </Button>
       </div>
 
       <div className="logs">
         {!snap.prefs.verbose ? (
-          <div className="log-empty">
-            The frame log is off, so there is nothing to show. Turn on <b>Write the frame log</b> in
-            Preferences and reconnect.
-          </div>
+          <div className="log-empty"><T k="logs.offBody" /></div>
         ) : rows.length === 0 ? (
-          <div className="log-empty">
-            Nothing logged yet. Frames appear here as soon as something talks to the device.
-          </div>
+          <div className="log-empty">{t('logs.empty')}</div>
         ) : (
           rows.map((l, i) => (
             <div className={`log-line ${l.dir}`} key={i}>

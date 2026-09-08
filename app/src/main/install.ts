@@ -4,6 +4,7 @@ import type { CheckId, Paths, Progress } from '../shared/types.js'
 import { IS_MAC, UV_PYTHON, buildScript } from './paths.js'
 import type { PythonInfo } from './system.js'
 import { exists, run } from './util.js'
+import { t } from '../shared/i18n/index.js'
 
 export type Emit = (p: Progress) => void
 
@@ -44,23 +45,23 @@ export async function createVenv(paths: Paths, python: PythonInfo, emit: Emit): 
     const env = { ...process.env, VIRTUAL_ENV: venv, UV_PYTHON_DOWNLOADS: 'automatic' }
     const mk = await stream(
       python.path, ['venv', '--python', UV_PYTHON, venv],
-      paths.repo, `Installing Python ${UV_PYTHON}`, emit, env
+      paths.repo, t('install.python', { version: UV_PYTHON }), emit, env
     )
-    if (mk !== 0) return `uv could not build the environment. It downloads Python ${UV_PYTHON} on first run, so this needs a network connection.`
+    if (mk !== 0) return t('install.uvVenvFail', { version: UV_PYTHON })
     const code = await stream(
       python.path, ['pip', 'install', '--python', paths.python, '-e', '.'],
-      paths.repo, 'Installing qc-mcp', emit, env
+      paths.repo, t('install.qcmcp'), emit, env
     )
-    if (code !== 0) return 'uv could not install qc-mcp. Open Logs for the output.'
+    if (code !== 0) return t('install.uvPipFail')
   } else {
     const [cmd, ...pre] = python.path.split(' ')
-    const mk = await stream(cmd, [...pre, '-m', 'venv', venv], paths.repo, 'Creating the virtual environment', emit)
-    if (mk !== 0) return 'Could not create .venv — check that Python 3.10 or newer is installed.'
+    const mk = await stream(cmd, [...pre, '-m', 'venv', venv], paths.repo, t('install.venv'), emit)
+    if (mk !== 0) return t('install.venvFail')
     const pip = IS_MAC ? join(venv, 'bin', 'pip') : join(venv, 'Scripts', 'pip.exe')
-    const code = await stream(pip, ['install', '-e', '.'], paths.repo, 'Installing qc-mcp', emit)
-    if (code !== 0) return 'pip could not install qc-mcp. Open Logs for the output.'
+    const code = await stream(pip, ['install', '-e', '.'], paths.repo, t('install.qcmcp'), emit)
+    if (code !== 0) return t('install.pipFail')
   }
-  return exists(paths.bin) ? null : `The install finished but ${paths.bin} is missing.`
+  return exists(paths.bin) ? null : t('install.binMissing', { bin: paths.bin })
 }
 
 /**
@@ -71,16 +72,16 @@ export async function createVenv(paths: Paths, python: PythonInfo, emit: Emit): 
 export async function installClang(): Promise<string | null> {
   if (!IS_MAC) return null
   await run('xcode-select', ['--install'], { timeout: 5000 })
-  return 'macOS is installing the command line tools. Press Re-check when it finishes.'
+  return t('install.clang')
 }
 
 /** interceptor/build.sh — compile the dylib, copy the app, re-sign, verify. */
 export async function buildInstrumented(paths: Paths, emit: Emit): Promise<string | null> {
   if (!IS_MAC) return null
   const script = buildScript(paths.repo)
-  if (!exists(script)) return `${script} is missing from this checkout.`
-  const code = await stream(script, [], paths.repo, 'Building the instrumented copy', emit)
-  return code === 0 ? null : 'The instrumented build failed. Open Logs for the output.'
+  if (!exists(script)) return t('install.scriptMissing', { script })
+  const code = await stream(script, [], paths.repo, t('install.building'), emit)
+  return code === 0 ? null : t('install.buildFail')
 }
 
 export const FIXABLE: CheckId[] = ['venv', 'clang', 'instrumented', 'register']

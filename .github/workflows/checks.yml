@@ -49,14 +49,20 @@ jobs:
         with:
           python-version: '3.12'
 
-      # numpy, but not the rest of [audio]: the leveling suites are arithmetic
-      # on a signal and run anywhere, while soundfile/sounddevice want PortAudio
-      # and a device neither runner has. Without it test_leveling_e2e skips its
-      # 153 checks — the ones that caught the true-peak guard converging on a
-      # clipped preset — and test_loudness skips 18 more.
-      # [gui] stays out: it is the macOS-only pyobjc harness and nothing here
+      # The maths half of [audio], and only that half. loudness.analyze needs
+      # numpy, pyloudnorm (the K-weighting) and scipy (4x oversampling for true
+      # peak); all three are pure wheels that install anywhere. Left out:
+      # sounddevice and soundfile, which want PortAudio and a device neither
+      # runner has, and mosqito, which is only for the perceived-loudness metric
+      # and drags matplotlib in with it.
+      #
+      # Without them test_leveling_e2e skips its 153 checks — the ones that
+      # caught the true-peak guard reporting "converged" over a clipping preset
+      # — and test_loudness skips 18 more.
+      #
+      # [gui] stays out: it is the macOS-only pyobjc harness, and nothing here
       # drives a GUI.
-      - run: pip install -e . numpy
+      - run: pip install -e . numpy scipy pyloudnorm
 
       # Every test file is its own __main__ that prints "N/N passed" and exits
       # non-zero on failure, so the loop is the runner. bash so one step serves

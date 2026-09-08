@@ -30,6 +30,14 @@ try:
 except ImportError:
     HAVE_NUMPY = False
 
+# Rendering a riff is numpy; WRITING one to disk is soundfile, which wants
+# libsndfile. Everything about the catalogue can be checked without it.
+try:
+    import soundfile                                 # noqa: F401,E402
+    HAVE_SOUNDFILE = True
+except ImportError:
+    HAVE_SOUNDFILE = False
+
 from qc_mcp import autolevel, loudness, riffs        # noqa: E402
 from qc_mcp import leveling as bench_mod             # noqa: E402
 
@@ -599,6 +607,9 @@ def test_the_bench_can_list_and_load_a_shipped_riff():
     check("all five are listed", len(names) == 5, names)
     check("each carries a reason", all(len(r["why"]) > 30 for r in listed["riffs"]))
     check("each carries a length", all(r["seconds"] > 2 for r in listed["riffs"]))
+
+    if not HAVE_SOUNDFILE:
+        return          # loading renders a wav; the listing above needs no disk
 
     with tempfile.TemporaryDirectory() as d:
         real_default = audio_io.DEFAULT_SAMPLE_PATH

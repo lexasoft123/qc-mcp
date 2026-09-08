@@ -311,6 +311,13 @@ our own handle and confirmed by re-reading the directory.
   `author_id`); a Grid UPDATE with those fields is a no-op and a `File` CREATE
   ignores `preset_payload`. An **Unsaved slot's live preset carries the device
   user as author**, so re-authoring = rebuild on an empty slot, then save over
-  the original (`tools/wip-reauthor/`, verified with a 0-difference
-  `describe()` diff on a preset with per-scene params/bypass, stomps, lane blocks).
+  the original. **Not production-ready**: the rebuild in `tools/wip-reauthor/`
+  reproduced blocks, per-scene params/bypass, stomps, lane blocks, labels and
+  colors (0-difference `describe()` diff) but **dropped the preset's MIDI out**
+  (`midi_messages*`, not covered by `describe()`), found by the owner on the
+  device. A faithful rebuild must cover every `BinaryPreset` field (see the
+  descriptor: expression/bypass_expression per model, `midi_messages`,
+  `midi_messages_general(_v2)`, `scene_tempo`, `stomp_labels`,
+  `single_stomp_labels`, `stomp_is_momentary`, `volume`/`pan`, `tags`,
+  `description`…) and be diffed on the raw message, not on a summary.
 - **default_scene** = whichever scene is active when the save happens.

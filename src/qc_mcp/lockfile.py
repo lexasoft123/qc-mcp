@@ -167,6 +167,13 @@ def acquire(owner, mode, socket_path=None, takeover=False, **extra):
     }
     record.update({k: v for k, v in extra.items() if v is not None})
     _write(p, record)
+    # Two processes can both read "nobody" and both write. The window is small
+    # and the device itself refuses the second in direct mode, but bridge and
+    # shared modes have no such backstop — so read back and see whose name is on
+    # it. Not a substitute for an OS lock; enough that the loser knows.
+    settled = read_raw(socket_path)
+    if settled and settled.get("pid") != os.getpid() and not takeover:
+        raise Held(settled)
     return record
 
 

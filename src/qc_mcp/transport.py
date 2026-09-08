@@ -93,24 +93,36 @@ class QuadCortex:
         self.detect_version()
         return self
 
+    @_serialized
     def _overheard_version(self, seconds=2.5):
         """A Version message the APP asked for, taken off the shared wire.
 
         Returns None if none arrives in the window — the caller then asks, once,
         and accepts that Cortex Control will see that one reply.
+
+        Serialized and self-clearing for the same reason every other exchange is:
+        `_pending` is shared, and listening for 2.5s fills it with whatever the
+        app was doing. The handshake clears it at the end for exactly this
+        reason, and bridge mode skips the handshake — so this has to.
         """
+        want = P.NAME_TO_CMD.get("Version")
+        found = None
         deadline = time.time() + seconds
-        while time.time() < deadline:
-            self._collect(0.25)
-            for cmd, obj, _raw, _pb in reversed(self._pending):
-                if obj is None:
-                    continue
-                if cmd != P.NAME_TO_CMD.get("Version"):
-                    continue
-                # a READ going the other way has none of these filled in
-                if any(getattr(obj, f, "") for f in ("zenos_git_hash", "app_fw_version")):
-                    return obj
-        return None
+        try:
+            while found is None and time.time() < deadline:
+                self._collect(0.25)
+                for cmd, obj, _raw, _pb in reversed(self._pending):
+                    if obj is None or cmd != want:
+                        continue
+                    # a READ going the other way has none of these filled in
+                    if any(getattr(obj, f, "") for f in ("zenos_git_hash", "app_fw_version")):
+                        found = obj
+                        break
+        finally:
+            # Nothing overheard is ours to answer: drop it all rather than leave
+            # the app's traffic sitting where the next request() will sift it.
+            self._pending.clear()
+        return found
 
     def detect_version(self):
         """Read the device's firmware and select the matching wire schema.

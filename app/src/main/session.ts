@@ -5,6 +5,7 @@ import { planFor } from '../shared/session.js'
 import { runPlan } from '../shared/run-plan.js'
 import { singleFlight } from '../shared/once.js'
 import * as cortex from './cortex.js'
+import { read as readLock } from './lock.js'
 import * as state from './state.js'
 import { IS_MAC, PLATFORM } from './paths.js'
 import { sleep } from './util.js'
@@ -75,7 +76,11 @@ function opsWith(note: (label: string) => void): SessionOps {
     note,
     stopDaemon: async () => { await state.getDaemon().stop(); await state.push() },
     takeOver: async () => {
-      const err = await state.getDaemon().evict(state.current()?.lock ?? null)
+      // Read the lock NOW, not from the snapshot the plan was made against: a
+      // pid is being sent a signal, and the record could be seconds old — long
+      // enough for that owner to have exited and the number to have been
+      // reused by something innocent.
+      const err = await state.getDaemon().evict(readLock(paths().socket))
       await state.push()
       return err
     },
@@ -138,7 +143,11 @@ export const pursue = singleFlight(async (
     state.setBusy(false)
     await state.push(true)
   }
-})
+},
+// Two calls are the same request when they ask for the same thing. The poll
+// asking for `connect` again joins the connect in flight; a person pressing
+// Disconnect during it waits for it and then actually disconnects.
+(goal, mode) => `${goal}:${mode ?? ''}`)
 
 /** Is a plan running? The poll must not start a second one behind it. */
 export const busy = (): boolean => pursue.busy()

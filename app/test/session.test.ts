@@ -627,3 +627,37 @@ test('take-over is the only step that ends somebody else\'s session', () => {
     }
   })
 })
+
+test('a step that THROWS is a failed step, not an escaped exception', async () => {
+  // An op that rejects used to escape runPlan entirely: a raw IPC rejection,
+  // the session left wherever the step reached it, and nothing on screen.
+  const f = WORLDS.find((w) => w.devicePresent && !w.heldBy && !w.daemonRunning)!
+  for (const [name, msg] of [['startDaemon', 'ENOENT'], ['quitCortex', 'boom']] as const) {
+    const plan = planFor('take-over', 'direct', { ...f, cortexRunning: true, cortexInstalled: true })
+    if (plan.blocked || !stepNames(plan).includes(name === 'quitCortex' ? 'quit-cortex' : 'start-daemon')) continue
+    const world: World = { ...f, cortexRunning: true, cortexInstalled: true }
+    const o = ops(world)
+    const boom = { ...o, [name]: async () => { throw new Error(msg) } }
+    const out = await runPlan(plan, boom)
+    assert.equal(out.ok, false, `${name} threw and the plan called it a success`)
+    assert.ok(out.error?.includes(msg), `the message should survive: ${out.error}`)
+  }
+})
+
+test('every op throwing, in every world, still returns an outcome', async () => {
+  const OPS = ['stopDaemon', 'startDaemon', 'quitCortex', 'launchBridge', 'launchStock',
+               'awaitBridge', 'awaitCortex', 'focusCortex', 'takeOver'] as const
+  for (const f of WORLDS) {
+    if (!f.devicePresent) continue
+    for (const goal of GOALS) for (const which of OPS) {
+      const plan = planFor(goal, 'auto', f)
+      if (plan.blocked || plan.satisfied) continue
+      const world: World = { ...f }
+      const base = ops(world)
+      const boom = { ...base, [which]: async () => { throw new Error('thrown by ' + which) } }
+      const out = await runPlan(plan, boom)          // must not reject
+      assert.equal(typeof out.ok, 'boolean', `${say(f)} · ${goal} · ${which}`)
+      if (!out.ok) assert.ok(out.error, `${say(f)} · ${goal} · ${which}: failed with no message`)
+    }
+  }
+})

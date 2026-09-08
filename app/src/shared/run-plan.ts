@@ -70,21 +70,39 @@ export const STEP_TIMEOUT_MS: Record<Step['do'], number> = {
 
 const TIMED_OUT = Symbol('timed out')
 
-async function within<T>(ms: number, work: Promise<T>): Promise<T | typeof TIMED_OUT> {
+/** A step that overran, or one that threw — never an escaped exception. */
+const THREW = Symbol('threw')
+
+async function within<T>(
+  ms: number, work: Promise<T>
+): Promise<T | typeof TIMED_OUT | { [THREW]: unknown }> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const bell = new Promise<typeof TIMED_OUT>((r) => { timer = setTimeout(() => r(TIMED_OUT), ms) })
   try {
     return await Promise.race([work, bell])
+  } catch (e) {
+    // An op that throws is a step that failed, and the plan says so. Letting it
+    // escape turns a legible failure into a raw IPC rejection, with the session
+    // left in whatever state the step reached and nothing on screen about it.
+    return { [THREW]: e }
   } finally {
     if (timer) clearTimeout(timer)
   }
+}
+
+const threw = (v: unknown): v is { [THREW]: unknown } =>
+  typeof v === 'object' && v !== null && THREW in v
+
+const because = (step: Step, e: unknown): string => {
+  const msg = e instanceof Error ? e.message : String(e)
+  return `${LABEL[step.do]} failed: ${msg || 'no reason given'}`
 }
 
 export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
   if (plan.blocked) return { ok: false, error: plan.blocked, ran: [] }
   const ran: Step[] = []
   const fail = (error: string): Outcome => ({ ok: false, error, ran })
-  const guard = async <T>(step: Step, work: Promise<T>): Promise<T | typeof TIMED_OUT> =>
+  const guard = <T>(step: Step, work: Promise<T>): Promise<T | typeof TIMED_OUT | { [THREW]: unknown }> =>
     within(STEP_TIMEOUT_MS[step.do], work)
 
   for (const step of plan.steps) {
@@ -96,12 +114,15 @@ export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
       case 'focus-cortex': {
         const call = step.do === 'stop-daemon' ? ops.stopDaemon()
           : step.do === 'quit-cortex' ? ops.quitCortex() : ops.focusCortex()
-        if ((await guard(step, call)) === TIMED_OUT) return fail(overran(step))
+        const r = await guard(step, call)
+        if (r === TIMED_OUT) return fail(overran(step))
+        if (threw(r)) return fail(because(step, r[THREW]))
         break
       }
       case 'take-over': {
         const err = await guard(step, ops.takeOver())
         if (err === TIMED_OUT) return fail(overran(step))
+        if (threw(err)) return fail(because(step, err[THREW]))
         if (err) return fail(err)
         break
       }
@@ -110,6 +131,7 @@ export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
         const call = step.do === 'launch-bridge' ? ops.launchBridge() : ops.launchStock()
         const err = await guard(step, call)
         if (err === TIMED_OUT) return fail(overran(step))
+        if (threw(err)) return fail(because(step, err[THREW]))
         if (err) return fail(err)
         break
       }
@@ -118,12 +140,14 @@ export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
         const call = step.do === 'await-bridge' ? ops.awaitBridge() : ops.awaitCortex()
         const ok = await guard(step, call)
         if (ok === TIMED_OUT) return fail(overran(step))
+        if (threw(ok)) return fail(because(step, ok[THREW]))
         if (!ok) return fail('Cortex Control did not open in time. Try again, or switch to Direct.')
         break
       }
       case 'start-daemon': {
         const err = await guard(step, ops.startDaemon(step.session))
         if (err === TIMED_OUT) return fail(overran(step))
+        if (threw(err)) return fail(because(step, err[THREW]))
         if (err) return fail(err)
         break
       }

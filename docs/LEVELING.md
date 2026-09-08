@@ -76,7 +76,7 @@ for measuring what the player is actually playing.
 **A measurement is silent in the room.** While the tail lane's output is tapped to USB it
 is no longer going to the XLRs, so nothing reaches the monitors during a run.
 
-### Verified on hardware (2026-09-03, CorOS 4.1.0, preset "Blackmore")
+### Verified on hardware (2026-09-03, CorOS 4.1.0, a split-lane preset)
 
     rows: input row 0, output row 2
     pass 1: -13.29 LUFS, off by -4.7 dB

@@ -159,8 +159,6 @@ function handlers(): void {
    * under the person using it is what Disconnect is for. Enforced here and not
    * only in the view, so no other caller can route around it.
    */
-  ipcMain.handle('daemon:mode', async (_e, mode: Mode) => setMode(mode))
-
   const setMode = async (mode: Mode): Promise<Snapshot> => {
     const snap = state.current() ?? (await state.refresh())
     const gate = modeSwitch(session.factsFrom(snap, false), snap.daemon.state !== 'stopped')
@@ -171,6 +169,8 @@ function handlers(): void {
     state.updatePrefs({ mode })
     return state.push()
   }
+
+  ipcMain.handle('daemon:mode', async (_e, mode: Mode) => setMode(mode))
 
   ipcMain.handle('cortex:launch', () => pursue('show-app'))
   ipcMain.handle('cortex:focus', () => pursue('show-app'))

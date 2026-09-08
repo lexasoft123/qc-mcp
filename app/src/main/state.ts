@@ -33,7 +33,6 @@ let inflight: Promise<Snapshot> | null = null
 let busy = false
 
 export const setBusy = (b: boolean): void => { busy = b }
-export const isBusy = (): boolean => busy
 
 export function init(): void {
   prefs = prefsStore.load()

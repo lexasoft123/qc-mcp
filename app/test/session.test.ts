@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { planFor, resolveSession } from '../src/shared/session.ts'
+import { modeSwitch, planFor, resolveSession } from '../src/shared/session.ts'
 import { runPlan } from '../src/shared/run-plan.ts'
 import type { Facts, Goal } from '../src/shared/session.ts'
 import type { Mode } from '../src/shared/types.ts'
@@ -181,6 +181,7 @@ test('Show Cortex Control never launches a second copy over a running one', () =
 test('Show Cortex Control opens the instrumented build wherever bridge mode could use it', () => {
   each((f) => {
     if (f.platform !== 'mac' || f.cortexRunning || !f.instrumentedBuilt) return
+    if (f.daemonSession === 'direct') return   // covered below: it is refused
     for (const mode of ['auto', 'bridge'] as Mode[]) {
       assert.ok(stepNames(planFor('show-app', mode, f)).includes('launch-bridge'),
         'opened the stock app when the instrumented one was available')
@@ -191,6 +192,32 @@ test('Show Cortex Control opens the instrumented build wherever bridge mode coul
     if (f.cortexInstalled) assert.deepEqual(stepNames(direct), ['launch-stock'])
     else assert.ok(direct.blocked)
   })
+})
+
+test('Show Cortex Control is refused while a direct session holds the device', () => {
+  // Launching Cortex Control into a device the daemon owns exclusively kills
+  // it — EXC_BAD_ACCESS on its message thread, nine seconds after launch. It
+  // is not a thing to attempt and recover from; it is a thing not to do.
+  each((f) => {
+    if (f.daemonSession !== 'direct') return
+    for (const mode of MODES) {
+      const p = planFor('show-app', mode, f)
+      assert.ok(p.blocked, 'planned to launch Cortex Control over a direct session')
+      assert.match(p.blocked, /Disconnect first|switch to Bridge/i)
+    }
+  })
+})
+
+test('Show Cortex Control never launches into a device somebody else holds', async () => {
+  for (const f of WORLDS) {
+    for (const mode of MODES) {
+      const plan = planFor('show-app', mode, f)
+      if (plan.blocked) continue
+      const launches = stepNames(plan).some((s) => s.startsWith('launch'))
+      if (!launches) continue
+      assert.notEqual(f.daemonSession, 'direct', `${say(f)} · mode=${mode}`)
+    }
+  }
 })
 
 test('Show Cortex Control never touches the daemon', () => {
@@ -437,4 +464,74 @@ test('the stock app is never opened on top of the instrumented one — the repor
     assert.equal(r.world.cortexInstrumented, true, 'the instrumented app was replaced')
     assert.equal(r.world.daemonSession, 'bridge', 'the session did not survive')
   }
+})
+
+// ── the mode selector ─────────────────────────────────────────────────────
+
+test('changing the mode never opens an app or starts a daemon', () => {
+  // The whole point of the switch being a preference: with nothing connected
+  // it changes what Connect WILL do, and touches the machine not at all.
+  each((f) => {
+    const gate = modeSwitch(f)
+    assert.equal(gate.allowed, !f.daemonRunning, say(f))
+    if (gate.allowed) assert.equal(gate.why, null)
+    else assert.match(gate.why!, /Disconnect first/)
+  })
+})
+
+test('the mode cannot be changed under a live session', () => {
+  each((f) => {
+    if (!f.daemonRunning) {
+      // ...and a session that is merely starting is live enough to lock it
+      assert.equal(modeSwitch(f, true).allowed, false, say(f))
+      return
+    }
+    assert.equal(modeSwitch(f).allowed, false, say(f))
+  })
+})
+
+test('a locked switch leaves the session exactly as it was', async () => {
+  for (const f of WORLDS) {
+    if (!f.daemonRunning) continue
+    const world: World = { ...f }
+    for (const mode of MODES) {
+      if (modeSwitch(world).allowed) assert.fail(`switch allowed on ${say(world)}`)
+      // refused means nothing ran at all
+      assert.deepEqual({ ...world }, { ...f }, `${say(f)} · ${mode} changed the world`)
+    }
+  }
+})
+
+test('waiting for the bridge is inseparable from launching it', () => {
+  // The boot-storm settle lives on the await step. If a plan could ever launch
+  // the app without then awaiting it, the daemon would attach mid-boot and kill
+  // Cortex Control — which is precisely the crash this pairing prevents.
+  each((f) => {
+    for (const mode of MODES) for (const goal of GOALS) {
+      const steps = stepNames(planFor(goal, mode, f))
+      const li = steps.indexOf('launch-bridge')
+      const ai = steps.indexOf('await-bridge')
+      if (li >= 0) assert.equal(ai, li + 1, `launch-bridge without an await after it: ${steps}`)
+      if (ai >= 0) assert.equal(li, ai - 1, `await-bridge without a launch before it: ${steps}`)
+      const ls = steps.indexOf('launch-stock')
+      const as = steps.indexOf('await-cortex')
+      if (ls >= 0 && goal === 'connect') assert.equal(as, ls + 1, `launch-stock unawaited: ${steps}`)
+    }
+  })
+})
+
+test('the daemon is never started in the same breath as launching the app', () => {
+  // start-daemon must be separated from any launch by the wait that lets the
+  // app finish booting.
+  each((f) => {
+    for (const mode of MODES) {
+      const steps = stepNames(planFor('connect', mode, f))
+      const start = steps.indexOf('start-daemon')
+      if (start < 0) continue
+      const launched = steps.findIndex((s) => s.startsWith('launch'))
+      if (launched < 0) continue
+      assert.ok(steps.slice(launched, start).some((s) => s.startsWith('await')),
+        `daemon started right after a launch, with no wait: ${steps}`)
+    }
+  })
 })

@@ -16,6 +16,10 @@ export async function launch(paths: Paths): Promise<string | null> {
   if (IS_MAC) {
     const script = bridgeScript(paths.repo)
     if (exists(instrumentedApp(paths.repo)) && exists(script)) {
+      // Nothing may still be holding the device. run-bridge.sh clears the way
+      // too, but Patchbay is usually the one that just killed the old instance,
+      // and it is the one that knows to wait for it to actually be gone.
+      await quit(paths.repo)
       spawn(script, [], { cwd: paths.repo, detached: true, stdio: 'ignore' }).unref()
       return null
     }
@@ -55,7 +59,23 @@ export async function bridgeReady(repo: string): Promise<boolean> {
 }
 
 /**
- * Wait for it. launch() only spawns run-bridge.sh and returns, but the
+ * The boot storm.
+ *
+ * Cortex Control pulls its entire catalog off the device in the first seconds
+ * after launch, and a second writer arriving in the middle of that kills it:
+ * EXC_BAD_ACCESS on the JUCE message thread, nine seconds after launch, every
+ * time. Verified by elimination — the stock app alone survives, the
+ * instrumented app alone survives, the daemon attaching mid-boot does not.
+ *
+ * qc_mcp/server._launch_bridge has waited these twelve seconds since it was
+ * written. Patchbay never did, and never had to: it only ever attached to an
+ * app that was already up. Now that a plan can launch the app and connect in
+ * one press, it has to wait the same wait.
+ */
+export const BOOT_SETTLE_MS = 12_000
+
+/**
+ * Wait for the bridge. launch() only spawns run-bridge.sh and returns, but the
  * instrumented app takes ~20s cold to come up and open the FIFOs — and the
  * daemon chooses bridge vs direct ONCE, at startup. Starting the daemon into a
  * half-open bridge silently gets direct mode, which seizes the device and
@@ -64,23 +84,48 @@ export async function bridgeReady(repo: string): Promise<boolean> {
  * Returns false on timeout rather than throwing: direct mode still works, so a
  * slow launch should degrade, not fail.
  */
-export async function waitForBridge(repo: string, timeoutMs = 45000): Promise<boolean> {
+export async function waitForBridge(
+  repo: string, timeoutMs = 60000, settleMs = 0
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (await bridgeReady(repo)) return true
+    if (await bridgeReady(repo)) {
+      if (!settleMs) return true
+      await sleep(settleMs)
+      // and it has to still be there once the storm has passed
+      return bridgeReady(repo)
+    }
     await sleep(500)
   }
   return false
 }
 
-export async function quit(): Promise<void> {
-  if (IS_MAC) {
-    await run('osascript', ['-e', 'quit app "Cortex Control"'], { timeout: 10000 })
-    // the instrumented copy is a separate bundle and ignores the AppleScript
-    await run('pkill', ['-f', 'CortexControl-instrumented.app'], { timeout: 5000 })
+/**
+ * Ask it to quit, and only insist if asking did not work.
+ *
+ * This used to send the AppleScript quit and then SIGTERM the instrumented copy
+ * immediately — the signal arriving in the middle of the teardown the script
+ * had just started. Cortex Control does not enjoy that. Give the graceful path
+ * its seconds, watch for the process to actually go, and escalate only if it
+ * is still there.
+ */
+export async function quit(repo: string): Promise<void> {
+  if (!IS_MAC) {
+    await run('taskkill', ['/IM', 'Cortex Control.exe'], { timeout: 10000 })
     return
   }
-  await run('taskkill', ['/IM', 'Cortex Control.exe'], { timeout: 10000 })
+  await run('osascript', ['-e', 'quit app "Cortex Control"'], { timeout: 10000 })
+  for (let i = 0; i < 24; i++) {
+    if ((await cortexPid(repo)).pid === null) return
+    await sleep(500)
+  }
+  // The instrumented copy is a separate bundle: the AppleScript names the stock
+  // one and never reaches it, so this is its normal exit, not a kill.
+  await run('pkill', ['-f', 'CortexControl-instrumented.app'], { timeout: 5000 })
+  for (let i = 0; i < 10; i++) {
+    if ((await cortexPid(repo)).pid === null) return
+    await sleep(500)
+  }
 }
 
 /**

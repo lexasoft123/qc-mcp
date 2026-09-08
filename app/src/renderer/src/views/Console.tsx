@@ -125,16 +125,15 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
             </Badge>
             <span className="grow" />
             <div className="acts">
+              {/* Locked while a session is open — the mode decides how one is
+                  opened, so changing it under a live one is a reconnect, and
+                  that is asked for with Stop, not with a selector. */}
               <SegmentedControl
                 options={MODES}
                 value={snap.prefs.mode}
                 aria-label="Connection mode"
-                onChange={(m) => {
-                  void act(() => window.patchbay.setMode(m))
-                  if (m === 'direct' && snap.cortex.running) {
-                    say('Direct mode needs the device to itself — quit Cortex Control.', true)
-                  }
-                }}
+                disabled={snap.daemon.state !== 'stopped'}
+                onChange={(m) => { void act(() => window.patchbay.setMode(m)) }}
               />
               <Button
                 variant={live ? 'danger' : 'primary'}

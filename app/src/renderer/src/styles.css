@@ -294,7 +294,8 @@ body::after {
 }
 .hm-tile.m-bridge { --m: var(--sz-success); }
 .hm-tile.m-direct { --m: var(--sz-danger); }
-.hm-tile:hover { border-color: color-mix(in srgb, var(--m) 40%, transparent); }
+.hm-tile:hover:not(:disabled) { border-color: color-mix(in srgb, var(--m) 40%, transparent); }
+.hm-tile:disabled { cursor: default; opacity: 0.42; }
 
 .hm-tile b {
   display: flex; align-items: center; gap: 7px;
@@ -327,6 +328,7 @@ body::after {
   font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--m); background: color-mix(in srgb, var(--m) 14%, transparent);
 }
+.hm-lock { color: var(--sz-faint); }
 .home-mode.warn .hm-plan { color: var(--sz-danger-surface-text); }
 .home-mode.warn .hm-plan i { color: var(--sz-danger); background: rgba(255, 122, 92, 0.16); }
 

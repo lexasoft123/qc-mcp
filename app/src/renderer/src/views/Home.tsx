@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Button } from '@singz/ui'
 import type { Mode, Snapshot } from '@shared/types'
+import { modeSwitch } from '@shared/session'
 import {
-  cleanError, isLinked, isMac, modePlan, sessionMode, sessionWords, setupPending
+  cleanError, isLinked, isMac, modeFacts, modePlan, sessionMode, sessionWords, setupPending
 } from '../derive.js'
 import { act, publish, say, useProgress } from '../store.js'
 import { SignalPath } from '../components/SignalPath.js'
@@ -37,6 +38,11 @@ export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): R
   const mode = snap.prefs.mode
   const mac = isMac(snap)
   const p = modePlan(snap)
+  // A live session is not a setting. Changing the mode under one means tearing
+  // the session down and building another, which is a thing to ask for on
+  // purpose — Disconnect — not a side effect of touching a selector.
+  const gate = modeSwitch(modeFacts(snap), snap.daemon.state !== 'stopped')
+  const locked = !gate.allowed
   // The chip belongs to the ROUTE, not the selection: it labels a sentence about
   // the session, and it is the tie back to the colour running through the path.
   const route = live ? sessionMode(snap) : p.will
@@ -53,12 +59,14 @@ export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): R
               role="radio"
               aria-checked={on}
               className={`hm-tile m-${m.value}${on ? ' on' : ''}`}
+              disabled={locked && !on}
+              aria-disabled={locked || undefined}
               onClick={() => {
                 if (on) return
+                if (locked) { say(gate.why!, true); return }
+                // Nothing is running, so this changes a preference and the
+                // picture above it. No app is opened, no daemon is started.
                 void act(() => window.patchbay.setMode(m.value))
-                if (m.value === 'direct' && snap.cortex.running) {
-                  say('Direct mode needs the device to itself — quit Cortex Control.', true)
-                }
               }}
             >
               <b><i className="dot" />{m.name}</b>
@@ -71,8 +79,11 @@ export function ModeChoice({ snap, live }: { snap: Snapshot; live: boolean }): R
       <p className="hm-plan">
         {live
           ? <><i>Open now</i> {sessionWords(snap, sessionMode(snap))}
-              {snap.daemon.external ? ' · adopted from a daemon started outside Patchbay' : ''}</>
-          : <><i>{p.blocked ? 'Cannot connect' : 'This press'}</i> {p.blocked ?? p.plan}</>}
+              {snap.daemon.external ? ' · adopted from a daemon started outside Patchbay' : ''}
+              <span className="hm-lock"> · disconnect to change it</span></>
+          : locked
+            ? <><i>Working</i> Opening the session.</>
+            : <><i>{p.blocked ? 'Cannot connect' : 'This press'}</i> {p.blocked ?? p.plan}</>}
       </p>
     </div>
   )

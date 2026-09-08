@@ -2,6 +2,7 @@ import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import type { CheckId, Mode, Prefs, Progress, Snapshot } from '../shared/types.js'
 import type { Goal } from '../shared/session.js'
+import { modeSwitch } from '../shared/session.js'
 import * as clients from './clients.js'
 import * as cortex from './cortex.js'
 import * as install from './install.js'
@@ -147,12 +148,26 @@ function handlers(): void {
    * selector that said Direct. If nothing is connected the preference is all
    * there is to change; if something is, the session is rebuilt to match.
    */
-  ipcMain.handle('daemon:mode', async (_e, mode: Mode) => {
+  /**
+   * Switching mode is a preference, and only ever a preference.
+   *
+   * With nothing connected it changes what Connect will do — no app is opened,
+   * no daemon started. With a session live it is refused: reshaping a session
+   * under the person using it is what Disconnect is for. Enforced here and not
+   * only in the view, so no other caller can route around it.
+   */
+  ipcMain.handle('daemon:mode', async (_e, mode: Mode) => setMode(mode))
+
+  const setMode = async (mode: Mode): Promise<Snapshot> => {
+    const snap = state.current() ?? (await state.refresh())
+    const gate = modeSwitch(session.factsFrom(snap, false), snap.daemon.state !== 'stopped')
+    if (!gate.allowed) {
+      emit('progress', { label: gate.why!, done: 1, total: 1, finished: true, error: gate.why! })
+      return snap
+    }
     state.updatePrefs({ mode })
-    const snap = await state.push()
-    if (snap.daemon.state !== 'running') return snap
-    return pursue('connect', mode)
-  })
+    return state.push()
+  }
 
   ipcMain.handle('cortex:launch', () => pursue('show-app'))
   ipcMain.handle('cortex:focus', () => pursue('show-app'))
@@ -164,12 +179,12 @@ function handlers(): void {
       leveling?.stop()
       await session.pursue('disconnect', undefined, () => {})
     }
-    await cortex.quit()
+    await cortex.quit(state.getPaths().repo)
     return state.push()
   })
 
   ipcMain.handle('cortex:rebuild', async () => {
-    await cortex.quit()
+    await cortex.quit(state.getPaths().repo)
     const err = await install.buildInstrumented(state.getPaths(), (p) => emit('progress', p))
     emit('progress', { label: err ?? 'Rebuilt', done: 1, total: 1, finished: true, error: err ?? undefined })
     return state.push(true)
@@ -181,15 +196,11 @@ function handlers(): void {
 
   ipcMain.handle('prefs:get', () => state.getPrefs())
   ipcMain.handle('prefs:set', async (_e, patch: Partial<Prefs>) => {
-    const before = state.getPrefs().mode
-    state.updatePrefs(patch)
-    const snap = await state.push()
-    // Preferences can change the mode too, and it has to mean the same thing
-    // there as it does on Home — a live session follows the selector.
-    if (patch.mode && patch.mode !== before && snap.daemon.state === 'running') {
-      return pursue('connect', patch.mode)
-    }
-    return snap
+    // The mode means the same thing in Preferences as it does on Home.
+    const { mode, ...rest } = patch
+    if (Object.keys(rest).length) state.updatePrefs(rest)
+    if (mode && mode !== state.getPrefs().mode) return setMode(mode)
+    return state.push()
   })
 
   ipcMain.handle('path:choose', async (_e, what: 'repo' | 'cortex') => {
@@ -267,7 +278,7 @@ async function tick(): Promise<void> {
     if (missing >= 2) {
       missing = 0
       leveling?.stop()
-      state.getDaemon().stop()
+      await state.getDaemon().stop()
       await state.push()
       return
     }
@@ -279,7 +290,11 @@ async function tick(): Promise<void> {
   if (!snap.device.present || snap.daemon.state !== 'stopped') return
   if (snap.daemon.error || !snap.daemon.supported) return
   if (snap.checks.some((c) => c.fixable && c.status !== 'ok')) return
-  await state.getDaemon().start(() => void state.push())
+  // Through the plan, like every other route in. Starting the daemon directly
+  // here meant autoconnect in Bridge mode fired at a closed Cortex Control and
+  // failed on the daemon's own BridgeError — a connection the plan would have
+  // opened the app for first.
+  await session.pursue('connect', undefined, () => {})
   await state.push()
 }
 
@@ -317,5 +332,5 @@ app.on('before-quit', () => {
   if (ticker) clearInterval(ticker)
   leveling?.stop()
   state.getDaemon()?.stop()
-  if (state.getPrefs().quitApp) void cortex.quit()
+  if (state.getPrefs().quitApp) void cortex.quit(state.getPaths().repo)
 })

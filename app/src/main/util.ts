@@ -53,3 +53,24 @@ export const exists = (p: string): boolean => {
 }
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * The sentence out of a Python traceback.
+ *
+ * This used to be `stderr.split('\n').slice(-3).join(' ')` — three arbitrary
+ * lines of wreckage glued together, which is what the status bar was showing:
+ * `...<2 lines>... "Windows") qc_mcp.backend.BridgeError: bridge mode needs…`.
+ * The last `SomeError: message` line is the whole of what anyone wants.
+ */
+export function lastErrorLine(stderr: string): string | null {
+  const lines = stderr.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim())
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /^\s*(?:[\w.]+\.)?(\w*(?:Error|Exception|Interrupt)):\s*(.+)$/.exec(lines[i])
+    if (m) {
+      // a message that wrapped onto following lines carries on until the next frame
+      const tail = lines.slice(i + 1).filter((l) => !/^\s*(File "|\s{2,}|Traceback)/.test(l))
+      return [m[2], ...tail].join(' ').trim()
+    }
+  }
+  return lines.at(-1) ?? null
+}

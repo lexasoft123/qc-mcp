@@ -132,6 +132,16 @@ export function planFor(goal: Goal, mode: Mode, f: Facts, quitApp = false): Plan
     if (f.cortexRunning) {
       return { session: null, steps: [{ do: 'focus-cortex' }], blocked: null, satisfied: false }
     }
+    // And never START one into a device the daemon is holding exclusively.
+    // Cortex Control does not survive that: it comes up, finds the device it
+    // expects unavailable, and segfaults on its own null a few seconds in
+    // (EXC_BAD_ACCESS on the JUCE message thread, nine seconds after launch).
+    if (f.daemonSession === 'direct') {
+      return {
+        session: null, steps: [], satisfied: false,
+        blocked: 'The daemon is holding the Quad Cortex on its own, and Cortex Control cannot start into a device it has no access to. Disconnect first, or switch to Bridge.'
+      }
+    }
     if (f.platform === 'mac' && mode !== 'direct' && f.instrumentedBuilt) {
       return { session: null, steps: [{ do: 'launch-bridge' }, { do: 'await-bridge' }], blocked: null, satisfied: false }
     }
@@ -155,6 +165,22 @@ export function planFor(goal: Goal, mode: Mode, f: Facts, quitApp = false): Plan
   // used to change only the preference, so it claimed a session nobody had.
   const teardown: Step[] = f.daemonRunning ? [{ do: 'stop-daemon' }] : []
   return { ...rest, steps: [...teardown, ...rest.steps] }
+}
+
+/**
+ * What moving the mode selector means.
+ *
+ * Two things it does NOT mean. It does not open Cortex Control or start a
+ * bridge: with nothing connected the mode is a preference and a picture, and
+ * pressing a picture used to launch the app. And it does not re-shape a session
+ * that is already open — that is a disconnect and a connect, which is asked for
+ * on purpose rather than triggered by touching a selector.
+ */
+export function modeSwitch(f: Facts, daemonBusy = false): { allowed: boolean; why: string | null } {
+  if (f.daemonRunning || daemonBusy) {
+    return { allowed: false, why: 'Disconnect first — the mode decides how the session is opened.' }
+  }
+  return { allowed: true, why: null }
 }
 
 /** One line saying what the plan does, for the interface. */

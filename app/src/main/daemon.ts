@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { DaemonInfo, Mode, Paths, SessionMode } from '../shared/types.js'
 import { IS_MAC } from './paths.js'
-import { exists, sleep } from './util.js'
+import { exists, lastErrorLine, sleep } from './util.js'
 
 /**
  * Supervises the long-lived qc-mcp daemon — the process that owns the device
@@ -190,7 +190,7 @@ export class Daemon {
       this.startedAt = null
       if (this.state !== 'stopped') {
         this.state = 'stopped'
-        this.error = stderr.trim().split('\n').slice(-3).join(' ').slice(0, 400)
+        this.error = (lastErrorLine(stderr) ?? '').slice(0, 400)
           || 'The daemon exited immediately.'
         // an immediate exit with an argument error means this build has no daemon
         if (/unrecognized arguments|no such option|--daemon/i.test(stderr)) this.supported = false

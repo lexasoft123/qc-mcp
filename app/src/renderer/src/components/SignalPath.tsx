@@ -76,7 +76,10 @@ export function SignalPath({ snap }: { snap: Snapshot }): React.JSX.Element {
             tone={`cc${appUp ? ' on' : ''}`}
             cap="Cortex Control"
             sub={appUp ? 'session shared' : 'not open yet'}
-            onClick={() => { void window.patchbay.cortexFocus() }}
+            // Clickable ONLY when it is really there. When bridge is merely
+            // selected this node is a drawing of a plan, and pressing a picture
+            // was launching the app — which is not what changing a mode means.
+            onClick={appUp ? () => { void window.patchbay.cortexFocus() } : undefined}
           >
             <AppWindow />
           </Node>

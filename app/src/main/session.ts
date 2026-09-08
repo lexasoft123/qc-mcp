@@ -59,10 +59,12 @@ function opsWith(note: (label: string) => void): SessionOps {
       if (info.state !== 'running') return info.error ?? 'The daemon did not start.'
       return null
     },
-    quitCortex: async () => { await cortex.quit(); await state.push() },
+    quitCortex: async () => { await cortex.quit(paths().repo); await state.push() },
     launchBridge: async () => cortex.launch(paths()),
     launchStock: async () => cortex.launchStock(paths()),
-    awaitBridge: async () => cortex.waitForBridge(paths().repo),
+    // `await-bridge` only ever follows a `launch-bridge` (the plan pairs them),
+    // so the boot-storm settle always applies exactly where the app is new.
+    awaitBridge: async () => cortex.waitForBridge(paths().repo, 60000, cortex.BOOT_SETTLE_MS),
     awaitCortex: async () => {
       for (let i = 0; i < 60; i++) {
         if ((await cortex.cortexPid(paths().repo)).pid !== null) return true

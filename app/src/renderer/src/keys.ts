@@ -89,7 +89,11 @@ export function matches(e: KeyboardEvent, s: Shortcut): boolean {
   if (s.local || s.keys.length === 0) return false
   const mod = IS_MAC ? e.metaKey : e.ctrlKey
   if (Boolean(s.mod) !== mod) return false
-  if (s.shift !== undefined && Boolean(s.shift) !== e.shiftKey) return false
+  // A shortcut that does not ask for shift does not accept it. Without this,
+  // ⌘⇧S matched plain ⌘S as well as ⌘⇧S, and only the order of the `if`s in
+  // the handler decided which one ran — a reorder would have silently made
+  // "save all" save one preset.
+  if (Boolean(s.shift) !== e.shiftKey) return false
   if (!s.mod && (e.metaKey || e.ctrlKey || e.altKey)) return false
   return s.keys.includes(e.key.toLowerCase())
 }

@@ -164,6 +164,22 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   other's frames and reads silently return `None` (telemetry still flows, so it
   looks like a dead session). `disconnect` the MCP before driving the device from
   a script.
+- **Every user-facing string goes through `t()`.** `app/src/shared/i18n/` holds
+  `en.ts` and `zh-CN.ts`, typed `Record<Key, string>` so a MISSING translation
+  is a compile error — but nothing catches a string that never went through
+  `t()` at all, which is how ~120 hard-coded English strings once landed in a
+  translated app. `app/tests/localized.test.ts` sweeps the renderer for bare
+  English JSX and checks both dictionaries for matching keys, `{vars}` and
+  balanced `**`/`` ` ``. `shared/session.ts` and `shared/run-plan.ts` translate
+  too, so the MAIN process narrates a plan in the user's language.
+- **Keyboard shortcuts are declared once**, in `app/src/renderer/src/keys.ts`;
+  the legend and the `?` sheet are generated from that list, and `shortcut(key)`
+  is the only way to look one up — `SHORTCUTS.find(...)!` returned undefined
+  after a rename and took every keydown in the window down with it.
+- **A bench run is ONE call that loops server-side.** Stopping it needs the
+  `cancel` op (`leveling.py` sets a flag `measure_many` reads between presets);
+  a client-side flag stops only what the renderer loops over itself — Apply and
+  the audition walk.
 - **The session lock is the single source of truth for who holds the device.**
   `~/Library/Application Support/qc-mcp/session.json` (next to the socket;
   `%LOCALAPPDATA%\qc-mcp\` on Windows) — `{pid, owner, mode, socket, firmware,

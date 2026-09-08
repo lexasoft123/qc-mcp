@@ -116,3 +116,34 @@ test('every shortcut the views look up actually exists', () => {
 test('an undeclared shortcut throws instead of returning undefined', () => {
   assert.throws(() => shortcut('home.connect'), /no shortcut declared/)
 })
+
+test('a shortcut that does not ask for shift does not accept it', () => {
+  // ⌘⇧S used to match plain ⌘S as well, so which one ran depended on the order
+  // of the `if`s in the handler — a reorder would have quietly turned
+  // "save every unsaved trim" into "save this one preset".
+  const saveOne = shortcut('keys.saveOne')
+  const withShift = ev({ key: 's', metaKey: true, ctrlKey: true, shiftKey: true })
+  assert.equal(matches(withShift, saveOne), false)
+  assert.equal(matches(ev({ key: 's', metaKey: true, ctrlKey: true }), saveOne), true)
+  // and the unmodified ones too: ⇧P is not Play
+  assert.equal(matches(ev({ key: 'p', shiftKey: true }), shortcut('keys.play')), false)
+  assert.equal(matches(ev({ key: 'p' }), shortcut('keys.play')), true)
+})
+
+test('no two shortcuts can fire on one keystroke, whatever the handler order', () => {
+  // The property the ordering was standing in for.
+  const combos = [false, true].flatMap((mod) => [false, true].map((shift) => ({ mod, shift })))
+  for (const { mod, shift } of combos) {
+    for (const k of new Set(SHORTCUTS.flatMap((s) => s.keys))) {
+      const e = ev({ key: k, metaKey: mod, ctrlKey: mod, shiftKey: shift })
+      const hits = SHORTCUTS.filter((s) => matches(e, s))
+      const byScope = new Map<string, number>()
+      for (const h of hits) byScope.set(h.scope, (byScope.get(h.scope) ?? 0) + 1)
+      for (const [scope, n] of byScope) {
+        assert.ok(n <= 1,
+          `${mod ? 'mod+' : ''}${shift ? 'shift+' : ''}${k} fires ${n} shortcuts in ${scope}: ` +
+          hits.filter((h) => h.scope === scope).map((h) => h.cap).join(', '))
+      }
+    }
+  }
+})

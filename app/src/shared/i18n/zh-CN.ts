@@ -540,6 +540,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'lvl.working': '进行中…',
   'lvl.measuringOf': '正在测量第 {n} / {total} 个{name}',
   'lvl.stop': '停止',
+  'lvl.stopped': '已在第 {n} / {total} 个之后停止。',
   'lvl.stopping': '测完这个预设后停止',
   'lvl.listenToSet': '试听整套',
   'lvl.listenHint': '依次用每个预设播放旋律（L）',

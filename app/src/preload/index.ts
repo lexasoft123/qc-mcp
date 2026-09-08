@@ -81,6 +81,7 @@ const api: Api = {
       ipcRenderer.invoke('leveling:sampleDiscard') as Promise<SampleState>,
     measure: (perceived?: boolean) =>
       ipcRenderer.invoke('leveling:measure', perceived) as Promise<Measurement>,
+    cancel: () => ipcRenderer.invoke('leveling:cancel') as Promise<{ cancelling: boolean }>,
     riffs: () => ipcRenderer.invoke('leveling:riffs') as Promise<RiffList>,
     useRiff: (name: string) => ipcRenderer.invoke('leveling:useRiff', name),
     applyTrim: (o: {

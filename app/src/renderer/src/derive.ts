@@ -165,7 +165,10 @@ export function heldByOther(s: Snapshot): string | null {
  * the UI said 'stopped' while every connect failed on a busy device.
  */
 export function heldButUnreachable(s: Snapshot): boolean {
-  return Boolean(s.lock && s.lock.owner === 'daemon' && s.daemon.state !== 'running')
+  // 'starting' is not unreachable: our own daemon writes the lock a moment
+  // before its socket answers, so treating that window as a stuck session
+  // flashed a red "answering nobody" strip during every ordinary connect.
+  return Boolean(s.lock && s.lock.owner === 'daemon' && s.daemon.state === 'stopped')
 }
 
 /** Which Cortex Control is up, if any — the stock app or the instrumented copy. */

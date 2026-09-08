@@ -142,6 +142,9 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       }
       else if (e.event === 'measured') {
         setRows((r) => ({ ...r, [e.row.position]: e.row }))
+      } else if (e.event === 'cancelled') {
+        setRunAt(null)
+        say(t('lvl.stopped', { n: String(e.done), total: String(e.total) }), false)
       } else if (e.event === 'play') { setPlayTick((n) => n + 1) }
       else if (e.event === 'scene_measuring') setSceneAt(e.scene)
       else if (e.event === 'scene_measured') {
@@ -401,6 +404,9 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
 
   const applyAll = useCallback((): void => {
     if (busyAll) return
+    // Clear the flag a previous Stop left set, or this run gives up on its
+    // first preset for a reason nobody can see.
+    abort.current = false
     const want = wanted()
     setBusyAll(true)
     void (async () => {
@@ -483,7 +489,10 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
 
   const stopRun = useCallback((): void => {
     if (!busyAll && auditing === null) return
+    // `abort` stops the loops THIS side runs — apply, and the audition walk.
+    // A measurement is one call that loops on the bench, so it has to be told.
     abort.current = true
+    void window.patchbay.leveling.cancel().catch(() => undefined)
     if (auditing !== null) void window.patchbay.leveling.sampleStopPlay().catch(() => undefined)
     say(t('lvl.stopping'), false)
   }, [busyAll, auditing])

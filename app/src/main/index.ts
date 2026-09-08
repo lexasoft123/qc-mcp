@@ -280,6 +280,7 @@ function handlers(): void {
   ipcMain.handle('leveling:measure', (_e, perceived?: boolean) => bench().measure(perceived))
   ipcMain.handle('leveling:autolevel', (_e, o) => bench().autolevel(o ?? {}))
   ipcMain.handle('leveling:applyTrim', (_e, o) => bench().applyTrim(o))
+  ipcMain.handle('leveling:cancel', () => bench().cancel())
   ipcMain.handle('leveling:riffs', () => bench().riffs())
   ipcMain.handle('leveling:useRiff', (_e, name: string) => bench().useRiff(name))
   ipcMain.handle('leveling:samplePlay', () => bench().samplePlay())

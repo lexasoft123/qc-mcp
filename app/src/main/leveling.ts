@@ -283,6 +283,19 @@ export class Leveling {
    * change it, and Apply has to write THAT. Re-measuring here would let the
    * table describe a change nobody is going to make.
    */
+  /**
+   * Stop the run after the preset it is on.
+   *
+   * Deliberately its own op rather than a flag on the request: a measurement of
+   * a whole bench is ONE call that loops server-side, so there is nothing on
+   * this side to interrupt — the Stop button used to set a local flag that the
+   * loop never read, announce that it was stopping, and then measure every
+   * remaining preset anyway.
+   */
+  async cancel(): Promise<{ cancelling: boolean }> {
+    return (await this.call('cancel', {}, 10000)) as unknown as { cancelling: boolean }
+  }
+
   /** The riffs the package ships, so nobody needs a guitar to start. */
   async riffs(): Promise<RiffList> {
     return (await this.call('riffs', {}, 30000)) as unknown as RiffList

@@ -395,6 +395,16 @@ def measure_ops(bench, emit):
                 "sample": (audio_io.DEFAULT_SAMPLE_PATH
                            if os.path.exists(audio_io.DEFAULT_SAMPLE_PATH) else None)}
 
+    # Set by `cancel`, read between presets. A run is one call that loops over
+    # a whole bench, so without this the Stop button sets a flag nobody reads:
+    # it said "stopping after this preset" and then measured every one of them.
+    cancelled = {"at": False}
+
+    def do_cancel(m):
+        """Ask the current run to stop after the preset it is on."""
+        cancelled["at"] = True
+        return {"cancelling": True}
+
     def guard(fn):
         def run(m):
             try:
@@ -443,9 +453,13 @@ def measure_ops(bench, emit):
         metric = m.get("metric", "lufs")
         perceived = metric == "perceived" or bool(m.get("perceived"))
         rows = []
-        for i, p in enumerate(m.get("presets") or []):
+        cancelled["at"] = False
+        presets = m.get("presets") or []
+        for i, p in enumerate(presets):
+            if cancelled["at"]:
+                break
             emit({"event": "measuring", "index": i, "name": p.get("name"),
-                  "total": len(m.get("presets") or [])})
+                  "total": len(presets)})
             try:
                 bench.open(p["folder_key"], int(p["position"]),
                            bool(p.get("is_factory")), p.get("cloud_id", ""))
@@ -471,7 +485,10 @@ def measure_ops(bench, emit):
             rows.append(row)
             emit({"event": "measured", "row": row})
         vals = [r["measured"] for r in rows if r.get("measured") is not None]
+        if cancelled["at"]:
+            emit({"event": "cancelled", "done": len(rows), "total": len(presets)})
         return {"target": target, "metric": metric, "rows": rows,
+                "cancelled": cancelled["at"],
                 "spread": (round(max(vals) - min(vals), 2) if len(vals) > 1 else None)}
 
     def do_measure_scenes(m):
@@ -722,6 +739,7 @@ def measure_ops(bench, emit):
         "level_scenes": guard(do_level_scenes),
         "autolevel": guard(do_autolevel),
         "apply_trim": guard(do_apply_trim),
+        "cancel": do_cancel,
         "riffs": guard(do_riffs),
         "use_riff": guard(do_use_riff),
         "revert_levels": guard(do_revert),

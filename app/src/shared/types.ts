@@ -302,6 +302,8 @@ export interface ReportResult {
   metric: string
   rows: ReportRow[]
   spread: number | null
+  /** The run stopped early because Stop was pressed. */
+  cancelled?: boolean
 }
 
 export type LevelEvent =
@@ -315,6 +317,7 @@ export type LevelEvent =
   | { event: 'autolevel'; row: number; step: AutoStep }
   | { event: 'measuring'; index: number; name: string; total: number }
   | { event: 'measured'; row: ReportRow }
+  | { event: 'cancelled'; done: number; total: number }
   | { event: 'play'; done?: boolean; error?: string }
   | { event: 'scene_measuring'; scene: number }
   | { event: 'scene_measured'; row: SceneRow }
@@ -497,6 +500,8 @@ export interface Api {
     autolevel(o?: { target?: number; tolerance?: number; dryRun?: boolean }): Promise<AutoResult>
     /** Write ONE proposed correction, exactly as shown — relative to where the
      *  fader is now, and recorded so Undo trims can put it back. */
+    /** Ask the running measurement to stop after the preset it is on. */
+    cancel(): Promise<{ cancelling: boolean }>
     /** The riffs the bench ships, and which is loaded. */
     riffs(): Promise<RiffList>
     /** Make one of them the reference every measurement plays. */

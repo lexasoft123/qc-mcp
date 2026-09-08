@@ -142,6 +142,7 @@ export function cortexText(s: Snapshot): string {
 
 export function railText(s: Snapshot): string {
   if (!s.device.present) return 'No Quad Cortex found on USB'
+  if (s.daemon.state === 'starting') return 'Opening the session…'
   if (s.daemon.state !== 'running') {
     const why = cleanError(s.daemon.error)
     return why

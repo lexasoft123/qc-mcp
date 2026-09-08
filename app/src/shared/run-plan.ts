@@ -44,50 +44,83 @@ const LABEL: Record<Step['do'], string> = {
   'focus-cortex': 'Bringing Cortex Control forward'
 }
 
+/**
+ * Every step is bounded, and the whole plan is bounded again on top.
+ *
+ * A step that never settles used to leave the app saying "starting…" for ever,
+ * with no way to tell which step it was stuck in — the one failure mode where
+ * the interface has nothing true to show. A plan that overruns is reported as
+ * an overrun, naming the step.
+ */
+export const STEP_TIMEOUT_MS: Record<Step['do'], number> = {
+  'stop-daemon': 30_000,
+  'quit-cortex': 30_000,
+  'launch-bridge': 30_000,
+  'launch-stock': 30_000,
+  'await-bridge': 90_000,
+  'await-cortex': 45_000,
+  'start-daemon': 90_000,
+  'focus-cortex': 15_000
+}
+
+const TIMED_OUT = Symbol('timed out')
+
+async function within<T>(ms: number, work: Promise<T>): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const bell = new Promise<typeof TIMED_OUT>((r) => { timer = setTimeout(() => r(TIMED_OUT), ms) })
+  try {
+    return await Promise.race([work, bell])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export async function runPlan(plan: Plan, ops: SessionOps): Promise<Outcome> {
   if (plan.blocked) return { ok: false, error: plan.blocked, ran: [] }
   const ran: Step[] = []
   const fail = (error: string): Outcome => ({ ok: false, error, ran })
+  const guard = async <T>(step: Step, work: Promise<T>): Promise<T | typeof TIMED_OUT> =>
+    within(STEP_TIMEOUT_MS[step.do], work)
 
   for (const step of plan.steps) {
     ops.note?.(LABEL[step.do])
     ran.push(step)
     switch (step.do) {
       case 'stop-daemon':
-        await ops.stopDaemon()
-        break
       case 'quit-cortex':
-        await ops.quitCortex()
-        break
-      case 'launch-bridge': {
-        const err = await ops.launchBridge()
-        if (err) return fail(err)
+      case 'focus-cortex': {
+        const call = step.do === 'stop-daemon' ? ops.stopDaemon()
+          : step.do === 'quit-cortex' ? ops.quitCortex() : ops.focusCortex()
+        if ((await guard(step, call)) === TIMED_OUT) return fail(overran(step))
         break
       }
+      case 'launch-bridge':
       case 'launch-stock': {
-        const err = await ops.launchStock()
+        const call = step.do === 'launch-bridge' ? ops.launchBridge() : ops.launchStock()
+        const err = await guard(step, call)
+        if (err === TIMED_OUT) return fail(overran(step))
         if (err) return fail(err)
         break
       }
       case 'await-bridge':
-        if (!(await ops.awaitBridge())) {
-          return fail('Cortex Control did not open in time. Try again, or switch to Direct.')
-        }
+      case 'await-cortex': {
+        const call = step.do === 'await-bridge' ? ops.awaitBridge() : ops.awaitCortex()
+        const ok = await guard(step, call)
+        if (ok === TIMED_OUT) return fail(overran(step))
+        if (!ok) return fail('Cortex Control did not open in time. Try again, or switch to Direct.')
         break
-      case 'await-cortex':
-        if (!(await ops.awaitCortex())) {
-          return fail('Cortex Control did not open in time. Try again, or switch to Direct.')
-        }
-        break
+      }
       case 'start-daemon': {
-        const err = await ops.startDaemon(step.session)
+        const err = await guard(step, ops.startDaemon(step.session))
+        if (err === TIMED_OUT) return fail(overran(step))
         if (err) return fail(err)
         break
       }
-      case 'focus-cortex':
-        await ops.focusCortex()
-        break
     }
   }
   return { ok: true, error: null, ran }
 }
+
+const overran = (step: Step): string =>
+  `${LABEL[step.do]} did not finish within ${Math.round(STEP_TIMEOUT_MS[step.do] / 1000)}s. ` +
+  'Nothing was left half-open; try again.'

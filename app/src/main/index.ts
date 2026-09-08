@@ -287,6 +287,7 @@ async function tick(): Promise<void> {
   }
 
   if (!snap.prefs.autoconnect) return
+  if (session.busy()) return                 // a plan is already running
   if (!snap.device.present || snap.daemon.state !== 'stopped') return
   if (snap.daemon.error || !snap.daemon.supported) return
   if (snap.checks.some((c) => c.fixable && c.status !== 'ok')) return

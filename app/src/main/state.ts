@@ -28,6 +28,11 @@ interface Slow {
 }
 let slow: Slow | null = null
 let inflight: Promise<Snapshot> | null = null
+/** A plan is running. Set by session.pursue; the poll and the views read it. */
+let busy = false
+
+export const setBusy = (b: boolean): void => { busy = b }
+export const isBusy = (): boolean => busy
 
 export function init(): void {
   prefs = prefsStore.load()
@@ -145,6 +150,10 @@ export async function refresh(deep = false): Promise<Snapshot> {
   daemon.setClients(targets.filter((c) => c.installed).map((c) => c.name))
 
   const info = daemon.info()
+  // A plan in flight IS the session starting, even while its last step — the
+  // daemon itself — has not been reached. Reporting 'stopped' through twenty
+  // seconds of launching is what let the poll re-enter and start a second one.
+  if (busy && info.state === 'stopped') info.state = 'starting'
   info.reportsPerSecond = info.state === 'running' || cortex.running ? logs.rate(paths.logPath) : 0
 
   snapshot = {

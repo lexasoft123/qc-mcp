@@ -3,6 +3,7 @@ import type { Outcome, SessionOps } from '../shared/run-plan.js'
 import type { Mode, Snapshot } from '../shared/types.js'
 import { planFor } from '../shared/session.js'
 import { runPlan } from '../shared/run-plan.js'
+import { singleFlight } from '../shared/once.js'
 import * as cortex from './cortex.js'
 import * as state from './state.js'
 import { IS_MAC, PLATFORM } from './paths.js'
@@ -79,19 +80,38 @@ function opsWith(note: (label: string) => void): SessionOps {
   }
 }
 
-/** Decide, then do it. The one entry point every button goes through. */
-export async function pursue(
+/**
+ * Decide, then do it. The one entry point every button goes through — and one
+ * at a time, because the steps ahead of `start-daemon` take twenty seconds and
+ * the poll behind them runs every two.
+ */
+export const pursue = singleFlight(async (
   goal: Goal,
   mode: Mode | undefined,
   note: (label: string) => void
-): Promise<Outcome> {
-  const prefs = state.getPrefs()
-  const f = await facts()
-  const plan = planFor(goal, mode ?? prefs.mode, f, prefs.quitApp)
-  if (plan.satisfied) return { ok: true, error: null, ran: [] }
-  const out = await runPlan(plan, opsWith(note))
-  await state.push(true)
-  return out
-}
+): Promise<Outcome> => {
+  state.setBusy(true)
+  const started = Date.now()
+  const at = (m: string): void => console.log(`[session] ${goal}: ${m} (+${Date.now() - started}ms)`)
+  try {
+    const prefs = state.getPrefs()
+    const f = await facts()
+    const plan = planFor(goal, mode ?? prefs.mode, f, prefs.quitApp)
+    at(plan.blocked ? `blocked: ${plan.blocked}`
+       : plan.satisfied ? 'already satisfied'
+       : `plan ${plan.steps.map((s2) => s2.do).join(' -> ')}`)
+    if (plan.satisfied) return { ok: true, error: null, ran: [] }
+    await state.push()
+    const out = await runPlan(plan, opsWith((label) => { at(label); note(label) }))
+    at(out.ok ? 'done' : `failed: ${out.error}`)
+    return out
+  } finally {
+    state.setBusy(false)
+    await state.push(true)
+  }
+})
+
+/** Is a plan running? The poll must not start a second one behind it. */
+export const busy = (): boolean => pursue.busy()
 
 export const platform = PLATFORM

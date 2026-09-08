@@ -168,7 +168,10 @@ def main(argv):
     pos = [a for a in argv if not a.startswith("--")]
     only = pos[0].lower() if pos else None
     cases = [c for c in CORNER_CASES if not only or only in c[0].lower()]
-    qc = QuadCortex(bridge=True).open()
+    # Same rule as e2e_test.py: QC_BRIDGE=0 (or no FIFOs) means direct, so this
+    # can run with Cortex Control quit instead of requiring the bridge.
+    bridge = os.environ.get("QC_BRIDGE") != "0" and os.path.exists("/tmp/qc_inject")
+    qc = QuadCortex(bridge=bridge).open(handshake=not bridge)
     print(f"mode: {'DEVICE rebuild (apply_spec -> read back)' if device else 'OFFLINE model (describe -> build)'}\n")
     results = []
     try:

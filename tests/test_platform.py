@@ -93,6 +93,122 @@ def test_shared_mode_asks_for_a_non_seizing_handle():
         T.open_hid = real
 
 
+class _SilentIO:
+    """A backend nothing ever talks on."""
+    def open(self): pass
+    def close(self): pass
+    def set_report(self, *a, **k): pass
+    def read_reports(self, timeout=0.1): return []
+
+
+def _shared_qc(live, firmware_on_try=1):
+    """A share=True QuadCortex on a fake backend, with the wire-level steps
+    stubbed so open() can be traced: `live` is what the session sniff sees,
+    `firmware_on_try` which detect_version call first learns the firmware
+    (2 = the session we joined was already dying)."""
+    import qc_mcp.transport as T
+    calls = []
+    real = T.open_hid
+    T.open_hid = lambda **kw: _SilentIO()
+    try:
+        qc = T.QuadCortex(share=True)
+    finally:
+        T.open_hid = real
+    qc._session_live = lambda seconds=1.5: (calls.append("sniff"), live)[1]
+    qc._handshake = lambda: calls.append("handshake")
+    qc._start_heartbeat = lambda: calls.append("heartbeat")
+    tries = []
+    def detect():
+        tries.append(1)
+        qc.firmware = "4.1.0" if len(tries) >= firmware_on_try else None
+        calls.append("detect")
+    qc.detect_version = detect
+    return qc, calls
+
+
+def test_shared_handle_rides_a_live_session_instead_of_handshaking():
+    """Windows: Cortex Control keeps its own session beside our shared handle.
+    Our handshake - ResetCommsBuffers with a fresh session_id - makes the device
+    drop the app's subscriptions, and Cortex Control shows "Device connection
+    lost" seconds after we join (seen on a QC Mini, CorOS 4.1.0). So when the
+    wire is already alive, ride that session like the macOS bridge does."""
+    qc, calls = _shared_qc(live=True)
+    qc.open()
+    assert qc.riding, "a live wire means someone else owns the session"
+    assert "handshake" not in calls and "heartbeat" not in calls, calls
+    assert calls == ["sniff", "detect"], calls
+
+
+def test_shared_handle_makes_its_own_session_when_the_wire_is_silent():
+    """With the app shut nobody heartbeats the device, so the shared handle
+    (which `auto` always takes on Windows) must still run the handshake."""
+    qc, calls = _shared_qc(live=False)
+    qc.open()
+    assert not qc.riding
+    assert calls == ["sniff", "heartbeat", "handshake", "detect"], calls
+
+
+def test_shared_handle_falls_back_to_its_own_session_if_the_one_it_joined_dies():
+    """The app's session lingers ~10 s after it quits: the sniff sees traffic
+    but the first read gets nothing. Then it is ours to make."""
+    qc, calls = _shared_qc(live=True, firmware_on_try=2)
+    qc.open()
+    assert not qc.riding and qc.firmware == "4.1.0"
+    assert calls == ["sniff", "detect", "heartbeat", "handshake", "detect"], calls
+
+
+def test_direct_and_bridge_modes_never_sniff():
+    """Seizing the device means the session is ours by definition, and the
+    bridge already rides the app's - neither should spend 1.5 s listening."""
+    import qc_mcp.transport as T
+    real = T.open_hid
+    T.open_hid = lambda **kw: _SilentIO()
+    try:
+        qc = T.QuadCortex(share=False)
+    finally:
+        T.open_hid = real
+    calls = []
+    qc._session_live = lambda seconds=1.5: (calls.append("sniff"), True)[1]
+    qc._handshake = lambda: calls.append("handshake")
+    qc._start_heartbeat = lambda: calls.append("heartbeat")
+    qc.detect_version = lambda: calls.append("detect")
+    qc.open()
+    assert calls == ["heartbeat", "handshake", "detect"], calls
+    assert not qc.riding
+
+
+def test_close_ends_only_a_session_we_own():
+    """A session lingers ~10 s after its last KeepAlive; close() ends ours with
+    Connection{connected:false} so the next shared open cannot mistake the
+    corpse for Cortex Control. Riding the app's session it must NOT send it -
+    that would knock the app off exactly like the handshake did."""
+    import qc_mcp.transport as T
+    for live, expect_conn in ((False, True), (True, False)):
+        qc, calls = _shared_qc(live=live)
+        sent = []
+        qc.send = lambda cmd, msg=None, **kw: sent.append(cmd)
+        import threading
+        qc._start_heartbeat = lambda: setattr(qc, "_hb_stop", threading.Event()) or calls.append("heartbeat")
+        qc.open()
+        qc.close()
+        assert ("Connection" in sent) is expect_conn, (live, sent)
+
+
+def test_session_sniff_reads_the_wire():
+    """_session_live is the real _collect on the backend: silence -> False."""
+    import qc_mcp.transport as T
+    real = T.open_hid
+    T.open_hid = lambda **kw: _SilentIO()
+    try:
+        qc = T.QuadCortex(share=True)
+    finally:
+        T.open_hid = real
+    assert qc._session_live(seconds=0) is False
+    qc._collect = lambda seconds: qc._pending.append(("GlobalTempo", None, b"", b""))
+    assert qc._session_live(seconds=0) is True
+    assert qc._pending == [], "the sniffed frames must not leak into later reads"
+
+
 def test_windows_auto_shares_even_with_cortex_control_shut():
     """On Windows `auto` must take a NON-exclusive handle whether or not Cortex
     Control is up. Gating that on "the app is already running" is a macOS-shaped

@@ -268,6 +268,15 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   old gate — share only if the app is ALREADY running — was a macOS-shaped
   precondition: there the app owns a session we can only ride, so it must exist
   first. `direct` stays the explicit way to seize.
+- **A shared handle RIDES the app's session; it must not handshake.** Our
+  `ResetCommsBuffers{session_id}`+`Version`+`Connection` from a second handle
+  makes the device drop the app's subscriptions (its `CPULoad` stream stops)
+  and Cortex Control shows "Device connection lost" seconds after we join
+  (QC Mini, CorOS 4.1.0). `open()` sniffs the wire for 1.5 s first: the device
+  streams only under a heartbeat, so traffic = someone owns a session = ride
+  it (`qc.riding`, no handshake/heartbeat of ours, like the macOS bridge);
+  silence = make our own. Riding dies with the app: `disconnect`→`connect`.
+  Never run `tools/win_hid_check.py` with the app up: it opens exclusively.
 - **Shared mode has two independent writers on one endpoint.** Single-report
   messages are atomic (~97% of the app's traffic), multi-report ones can
   interleave — `connect()` returns a `caution` saying so. Build/save presets in

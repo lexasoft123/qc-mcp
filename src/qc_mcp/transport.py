@@ -49,6 +49,9 @@ class QuadCortex:
         #                daemon), so the handshake and heartbeat are theirs
         self.bridge = bridge
         self.shared = share
+        #: A shared handle that found Cortex Control's session live and rides it
+        #: (no handshake/heartbeat of our own) - set by open().
+        self.riding = False
         self.attached = io is not None
         if io is not None:
             self.io = io
@@ -84,14 +87,48 @@ class QuadCortex:
     def open(self, handshake=True):
         self.io.open()
         # In bridge mode Cortex Control already owns the handshake + heartbeat.
-        # A shared handle does NOT - it is our own session alongside the app's.
+        # A shared handle (Windows) may or may not have the app beside it:
+        #   * app up   -> RIDE its session, exactly like the bridge. Our own
+        #                 handshake here is what kicks the app off: the device
+        #                 treats ResetCommsBuffers{session_id} as a new client,
+        #                 drops the app's subscriptions, and Cortex Control shows
+        #                 "Device connection lost" a few seconds after we join.
+        #                 Reads and writes work fine on the app's heartbeat.
+        #   * app shut -> the session is ours to make: handshake + heartbeat.
+        # "Is a session live" is read off the wire, not off the process list:
+        # the device only streams (GlobalTempo ~3/s, CPULoad) while someone
+        # heartbeats it, and is silent otherwise.
+        self.riding = False
         if handshake and not self.bridge and not self.attached:
-            self._start_heartbeat()   # keep session "online" (required for reads)
-            self._handshake()
+            if self.shared and self._session_live():
+                self.riding = True
+            else:
+                self._start_heartbeat()   # keep session "online" (required for reads)
+                self._handshake()
         # Bridge mode skips the handshake (the app owns it) but still needs the
         # firmware to pick a schema, so ask here either way.
         self.detect_version()
+        if self.riding and self.firmware is None:
+            # We joined a session that was already dying (the app quit a moment
+            # ago: its session lingers ~10 s). Nobody is keeping the device
+            # online, so make it our own after all.
+            self.riding = False
+            self._start_heartbeat()
+            self._handshake()
+            self.detect_version()
         return self
+
+    def _session_live(self, seconds=1.5):
+        """Is some other client already keeping this device online? True when
+        the device is streaming on its own — it does so only under a heartbeat."""
+        self._pending.clear()
+        try:
+            self._collect(seconds)
+        except Exception:
+            return False
+        live = bool(self._pending)
+        self._pending.clear()
+        return live
 
     @_serialized
     def _overheard_version(self, seconds=2.5):
@@ -189,7 +226,25 @@ class QuadCortex:
 
     def close(self):
         self._stop_heartbeat()
+        if self._owns_session():
+            # End our session now. Without this the device keeps it alive ~10 s
+            # after the last KeepAlive (still streaming GlobalTempo), and a
+            # shared handle opened in that window would "ride" our own corpse.
+            # Never send it on a ridden/bridged session: it is the app's.
+            try:
+                conn = P.message_class("Connection")()
+                conn.connected = False
+                self.send("Connection", conn)
+                time.sleep(0.2)
+            except Exception:
+                pass
         self.io.close()
+
+    def _owns_session(self):
+        """Did this object run the handshake, i.e. is the device session ours
+        to end? False when bridged, attached or riding another client's."""
+        return not self.bridge and not self.attached and not getattr(self, "riding", False) \
+            and self._hb_stop is not None
 
     # -- heartbeat: the QC only streams/answers reads while it receives a
     #    steady KeepAlive{action:UPDATE, is_online:true}. --

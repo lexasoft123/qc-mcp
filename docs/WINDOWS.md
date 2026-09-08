@@ -125,6 +125,27 @@ occasional multi-report message (startup here; preset saves and uploads are the
 other case). State divergence is *not* a concern — the device pushes state to
 every open handle, so the app's UI keeps up with changes the MCP makes.
 
+**The shared handle must not run its own handshake while the app is connected.**
+`ResetCommsBuffers{session_id}` + `Version` + `Connection` from a second handle
+makes the device treat us as a *new* client: it drops the app's subscriptions
+(its `CPULoad` stream stops within seconds) and Cortex Control shows
+"Device connection lost" — reproducibly, on a QC Mini with CorOS 4.1.0, a few
+seconds after every `connect(mode='bridge')`. So `QuadCortex.open()` first
+**listens on the wire for 1.5 s**: the device streams (`GlobalTempo` ~3/s,
+`CPULoad`) only while someone heartbeats it, and is silent otherwise. Traffic
+means the app owns a live session — we **ride it**, no handshake and no
+heartbeat of our own, exactly like the macOS bridge (`qc.riding == True`;
+reads and writes work on the app's heartbeat). Silence means the session is
+ours to make, and the handshake runs as before. If the sniff catches the tail
+of a dying session (the app's lingers ~10 s after it quits) and the first read
+gets nothing, `open()` falls back to its own handshake. One consequence: when
+riding, quitting Cortex Control takes the heartbeat with it — `disconnect()`
+then `connect()` again. And `close()` on a session we own now sends
+`Connection{connected:false}`: without it the device keeps our session alive
+~10 s after the last KeepAlive, and the next shared open would ride that corpse
+(seen with back-to-back scripts). It is never sent on a ridden session — that
+would knock the app off exactly like the handshake did.
+
 Practical rule, which `connect()` returns as a `caution` when it shares:
 **reads and light edits alongside the app are fine; for building or saving
 presets, use `connect(mode='direct', quit_app=True)`** so nothing else is

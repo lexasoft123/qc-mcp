@@ -49,9 +49,14 @@ jobs:
         with:
           python-version: '3.12'
 
-      # No extras: [gui] is the macOS-only pyobjc harness and nothing here
-      # drives a GUI. The suite needs the package importable, nothing more.
-      - run: pip install -e .
+      # numpy, but not the rest of [audio]: the leveling suites are arithmetic
+      # on a signal and run anywhere, while soundfile/sounddevice want PortAudio
+      # and a device neither runner has. Without it test_leveling_e2e skips its
+      # 153 checks — the ones that caught the true-peak guard converging on a
+      # clipped preset — and test_loudness skips 18 more.
+      # [gui] stays out: it is the macOS-only pyobjc harness and nothing here
+      # drives a GUI.
+      - run: pip install -e . numpy
 
       # Every test file is its own __main__ that prints "N/N passed" and exits
       # non-zero on failure, so the loop is the runner. bash so one step serves

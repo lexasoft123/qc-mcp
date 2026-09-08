@@ -20,7 +20,16 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
 
-import numpy as np                                  # noqa: E402
+# Everything here is arithmetic on a signal, so numpy is not optional to the
+# work — but it IS optional to the package (it lives behind the `.[audio]`
+# extra), and CI installs the base package. The sibling suites skip rather than
+# fail in that case; a hard import here turned a missing extra into a red build.
+try:
+    import numpy as np                               # noqa: E402
+    HAVE_NUMPY = True
+except ImportError:
+    HAVE_NUMPY = False
+
 from qc_mcp import autolevel, loudness, riffs        # noqa: E402
 from qc_mcp import leveling as bench_mod             # noqa: E402
 
@@ -635,6 +644,9 @@ def _raises(exc, fn, *a, **kw):
 
 
 def main():
+    if not HAVE_NUMPY:
+        print("0 passed, 0 failed (skipped: numpy — install the '.[audio]' extra)")
+        return 0
     real = autolevel.measure
     try:
         for name, fn in sorted(globals().items()):

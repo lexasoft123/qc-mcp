@@ -713,6 +713,31 @@ class QuadCortex:
                 pv.string_value = s
         self.send("Grid", g)
 
+    def assign_expression(self, row, column, param_index, expression,
+                          expr_min=0.0, expr_max=1.0):
+        """Assign a block parameter to an expression pedal (the QC's per-parameter
+        MIDI handle), matching the app's Grid UPDATE. `expression`: 0 = none (clears
+        the assignment), 1 = Expression Pedal 1 (driven by MIDI CC#1), 2 = Expression
+        Pedal 2 (MIDI CC#2, no physical jack). `expr_min`/`expr_max` bound the swept
+        range in NORMALIZED units (0.0-1.0 = full range). Decoded from a preset that
+        already carried assignments (ROOT->exp2, MODE->exp1). Like set_param, this is
+        a partial Param UPDATE: only the expression fields are sent, and the device's
+        field-level merge preserves the param's existing value and per-scene data
+        (verified — clearing an assignment leaves the value intact)."""
+        g = P.message_class("Grid")()
+        g.action = P.ACTION["UPDATE"]
+        g.request_id = self.next_request_id()
+        ch = g.preset.chains.add()
+        ch.row = row
+        m = ch.models.add()
+        m.column = column
+        p = m.params.add()
+        p.index = param_index
+        p.expression = int(expression)
+        p.expression_min = float(expr_min)
+        p.expression_max = float(expr_max)
+        self.send("Grid", g)
+
     def set_scene(self, scene):
         m = P.message_class("Scene")(action=P.ACTION["UPDATE"],
                                      request_id=self.next_request_id(),

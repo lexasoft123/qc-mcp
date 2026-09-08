@@ -549,6 +549,43 @@ def measure_ops(bench, emit):
             applied.pop((preset, row), None)
         return {"reverted": back, "remaining": len(applied)}
 
+    def do_apply_trim(m):
+        """Write ONE proposed correction — the number the report is showing.
+
+        Distinct from `autolevel`, which measures again and decides for itself.
+        The report proposes a correction, the user is free to change it, and
+        Apply must write what is on the screen: re-deriving it here would make
+        the table describe a change nobody is going to make.
+
+        The correction is relative — "3.2 dB quieter than it is now" — because
+        that is what a measurement produces. The absolute value it lands on is
+        returned so the caller can show where the fader ended up, and the value
+        it started from goes into the same undo store `revert_levels` reads.
+        """
+        if m.get("folder_key") is not None:
+            bench.open(m["folder_key"], int(m["position"]),
+                       bool(m.get("is_factory")), m.get("cloud_id", ""))
+        state = bench.preset_state() or {}
+        row = int(m["row"]) if m.get("row") is not None else autolevel.measurement_rows(bench.qc)[1]
+        before = next((l["db"] for l in state.get("lanes", []) if l.get("row") == row), None)
+        if before is None:
+            return {"error": "row %d has no output control to trim" % row}
+        lo, hi = db_range()
+        want = float(m["db"]) + before
+        landed = max(lo, min(hi, want))
+        applied.setdefault((state.get("name"), row), before)
+        bench.set_db(row, landed)
+        out = {"row": row, "from_db": round(before, 2), "db": round(landed, 2),
+               "applied_db": round(landed - before, 2),
+               "preset": state.get("name"), "position": m.get("position")}
+        if abs(landed - want) > 0.01:
+            # The fader has ends too, and a trim that could not be given in full
+            # has to say so rather than look like it was.
+            out["limited_by"] = "range"
+            out["short_by_db"] = round(want - landed, 2)
+            out["knob_limit_db"] = hi if want > landed else lo
+        return out
+
     def do_autolevel(m):
         # Trim the lane the sound leaves by, not row 0: a preset that enters on one
         # lane and exits on another would otherwise have its head trimmed while its
@@ -606,6 +643,7 @@ def measure_ops(bench, emit):
         "measure_scenes": guard(do_measure_scenes),
         "level_scenes": guard(do_level_scenes),
         "autolevel": guard(do_autolevel),
+        "apply_trim": guard(do_apply_trim),
         "revert_levels": guard(do_revert),
     }
 

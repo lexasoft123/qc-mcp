@@ -72,7 +72,18 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const [measuring, setMeasuring] = useState<string | null>(null)
   const [busyAll, setBusyAll] = useState(false)
   /** Positions whose fader an Apply moved, so Undo has something to offer. */
-  const [applied, setApplied] = useState<number[]>([])
+  /**
+   * Three states, kept apart on purpose.
+   *
+   * `proposals` is what will be written — seeded from the measurement, and
+   * overwritten the moment somebody disagrees with it. `applied` is what
+   * actually reached the device, so Undo has a number to put back and the
+   * yellow dot has something to be about. `saved` is what made it into the
+   * preset file, which is the only one of the three that survives a reload.
+   */
+  const [applied, setApplied] = useState<Record<number, number>>({})
+  const [saved, setSaved] = useState<number[]>([])
+  const [proposals, setProposals] = useState<Record<number, number>>({})
   const [chosen, setChosen] = useState<number[] | null>(null)
   const [playTick, setPlayTick] = useState(0)
   const [helping, setHelping] = useState(false)
@@ -407,13 +418,29 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         busy={busyAll}
         progress={measuring}
         applied={applied}
+        saved={saved}
+        proposals={proposals}
         selected={chosen ?? bench.map((b) => b.position)}
+        onPropose={(pos, db) => setProposals((p) => ({ ...p, [pos]: db }))}
+        onNudge={(pos, by) => setProposals((p) => {
+          // Functional, and against whatever is in there now: two clicks in one
+          // tick have to be two steps.
+          const base = p[pos] ?? rows[pos]?.correction_db ?? 0
+          return { ...p, [pos]: Math.round((base + by) * 10) / 10 }
+        })}
+        onResetProposal={(pos) => setProposals((p) => {
+          const { [pos]: _gone, ...rest } = p
+          return rest
+        })}
         onToggle={(pos) => {
           const now = chosen ?? bench.map((b) => b.position)
           setChosen(now.includes(pos) ? now.filter((p) => p !== pos) : [...now, pos])
         }}
         onMeasure={() => {
-          setBusyAll(true); setRows({}); setError(null)
+          // A fresh measurement replaces the proposals: keeping an edit from
+          // the last run against a new number would be a proposal about
+          // nothing. What was already written stays, and stays marked.
+          setBusyAll(true); setRows({}); setProposals({}); setError(null)
           const want = chosen ?? bench.map((b) => b.position)
           void window.patchbay.leveling
             .measureMany(
@@ -427,30 +454,57 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
             .finally(() => { setBusyAll(false); setMeasuring(null) })
         }}
         onApply={() => {
-          // One preset at a time, and only the selected ones: each Apply is a
-          // separate, undoable move of that preset's fader.
+          // Writes the number on the screen, one preset at a time — not a fresh
+          // decision per preset. Each Apply is a separate, undoable move of that
+          // preset's fader, and none of them touches the preset file.
           const want = chosen ?? bench.map((b) => b.position)
           setBusyAll(true)
           void (async () => {
             for (const b of bench.filter((x) => want.includes(x.position))) {
               const r = rows[b.position]
-              if (!r || r.correction_db === null || r.correction_db === undefined) continue
+              const db = proposals[b.position] ?? r?.correction_db
+              if (db === null || db === undefined) continue
               try {
-                await window.patchbay.leveling.open(
-                  b.folderKey, b.position, false, b.cloudId)
-                await window.patchbay.leveling.autolevel({ target, dryRun: false })
-                setApplied((a) => (a.includes(b.position) ? a : [...a, b.position]))
+                const res = await window.patchbay.leveling.applyTrim({
+                  folderKey: b.folderKey, position: b.position,
+                  isFactory: false, cloudId: b.cloudId, row: r?.row, db
+                })
+                if (res.error) { setError(res.error); break }
+                setApplied((a) => ({ ...a, [b.position]: res.applied_db }))
+                setSaved((v) => v.filter((p) => p !== b.position))
+                if (res.limited_by === 'range') {
+                  setError(`${b.name}: the fader ran out ${
+                    (res.short_by_db ?? 0) > 0 ? 'of headroom' : 'of travel'} — ` +
+                    `${res.applied_db.toFixed(1)} dB of ${db.toFixed(1)} given.`)
+                }
               } catch (e) { setError((e as Error).message); break }
             }
             setBusyAll(false)
             void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
           })()
         }}
+        onSave={() => {
+          // Only a save makes a trim outlive the next preset change, and only
+          // for the presets that actually have one.
+          const pending = Object.keys(applied).map(Number).filter((p) => !saved.includes(p))
+          setBusyAll(true)
+          void (async () => {
+            for (const b of bench.filter((x) => pending.includes(x.position))) {
+              try {
+                await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
+                await window.patchbay.leveling.save()
+                setSaved((v) => (v.includes(b.position) ? v : [...v, b.position]))
+              } catch (e) { setError((e as Error).message); break }
+            }
+            setBusyAll(false)
+          })()
+        }}
         onRevert={() => {
           void window.patchbay.leveling
             .revertLevels()
             .then(() => {
-              setApplied([])
+              setApplied({})
+              setSaved([])
               return window.patchbay.leveling.state().then(setPreset)
             })
             .catch((e: Error) => setError(e.message))

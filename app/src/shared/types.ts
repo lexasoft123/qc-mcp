@@ -247,6 +247,21 @@ export interface ReportRow {
   error?: string | null
 }
 
+/** What one Apply did — the number written, and where the fader landed. */
+export interface ApplyResult {
+  row: number
+  /** dB actually given, after the fader's own ends. */
+  applied_db: number
+  from_db: number
+  db: number
+  preset?: string | null
+  position?: number
+  limited_by?: 'range'
+  short_by_db?: number
+  knob_limit_db?: number
+  error?: string
+}
+
 export interface ReportResult {
   target: number
   metric: string
@@ -417,6 +432,12 @@ export interface Api {
     sampleDiscard(): Promise<SampleState>
     measure(perceived?: boolean): Promise<Measurement>
     autolevel(o?: { target?: number; tolerance?: number; dryRun?: boolean }): Promise<AutoResult>
+    /** Write ONE proposed correction, exactly as shown — relative to where the
+     *  fader is now, and recorded so Undo trims can put it back. */
+    applyTrim(o: {
+      folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
+      row?: number; db: number
+    }): Promise<ApplyResult>
     samplePlay(): Promise<{ playing: boolean; seconds: number }>
     sampleStopPlay(): Promise<void>
     revertLevels(): Promise<{ reverted: { row: number; db: number }[] }>

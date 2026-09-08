@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import type {
-  AudioState, AutoResult, LevelEvent, Measurement, Paths, PresetFolder, PresetState,
+  ApplyResult, AudioState, AutoResult, LevelEvent, Measurement, Paths, PresetFolder, PresetState,
   ReportResult, SampleState, SceneRow
 } from '../shared/types.js'
 import { exists } from './util.js'
@@ -273,6 +273,24 @@ export class Leveling {
     return await this.call('level_scenes', {
       target: o.target ?? -18, scenes: o.scenes, dry_run: false
     }, 600000)
+  }
+
+  /**
+   * Write one proposed correction, relative to where the fader is now.
+   *
+   * Separate from autolevel on purpose: the report shows a number, the user may
+   * change it, and Apply has to write THAT. Re-measuring here would let the
+   * table describe a change nobody is going to make.
+   */
+  async applyTrim(o: {
+    folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
+    row?: number; db: number
+  }): Promise<ApplyResult> {
+    return (await this.call('apply_trim', {
+      folder_key: o.folderKey, position: o.position,
+      is_factory: o.isFactory ?? false, cloud_id: o.cloudId ?? '',
+      row: o.row, db: o.db
+    }, 120000)) as unknown as ApplyResult
   }
 
   async autolevel(opts: {

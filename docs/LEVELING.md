@@ -76,6 +76,45 @@ for measuring what the player is actually playing.
 **A measurement is silent in the room.** While the tail lane's output is tapped to USB it
 is no longer going to the XLRs, so nothing reaches the monitors during a run.
 
+### Reference riffs
+
+`qc_mcp.riffs` synthesises the signal the bench pushes through every preset —
+Karplus-Strong plucked strings, deterministic, cached to `~/.qc-mcp/riffs/`.
+Five of them: `chords`, `chug`, `lead`, `dynamics`, `sweep`. Each is normalised
+to **-6 dBFS peak** and lands between -18 and -25 LUFS.
+
+They exist because a recorded riff is the weakest link in the chain. The first
+one recorded against this feature peaked at -22.8 dBFS with 74% of its samples
+near silence, and a preset given 12 dB more input moved its output by 3.5 — the
+numbers coming out the far end were noise, and looked exactly like preset
+differences. Nobody notices that while playing.
+
+    from qc_mcp import riffs
+    riffs.catalogue()          # [(name, what it is for, seconds)]
+    riffs.ensure("chords")     # -> path to a wav, rendered on first use
+
+### Proposals, not changes
+
+Measuring produces a **proposal per preset**, and nothing is written until it is
+applied. The number is editable first: the measurement is a good opinion about
+loudness and a bad one about taste, and a lead that should sit two dB above the
+rest is a decision the player makes. `apply_trim` writes what the report shows —
+re-deriving it at Apply time would make the table describe a change nobody was
+going to make.
+
+Three states, kept apart because they behave differently:
+
+| state | where it lives | survives a preset reload |
+|---|---|---|
+| proposed | the screen | — |
+| applied | the device's lane fader | no |
+| saved | the preset file | yes |
+
+An applied-but-unsaved trim carries a **yellow dot** in the report. It is the
+only thing on screen that distinguishes the middle row from the last one, and
+the difference is silent otherwise: reloading the preset loses the trim with no
+warning at all.
+
 ### Verified on hardware (2026-09-03, CorOS 4.1.0, a split-lane preset)
 
     rows: input row 0, output row 2

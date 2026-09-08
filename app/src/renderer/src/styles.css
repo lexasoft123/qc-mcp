@@ -937,7 +937,7 @@ body.win .lvl-col.on { background: var(--sz-surface-raised); }
 .rep-table { display: grid; gap: 2px; }
 .rep-row {
   display: grid; align-items: center; gap: 10px;
-  grid-template-columns: 22px minmax(0, 1fr) 74px 76px 210px;
+  grid-template-columns: 22px minmax(0, 1fr) 74px 76px 150px 132px;
   padding: 8px 12px; border-radius: 11px; border: 1px solid transparent;
 }
 .rep-row.now { border-color: rgba(255, 160, 40, 0.32); background: var(--sz-accent-soft); }
@@ -951,6 +951,46 @@ body.win .lvl-col.on { background: var(--sz-surface-raised); }
 .rep-name { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .rep-name .badge { font-size: 8.5px; }
 .rep-foot { padding: 0 2px; }
+
+/* ── the proposal: a number you can argue with ──
+   The measurement is a good opinion about loudness and a bad one about taste,
+   so the correction is editable before anything moves. An edited one says so —
+   otherwise the table would claim the machine suggested it. */
+.prop { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
+.prop.muted { color: var(--sz-faint); font-family: var(--sz-font-mono); font-size: 11px; }
+.prop input {
+  width: 58px; text-align: right; font-family: var(--sz-font-mono); font-size: 11.5px;
+  padding: 4px 6px; border-radius: 7px; color: var(--sz-text);
+  border: 1px solid var(--sz-line); background: var(--sz-panel-deep);
+  -moz-appearance: textfield;
+}
+.prop input::-webkit-outer-spin-button,
+.prop input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.prop input:focus { outline: none; border-color: var(--sz-accent); }
+.prop input:disabled { opacity: 0.4; }
+.prop.edited input { border-color: rgba(255, 160, 40, 0.5); color: var(--sz-accent); }
+.prop .nudge, .prop .undo {
+  width: 20px; height: 22px; border-radius: 6px; flex: none;
+  border: 1px solid var(--sz-line); background: none; color: var(--sz-dim);
+  font-size: 12px; line-height: 1; display: grid; place-items: center;
+}
+.prop .nudge:hover:not(:disabled), .prop .undo:hover:not(:disabled) {
+  border-color: var(--sz-line-strong); color: var(--sz-text);
+}
+.prop .nudge:disabled, .prop .undo:disabled { opacity: 0.3; }
+.prop .undo { color: var(--sz-accent); border-color: rgba(255, 160, 40, 0.35); }
+.rep-bar.edited { background: var(--sz-accent); }
+
+/* ── the yellow dot ──
+   The one mark that says a trim is on the DEVICE and not in the preset file.
+   Nothing else on screen distinguishes those two, and reloading the preset
+   loses the difference silently. */
+.dot-unsaved {
+  flex: none; width: 7px; height: 7px; border-radius: 99px;
+  background: #ffc94a; box-shadow: 0 0 7px rgba(255, 201, 74, 0.65);
+}
+.badge .dot-unsaved { margin-right: 5px; display: inline-block; vertical-align: middle; }
+.rep-row.unsaved { background: rgba(255, 201, 74, 0.045); }
 
 /* selection, in the kit's checkbox treatment */
 .selbox {

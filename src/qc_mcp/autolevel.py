@@ -338,6 +338,18 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
         if delta is None:
             out["error"] = "could not derive a correction from the measurement"
             return out
+        # Over the ceiling ALREADY, before anything is written. Say so on every
+        # path out of here, including the two that return early: a preset can be
+        # exactly on target and clipping, and reporting a clean convergence over
+        # +0.2 dBTP is the report lying about the thing it exists to check.
+        # Not corrected automatically — that would detune a preset that is where
+        # it was asked to be — but never hidden either.
+        tp0 = first.get("true_peak_dbtp")
+        if tp0 is not None and tp0 > true_peak_ceiling:
+            out["over_ceiling"] = True
+            out["true_peak_dbtp"] = tp0
+            out["ceiling_dbtp"] = true_peak_ceiling
+
         if dry_run:
             out["suggested_db"] = delta
             return out
@@ -352,7 +364,13 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
         current = knob.read()
 
         for n in range(2, max_iterations + 2):
-            want = loudness.clamp_db(current + delta, lo, hi)
+            ideal = current + delta
+            want = loudness.clamp_db(ideal, lo, hi)
+            # The knob has ends. A preset that needs more lift than the Gain
+            # block has (-60..+12 dB) used to sit at +12 rewriting +12 for every
+            # remaining pass and then report "did not converge" with no reason —
+            # from the outside, a preset that simply refuses to level.
+            pinned = abs(ideal - want) > 1e-6
             current = knob.write(want)
             out["written"] = True
             res = measure(di_path=di_path, perceived=perceived)
@@ -363,8 +381,14 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
             tp = res.get("true_peak_dbtp")
             step = {"n": n, "measured": _metric(res, metric), "delta_db": delta,
                     "true_peak_dbtp": tp, "wrote_db": current}
-            # Guard: never trim into the ceiling. Back off and stop.
-            if tp is not None and tp > true_peak_ceiling and delta and delta > 0:
+            # Guard: never leave the output over the ceiling. Back off and stop.
+            #
+            # This used to also require `delta > 0` — that the loop still wanted
+            # MORE level — which meant a preset that reached its target exactly
+            # while clipping was reported as converged. Measured: target hit to
+            # 0.00 LU at +3.09 dBTP, "converged": true. Being on target is not a
+            # reason to accept clipping; the ceiling is a ceiling.
+            if tp is not None and tp > true_peak_ceiling:
                 back = current - (tp - true_peak_ceiling)
                 current = knob.write(loudness.clamp_db(back, lo, hi))
                 step["limited_by"] = "true_peak"
@@ -374,6 +398,10 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
                     on_step(step)
                 out["limited"] = True
                 break
+            if pinned:
+                step["limited_by"] = "range"
+                step["knob_limit_db"] = hi if ideal > want else lo
+                step["short_by_db"] = round(ideal - want, 2)
             out["iterations"].append(step)
             if on_step:
                 on_step(step)
@@ -381,10 +409,22 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
             if delta is not None and abs(delta) <= tolerance:
                 out["converged"] = True
                 break
+            if pinned:
+                # Against the stop and still short: more passes write the same
+                # number and measure the same result.
+                out["limited"] = True
+                break
 
     last = out["iterations"][-1]
     out["final_delta_db"] = last.get("delta_db")
     out["final_trim_db"] = last.get("backed_off_to_db", last.get("wrote_db"))
+    # Say why, at the top level, where a report reads it: "did not converge" on
+    # its own tells nobody whether to try again or to change the preset.
+    if last.get("limited_by"):
+        out["limited_by"] = last["limited_by"]
+        if last.get("short_by_db") is not None:
+            out["short_by_db"] = last["short_by_db"]
+            out["knob_limit_db"] = last.get("knob_limit_db")
     out.setdefault("converged", False)
     return out
 

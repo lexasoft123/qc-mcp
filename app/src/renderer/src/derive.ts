@@ -45,7 +45,11 @@ export function modeFacts(s: Snapshot): Facts {
       owner: s.lock.owner,
       mode: s.lock.mode,
       ours: s.lock.launchedBy === 'patchbay',
-      adoptable: s.lock.owner === 'daemon' && Boolean(s.lock.socket)
+      // The renderer cannot open a socket. `daemon.state === 'running'` is the
+      // main process's answer to the same question, and main re-checks it for
+      // real before acting on any plan.
+      serving: s.daemon.state === 'running',
+      adoptable: s.lock.owner === 'daemon' && s.daemon.state === 'running'
     },
     platform: s.platform,
     devicePresent: s.device.present,
@@ -152,6 +156,18 @@ export function heldByOther(s: Snapshot): string | null {
   return `${who} started outside Patchbay is ${how}.`
 }
 
+/**
+ * A daemon that is alive and answering nobody.
+ *
+ * Its socket is gone — deleted under it, which is exactly what Patchbay's own
+ * stop() used to do to a daemon it had adopted. The device stays held, no
+ * client can reach it, and before the lock existed there was nothing to see:
+ * the UI said 'stopped' while every connect failed on a busy device.
+ */
+export function heldButUnreachable(s: Snapshot): boolean {
+  return Boolean(s.lock && s.lock.owner === 'daemon' && s.daemon.state !== 'running')
+}
+
 /** Which Cortex Control is up, if any — the stock app or the instrumented copy. */
 export function cortexText(s: Snapshot): string {
   if (!s.cortex.running) return 'Cortex Control closed'
@@ -163,6 +179,14 @@ export function cortexText(s: Snapshot): string {
 export function railText(s: Snapshot): string {
   if (!s.device.present) return 'No Quad Cortex found on USB'
   if (s.daemon.state === 'starting') return 'Opening the session…'
+  // Somebody else's session comes first: it is why nothing else will work, and
+  // it used to be the one thing nothing could see.
+  if (heldButUnreachable(s)) {
+    return `A ${s.lock!.mode} daemon (pid ${s.lock!.pid}) is holding the device and answering nobody` +
+      ' — Take over on Home'
+  }
+  const other = heldByOther(s)
+  if (other && s.daemon.state !== 'running') return `${other} Take over on Home`
   if (s.daemon.state !== 'running') {
     const why = cleanError(s.daemon.error)
     return why

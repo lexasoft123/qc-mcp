@@ -173,7 +173,19 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   it started and *evicts* (a named step, never a side effect) what it did not.
   Do NOT go back to inferring this from `pgrep`, FIFO existence or a socket
   probe — those three could each be true about a different world, which is what
-  the lock exists to end.
+  the lock exists to end. **The socket and the lock are separate facts**: a
+  socket file outlives the process that made it, and a process can outlive its
+  socket (Patchbay's old `stop()` deleted an adopted daemon's socket without
+  killing it — device held, nobody served, nothing to see). `heldBy.serving`
+  is an actual connect, never `existsSync`.
+- **`os.kill(pid, 0)` is a KILL on Windows, not a probe.** Anything but
+  CTRL_C_EVENT/CTRL_BREAK_EVENT goes to `TerminateProcess` with the signal as
+  the exit code, so the POSIX "does this process exist" idiom would execute the
+  owner of the device on every read of the lock. `lockfile._alive_win32` uses
+  `OpenProcess` + `WaitForSingleObject` (not `GetExitCodeProcess`, whose
+  STILL_ACTIVE is 259 — also a legal exit code, so a process that exited with
+  259 would read as alive for ever). `tests/test_platform.py` guards both.
+  Node's `process.kill(pid, 0)` IS safe on Windows: libuv special-cases 0.
 - **CorOS version matters.** `connect`/`device_info` report `firmware` +
   `protocol_generation`; 4.1-only tools gate on `P.require(...)`. The device's
   human version is in `Version.zenos_git_hash` — `app_fw_version` is a build hash.

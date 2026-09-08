@@ -15,6 +15,18 @@ DEAD = 999_999_999      # no such process, and out of pid_max on both platforms
 ok = fail = 0
 
 
+def live_stranger():
+    """A process that is certainly alive and certainly not us.
+
+    `pid 1` would do on POSIX and is meaningless on Windows, and this file has to
+    run on both — the lock is read on whichever machine holds the device.
+    """
+    import subprocess
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return p
+
+
 def check(name, cond):
     global ok, fail
     if cond:
@@ -49,10 +61,8 @@ def main():
         check("our own record can be rewritten", again["mode"] == "direct")
 
         # --- a live foreign owner blocks ---
-        L._write(L.path(s), {"pid": os.getpid(), "owner": "mcp", "mode": "direct"})
-        # (same pid, so simulate a foreign one by pretending: use a live pid we
-        #  do not own the record for — the check is pid != getpid())
-        L._write(L.path(s), {"pid": 1, "owner": "mcp", "mode": "direct"})   # launchd: alive, not us
+        stranger = live_stranger()
+        L._write(L.path(s), {"pid": stranger.pid, "owner": "mcp", "mode": "direct"})
         held = None
         try:
             L.acquire("daemon", "bridge", s)
@@ -74,8 +84,19 @@ def main():
         fresh = L.acquire("daemon", "direct", s)
         check("and can be claimed with no takeover", fresh["pid"] == os.getpid())
 
+        # --- liveness, both ways, on this platform ---
+        check("a running child reads as alive", L.alive(stranger.pid))
+        check("this process reads as alive", L.alive(os.getpid()))
+        check("a dead pid reads as dead", not L.alive(DEAD))
+        check("pid 0 and negatives are dead", not L.alive(0) and not L.alive(-5))
+        check("rubbish is dead, not an exception", not L.alive("nonsense") and not L.alive(None))
+        stranger.terminate()
+        stranger.wait(timeout=10)
+        check("a child that has exited reads as dead", not L.alive(stranger.pid))
+
         # --- release only removes our own ---
-        L._write(L.path(s), {"pid": 1, "owner": "mcp", "mode": "direct"})
+        other = live_stranger()
+        L._write(L.path(s), {"pid": other.pid, "owner": "mcp", "mode": "direct"})
         check("release refuses somebody else's record", L.release(s) is False)
         check("and leaves it in place", os.path.exists(L.path(s)))
         L._write(L.path(s), {"pid": os.getpid(), "owner": "daemon", "mode": "bridge"})
@@ -87,8 +108,10 @@ def main():
         L.update(s, firmware="4.1.0")
         check("update merges", (L.read(s) or {}).get("firmware") == "4.1.0")
         check("and keeps the rest", (L.read(s) or {}).get("owner") == "daemon")
-        L._write(L.path(s), {"pid": 1, "owner": "mcp", "mode": "direct"})
+        L._write(L.path(s), {"pid": other.pid, "owner": "mcp", "mode": "direct"})
         check("update refuses somebody else's record", L.update(s, firmware="9") is None)
+        other.terminate()
+        other.wait(timeout=10)
 
         # --- rubbish on disk is not an owner ---
         with open(L.path(s), "w") as fh:

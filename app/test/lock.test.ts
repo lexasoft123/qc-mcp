@@ -114,3 +114,75 @@ except L.Held as e:
     assert.equal(isOurs(got), false)
   })
 })
+
+// ── stale files, which is where this used to go wrong ─────────────────────
+
+test('a stale socket with no lock is nobody holding the device', () => {
+  withDir((d) => {
+    // exactly what a SIGKILLed daemon leaves: a socket file and nothing alive
+    writeFileSync(join(d, 'daemon.sock'), '')
+    assert.equal(read(join(d, 'daemon.sock')), null)
+  })
+})
+
+test('a stale socket AND a stale lock still read as nobody', { skip: !havePython }, () => {
+  withDir((d) => {
+    writeFileSync(join(d, 'daemon.sock'), '')
+    python(d, `L._write(L.path(SOCK), {"pid": 999999999, "owner": "daemon",
+                                       "mode": "bridge", "socket": SOCK})`)
+    assert.equal(read(join(d, 'daemon.sock')), null,
+      'a dead daemon left a lock that still claimed the device')
+  })
+})
+
+test('qc_mcp claims a stale lock without needing --takeover', { skip: !havePython }, () => {
+  withDir((d) => {
+    python(d, `L._write(L.path(SOCK), {"pid": 999999999, "owner": "daemon", "mode": "direct"})`)
+    const out = python(d, `
+rec = L.acquire("daemon", "bridge", SOCK, launched_by="patchbay")
+print("CLAIMED", rec["mode"], rec["owner"])`)
+    assert.match(out, /CLAIMED bridge daemon/)
+  })
+})
+
+test('a LIVE lock whose socket is gone still names an owner', { skip: !havePython }, () => {
+  // The state Patchbay's own stop() used to create: the daemon killed by
+  // nobody, its socket deleted under it. The device stays held, and before the
+  // lock there was nothing at all to see.
+  withDir((d) => {
+    python(d, `L._write(L.path(SOCK), {"pid": ${process.pid}, "owner": "daemon",
+                                       "mode": "direct", "socket": SOCK,
+                                       "launched_by": "cli"})`)
+    assert.equal(existsSync(join(d, 'daemon.sock')), false, 'no socket, on purpose')
+    const got = read(join(d, 'daemon.sock'))
+    assert.ok(got, 'a live owner with no socket vanished from view')
+    assert.equal(got.owner, 'daemon')
+    assert.equal(got.mode, 'direct')
+    assert.equal(isOurs(got), false)
+  })
+})
+
+test('the lock survives a socket being deleted and recreated underneath it', { skip: !havePython }, () => {
+  withDir((d) => {
+    python(d, `L.acquire("daemon", "bridge", SOCK, launched_by="patchbay")`)
+    const p = lockPath(join(d, 'daemon.sock'))
+    const raw = JSON.parse(execFileSync('cat', [p], { encoding: 'utf8' }))
+    raw.pid = process.pid
+    writeFileSync(p, JSON.stringify(raw))
+    writeFileSync(join(d, 'daemon.sock'), '')
+    assert.equal(read(join(d, 'daemon.sock'))?.mode, 'bridge')
+    // socket churn changes nothing: the pid is the liveness test
+    rmSync(join(d, 'daemon.sock'))
+    assert.equal(read(join(d, 'daemon.sock'))?.mode, 'bridge')
+  })
+})
+
+test('releasing is safe when the file is already gone', { skip: !havePython }, () => {
+  withDir((d) => {
+    const out = python(d, `
+L.acquire("daemon", "bridge", SOCK)
+import os; os.unlink(L.path(SOCK))
+print("released twice:", L.release(SOCK), L.release(SOCK))`)
+    assert.match(out, /released twice: False False/)
+  })
+})

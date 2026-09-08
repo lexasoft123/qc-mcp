@@ -19,9 +19,9 @@ import { sleep } from './util.js'
  */
 
 /** Facts from a snapshot — the renderer's view and this one agree by construction. */
-export function factsFrom(s: Snapshot, bridgeReady: boolean): Facts {
+export function factsFrom(s: Snapshot, bridgeReady: boolean, serving = false): Facts {
   return {
-    heldBy: heldFrom(s.lock),
+    heldBy: heldFrom(s.lock, serving),
     platform: s.platform,
     devicePresent: s.device.present,
     cortexInstalled: s.cortex.installed,
@@ -41,21 +41,26 @@ export function factsFrom(s: Snapshot, bridgeReady: boolean): Facts {
  * anything else belongs to somebody — a daemon run by hand, an MCP server that
  * opened the device itself — and ending it is a decision, not a side effect.
  */
-export function heldFrom(lock: SessionLock | null): Facts['heldBy'] {
+export function heldFrom(lock: SessionLock | null, serving = false): Facts['heldBy'] {
   if (!lock) return null
   return {
     owner: lock.owner,
     mode: lock.mode,
     ours: lock.launchedBy === 'patchbay',
-    // only a daemon serves a socket others can join
-    adoptable: lock.owner === 'daemon' && Boolean(lock.socket)
+    serving,
+    // Only a daemon serves a socket others can join — and only if it answers.
+    // A live daemon with a dead endpoint holds the device and serves nobody.
+    adoptable: lock.owner === 'daemon' && serving
   }
 }
 
 export async function facts(): Promise<Facts> {
   const snap = await state.refresh()
   const ready = IS_MAC ? await cortex.bridgeReady(state.getPaths().repo) : snap.cortex.running
-  return factsFrom(snap, ready)
+  // Ask the endpoint, do not assume it from the file: a socket outlives the
+  // process that made it, and a process can outlive its socket.
+  const serving = snap.lock ? await state.getDaemon().reachable() : false
+  return factsFrom(snap, ready, serving)
 }
 
 /** What would happen, without doing it. Used for the plan the interface shows. */

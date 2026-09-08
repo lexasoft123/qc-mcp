@@ -181,11 +181,34 @@ export function Console({ snap }: { snap: Snapshot }): React.JSX.Element {
                 <div className="u">reports/s</div>
               </div>
             </div>
+            {/* The lock, said plainly. It is the only thing here that answers
+                "who holds the device" rather than "what did we start". */}
+            {snap.lock && snap.lock.launchedBy !== 'patchbay' && (
+              <Strip bad={!live}>
+                <span className="grow">
+                  The session lock names <b>{snap.lock.owner}</b> (pid {snap.lock.pid}) in{' '}
+                  <b>{snap.lock.mode}</b> mode
+                  {snap.lock.launchedBy ? `, started by ${snap.lock.launchedBy}` : ''} — not
+                  Patchbay. {live ? 'Patchbay has joined it.' : 'Nothing here started it.'}
+                </span>
+                <Button variant="danger" size="sm"
+                        onClick={() => void act(() => window.patchbay.takeOver())}>
+                  Take over
+                </Button>
+              </Strip>
+            )}
             <Facts
               rows={[
                 ['status', live ? `pid ${snap.daemon.pid} · up ${uptime(snap.daemon.startedAt)}` : 'not running', live ? '' : 'off'],
                 [mac ? 'socket' : 'named pipe', snap.paths.show.socket, live ? 'muted' : 'off'],
                 ['session', live ? sessionFact(snap) : '—', live ? '' : 'off'],
+                ['holds the device',
+                  snap.lock
+                    ? `${snap.lock.owner} · pid ${snap.lock.pid} · ${snap.lock.mode}` +
+                      (snap.lock.launchedBy ? ` · ${snap.lock.launchedBy}` : '') +
+                      (live ? '' : ' · not answering')
+                    : 'nobody',
+                  snap.lock ? (live ? 'muted' : '') : 'off'],
                 ['attached clients', live ? (snap.daemon.clients.join(', ') || 'none') : '—', live ? 'muted' : 'off']
               ]}
             />

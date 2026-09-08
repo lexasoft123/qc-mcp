@@ -30,9 +30,11 @@ test(`the state space is complete (${WORLDS.length} coherent worlds)`, () => {
   // 26 on macOS and 9 on Windows — every arrangement of device, app build,
   // bridge and session that the machine can actually be in. Pinned, so that
   // widening the facts without widening the enumeration is caught here.
-  assert.equal(WORLDS.length, 63)
-  assert.equal(WORLDS.filter((f) => f.platform === 'mac').length, 46)
-  assert.equal(WORLDS.filter((f) => f.platform === 'win').length, 17)
+  assert.equal(WORLDS.length, 71)
+  assert.equal(WORLDS.filter((f) => f.platform === 'mac').length, 52)
+  assert.equal(WORLDS.filter((f) => f.platform === 'win').length, 19)
+  assert.equal(WORLDS.filter((f) => f.heldBy?.owner === 'daemon' && !f.heldBy.serving).length, 8,
+    'the alive-but-unreachable daemon has to be in the space')
   assert.ok(WORLDS.some((f) => f.heldBy?.owner === 'mcp'), 'no MCP-held world')
   assert.ok(WORLDS.some((f) => f.heldBy && !f.heldBy.ours), 'no foreign-owner world')
   assert.ok(WORLDS.some((f) => f.heldBy?.ours), 'no world we own')
@@ -478,7 +480,7 @@ test('the stock app is never opened on top of the instrumented one — the repor
     platform: 'mac', devicePresent: true, cortexInstalled: true, cortexRunning: true,
     cortexInstrumented: true, instrumentedBuilt: true, bridgeReady: true,
     daemonRunning: true, daemonSession: 'bridge',
-    heldBy: { owner: 'daemon', mode: 'bridge', ours: true, adoptable: true }
+    heldBy: { owner: 'daemon', mode: 'bridge', ours: true, serving: true, adoptable: true }
   }
   for (const mode of MODES) {
     const r = await play(live, 'show-app', mode)
@@ -554,6 +556,74 @@ test('the daemon is never started in the same breath as launching the app', () =
       if (launched < 0) continue
       assert.ok(steps.slice(launched, start).some((s) => s.startsWith('await')),
         `daemon started right after a launch, with no wait: ${steps}`)
+    }
+  })
+})
+
+// ── a daemon that is alive and answering nobody ───────────────────────────
+
+test('an unreachable daemon is never joined — it is taken over', () => {
+  // Its process holds the device; its socket is gone. Joining is impossible and
+  // starting a second one would fight it for the interface. Before the lock
+  // this state was invisible: the UI said 'stopped' while every connect failed
+  // on a device that was plainly in use.
+  each((f) => {
+    const h = f.heldBy
+    if (!h || h.owner !== 'daemon' || h.serving) return
+    for (const mode of MODES) {
+      if (!f.devicePresent) continue
+      const p = planFor('connect', mode, f)
+      assert.ok(!p.satisfied, `${say(f)} · ${mode}: called an unreachable daemon a session`)
+      if (h.ours) continue        // our own: stop-daemon handles it
+      assert.ok(p.blocked, `${say(f)} · ${mode}: planned around an unreachable daemon`)
+      // Take-over is the way out — unless the session was impossible anyway
+      // (no instrumented copy to bridge through, say), in which case it must
+      // say THAT rather than go on blaming the holder.
+      const over = planFor('take-over', mode, f)
+      if (over.blocked) {
+        assert.doesNotMatch(over.blocked, /Take over/i,
+          `${say(f)} · ${mode}: take-over still told us to take over`)
+      } else {
+        assert.ok(stepNames(over).includes('take-over'),
+          `${say(f)} · ${mode}: take-over planned no eviction`)
+      }
+    }
+  })
+})
+
+test('taking over an unreachable daemon reaches the session, from every world', async () => {
+  for (const f of WORLDS) {
+    if (!f.devicePresent) continue
+    const h = f.heldBy
+    if (!h || h.serving) continue
+    for (const mode of MODES) {
+      const plan = planFor('take-over', mode, f)
+      if (plan.blocked) continue
+      const r = await play(f, 'take-over', mode)
+      const where = `${say(f)} · ${mode} · ran=[${r.ran}]`
+      assert.equal(r.ok, true, `${where}\n  failed: ${r.error}`)
+      assert.equal(r.world.daemonSession, plan.session, where)
+      assert.equal(r.world.heldBy?.ours, true, `${where}: the lock still names somebody else`)
+    }
+  }
+})
+
+test('a session is never opened on top of a lock somebody else holds', async () => {
+  // The fake refuses it, so this drives every plan through that refusal.
+  for (const f of WORLDS) {
+    for (const mode of MODES) for (const goal of GOALS) {
+      for (const quitApp of [false, true]) await play(f, goal, mode, quitApp)
+    }
+  }
+})
+
+test('take-over is the only step that ends somebody else\'s session', () => {
+  each((f) => {
+    for (const mode of MODES) for (const goal of GOALS) {
+      const steps = stepNames(planFor(goal, mode, f))
+      if (!steps.includes('stop-daemon')) continue
+      assert.ok(!f.heldBy || f.heldBy.ours,
+        `${say(f)} · ${goal}/${mode}: plain stop-daemon over a foreign lock`)
     }
   })
 })

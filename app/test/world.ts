@@ -22,18 +22,31 @@ export type World = Facts & {
 export const MODES: Mode[] = ['auto', 'bridge', 'direct']
 export const GOALS: Goal[] = ['connect', 'disconnect', 'show-app', 'take-over']
 
-/** Every shape the session lock can take, including nobody. */
+/**
+ * Every shape the session lock can take, including nobody — and including the
+ * one that used to be invisible: a daemon whose process is alive but whose
+ * socket is gone. It holds the device and serves nobody, and Patchbay's own
+ * stop() is what created that state, by deleting the socket of a daemon it had
+ * adopted without being able to kill it.
+ */
+const daemonLock = (mode: SessionMode, ours: boolean, serving: boolean): Facts['heldBy'] =>
+  ({ owner: 'daemon', mode, ours, serving, adoptable: serving })
+
 export const HOLDERS: Facts['heldBy'][] = [
   null,
-  { owner: 'daemon', mode: 'bridge', ours: true, adoptable: true },
-  { owner: 'daemon', mode: 'direct', ours: true, adoptable: true },
-  { owner: 'daemon', mode: 'shared', ours: true, adoptable: true },
-  { owner: 'daemon', mode: 'bridge', ours: false, adoptable: true },
-  { owner: 'daemon', mode: 'direct', ours: false, adoptable: true },
-  { owner: 'daemon', mode: 'shared', ours: false, adoptable: true },
-  { owner: 'mcp', mode: 'direct', ours: false, adoptable: false },
-  { owner: 'mcp', mode: 'bridge', ours: false, adoptable: false },
-  { owner: 'bench', mode: 'bridge', ours: false, adoptable: false }
+  daemonLock('bridge', true, true),
+  daemonLock('direct', true, true),
+  daemonLock('shared', true, true),
+  daemonLock('bridge', false, true),
+  daemonLock('direct', false, true),
+  daemonLock('shared', false, true),
+  // alive, holding the device, answering nobody
+  daemonLock('direct', true, false),
+  daemonLock('bridge', false, false),
+  daemonLock('direct', false, false),
+  { owner: 'mcp', mode: 'direct', ours: false, serving: false, adoptable: false },
+  { owner: 'mcp', mode: 'bridge', ours: false, serving: false, adoptable: false },
+  { owner: 'bench', mode: 'bridge', ours: false, serving: false, adoptable: false }
 ]
 
 /**
@@ -71,6 +84,10 @@ export function coherent(f: Facts): boolean {
   if (f.daemonRunning && !h) return false
   if (h && h.owner === 'daemon' && h.ours && !f.daemonRunning) return false
   if (f.daemonRunning && h && h.owner === 'daemon' && h.ours && h.mode !== f.daemonSession) return false
+  // 'serving' and 'daemonRunning' are the same question asked of the same
+  // endpoint: a daemon we can see serving is one the lock says is serving.
+  if (h && h.owner === 'daemon' && h.ours && h.serving !== f.daemonRunning) return false
+  if (f.daemonRunning && h && h.owner === 'daemon' && !h.serving) return false
   // A foreign daemon CAN be serving us: joining one is adoption, and then the
   // session is running while the lock still names them. Anything else foreign
   // cannot coexist with a daemon of ours.
@@ -115,7 +132,10 @@ export const say = (f: Facts): string =>
     f.cortexRunning ? (f.cortexInstrumented ? 'instrumented' : 'stock') : 'closed'
   } built=${f.instrumentedBuilt ? 'y' : 'n'} bridge=${f.bridgeReady ? 'y' : 'n'} session=${
     f.daemonSession ?? '-'} lock=${
-    f.heldBy ? `${f.heldBy.owner}/${f.heldBy.mode}${f.heldBy.ours ? '/ours' : ''}` : '-'}`
+    f.heldBy
+      ? `${f.heldBy.owner}/${f.heldBy.mode}${f.heldBy.ours ? '/ours' : ''}${
+          f.heldBy.serving ? '' : '/UNREACHABLE'}`
+      : '-'}`
 
 /** Operations that move the world, and refuse what the real ones refuse. */
 export function ops(w: World, log: string[] = []): SessionOps & { log: string[] } {
@@ -165,7 +185,7 @@ export function ops(w: World, log: string[] = []): SessionOps & { log: string[] 
       assert.equal(w.heldBy, null, 'opened a session while somebody still held the device')
       w.daemonRunning = true
       w.daemonSession = session
-      w.heldBy = { owner: 'daemon', mode: session, ours: true, adoptable: true }
+      w.heldBy = daemonLock(session, true, true)
       return null
     },
     async quitCortex() {

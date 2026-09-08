@@ -44,6 +44,15 @@ export interface Facts {
     owner: 'daemon' | 'mcp' | 'bench'
     mode: SessionMode
     ours: boolean
+    /**
+     * Its socket answered. A daemon whose process is alive but whose endpoint
+     * is gone — the socket file deleted under it, which is precisely what the
+     * old stop() did to adopted daemons — is holding the device and serving
+     * nobody. It cannot be joined, and saying so is the whole point: that state
+     * used to be invisible, and every later connect failed on a device that was
+     * plainly in use.
+     */
+    serving: boolean
     /** A serving daemon can simply be joined; an MCP server cannot. */
     adoptable: boolean
   } | null

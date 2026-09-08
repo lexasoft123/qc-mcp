@@ -55,18 +55,65 @@ def path(socket_path=None):
 
 
 def alive(pid):
-    """Is that process still there? Signal 0 asks without disturbing it."""
-    if not pid or pid <= 0:
-        return False
+    """Is that process still there?
+
+    NOT `os.kill(pid, 0)` on Windows. There, os.kill does not send a signal at
+    all: anything other than CTRL_C_EVENT/CTRL_BREAK_EVENT calls TerminateProcess
+    with the signal as the exit code, so the POSIX idiom for "does this process
+    exist" would KILL the very owner it was asking about — every read() of the
+    lock quietly executing whoever holds the device.
+    """
     try:
-        os.kill(int(pid), 0)
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        return _alive_win32(pid)
+    try:
+        os.kill(pid, 0)          # POSIX: signal 0 checks, it does not deliver
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True          # someone else's process, but it exists
-    except (OSError, ValueError, TypeError):
+        return True              # someone else's process, but it exists
+    except OSError:
         return False
     return True
+
+
+def _alive_win32(pid):
+    """Open the process and ask whether it has finished waiting.
+
+    WaitForSingleObject rather than GetExitCodeProcess: the latter reports
+    STILL_ACTIVE as 259, which is also a perfectly legal exit code, and a
+    process that exited with 259 would read as alive for ever.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    SYNCHRONIZE = 0x00100000
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    WAIT_TIMEOUT = 0x00000102
+    ERROR_ACCESS_DENIED = 5
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+    handle = k32.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                             False, pid)
+    if not handle:
+        # Access denied means it exists and belongs to somebody else; anything
+        # else (ERROR_INVALID_PARAMETER, mostly) means there is no such process.
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        return k32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
+    finally:
+        k32.CloseHandle(handle)
 
 
 def read(socket_path=None):

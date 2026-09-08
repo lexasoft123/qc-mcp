@@ -123,6 +123,10 @@ export class Daemon {
     })
   }
 
+  /** Does the endpoint answer? The socket FILE existing proves nothing — it
+   *  outlives the process that made it, and a process can outlive its socket. */
+  reachable(): Promise<boolean> { return this.endpointUp() }
+
   /** Take over reporting for a daemon we did not spawn. */
   private adopt(onChange: () => void): void {
     this.state = 'running'

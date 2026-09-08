@@ -96,6 +96,17 @@ static void qc_log(const char *fmt, ...) {
     fflush(g_log);
 }
 
+// Whole report as hex on one line (QC_VERBOSE=1), so a capture can be decoded
+// offline from the log alone - the macOS interposer logs full frames too.
+static void qc_log_hex(const char *prefix, const unsigned char *f, DWORD len) {
+    if (!g_log) return;
+    char line[3 * 260 + 1];
+    DWORD n = len > 260 ? 260 : len, i;
+    for (i = 0; i < n; i++) sprintf_s(line + 2 * i, sizeof line - 2 * i, "%02x", f[i]);
+    line[2 * n] = 0;
+    qc_log("%s%s", prefix, line);
+}
+
 // ---------------------------------------------------------------- inject queue
 // Frames the MCP wants sent. NOT written from the pipe thread: that would
 // interleave with the app's own multi-chunk messages and corrupt framing. They
@@ -299,8 +310,10 @@ static BOOL WINAPI my_ReadFile(HANDLE h, LPVOID buf, DWORD len, LPDWORD got,
     if (h == g_dev) {
         if (ok && got && *got) {
             const unsigned char *f = (const unsigned char *)buf;
-            if (g_verbose) qc_log("QC->APP(sync) %02x%02x%02x len=%lu",
-                                  f[0], f[1], f[2], *got);
+            if (g_verbose) {
+                qc_log("QC->APP(sync) %02x%02x%02x len=%lu", f[0], f[1], f[2], *got);
+                qc_log_hex("QC->APP HEX ", f, *got);
+            }
             mirror(f, *got);                            // completed synchronously
         } else if (!ok && rerr == ERROR_IO_PENDING && ov) {
             pend_add(ov, buf);                          // mirror on completion
@@ -318,8 +331,10 @@ static BOOL WINAPI my_GetOverlappedResult(HANDLE h, LPOVERLAPPED ov, LPDWORD got
         void *buf = pend_take(ov);
         if (buf) {
             const unsigned char *f = (const unsigned char *)buf;
-            if (g_verbose) qc_log("QC->APP %02x%02x%02x len=%lu",
-                                  f[0], f[1], f[2], *got);
+            if (g_verbose) {
+                qc_log("QC->APP %02x%02x%02x len=%lu", f[0], f[1], f[2], *got);
+                qc_log_hex("QC->APP HEX ", f, *got);
+            }
             mirror(f, *got);
         }
     }
@@ -340,8 +355,11 @@ static BOOL WINAPI my_WriteFile(HANDLE h, LPCVOID buf, DWORD len, LPDWORD wrote,
     BOOL ok = real_WriteFile(h, buf, len, wrote, ov);
     DWORD werr = ok ? 0 : GetLastError();
     if (is_dev) {
-        if (g_verbose) qc_log("APP->QC %02x%02x%02x len=%lu ok=%d err=%lu",
-                              f[0], f[1], f[2], len, ok, werr);
+        if (g_verbose) {
+            qc_log("APP->QC %02x%02x%02x len=%lu ok=%d err=%lu",
+                   f[0], f[1], f[2], len, ok, werr);
+            qc_log_hex("APP->QC HEX ", f, len);
+        }
         if (f[2] & FLAG_LAST) {              // message complete: release the wire
             while (g_tx_depth > 0) { g_tx_depth--; LeaveCriticalSection(&g_tx); }
         }

@@ -70,6 +70,20 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: [], cap: '↵ esc', does: 'keys.commit', short: 'keys.commit', scope: 'leveling', group: 'keys.group.report', local: true }
 ]
 
+/**
+ * One shortcut, by the string key that describes it.
+ *
+ * Not by its English prose, and not by `find(...)!`: the caps and the
+ * descriptions both moved when these became translatable, and a lookup that
+ * silently returns undefined takes the whole key handler down with it — every
+ * shortcut in the window dead, with nothing on screen to say why.
+ */
+export function shortcut(does: Key): Shortcut {
+  const found = SHORTCUTS.find((s) => s.does === does)
+  if (!found) throw new Error(`no shortcut declared for ${does}`)
+  return found
+}
+
 /** Does this event mean that shortcut? */
 export function matches(e: KeyboardEvent, s: Shortcut): boolean {
   if (s.local || s.keys.length === 0) return false

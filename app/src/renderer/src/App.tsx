@@ -13,7 +13,7 @@ import { Logs } from './views/Logs.js'
 import { Leveling } from './views/Leveling.js'
 import { Prefs } from './modals/Prefs.js'
 import { Shortcuts } from './modals/Shortcuts.js'
-import { SHORTCUTS, matches, typing } from './keys.js'
+import { matches, shortcut, typing } from './keys.js'
 
 type View = 'home' | 'console' | 'leveling' | 'setup' | 'logs'
 
@@ -40,11 +40,9 @@ export function App(): React.JSX.Element {
    * the tool being out of reach.
    */
   useEffect(() => {
-    const byCap = (cap: string): (typeof SHORTCUTS)[number] =>
-      SHORTCUTS.find((s) => s.cap === cap)!
-    const jump = SHORTCUTS.find((s) => s.scope === 'app' && s.does.startsWith('Home,'))!
-    const sheet = byCap('?')
-    const settings = SHORTCUTS.find((s) => s.does === 'prefs.open')!
+    const jump = shortcut('keys.views')
+    const sheet = shortcut('keys.thisList')
+    const settings = shortcut('prefs.open')
 
     const onKey = (e: KeyboardEvent): void => {
       if (typing(e)) return

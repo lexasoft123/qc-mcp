@@ -5,7 +5,7 @@ import type {
   Snapshot
 } from '@shared/types'
 import { cleanError, slotId } from '../derive.js'
-import { MOD, SHORTCUTS, type Shortcut, matches, typing } from '../keys.js'
+import { SHORTCUTS, matches, shortcut, typing } from '../keys.js'
 import { act, say } from '../store.js'
 import { T, t } from '../i18n.js'
 import { Knob } from '../components/Knob.js'
@@ -491,19 +491,19 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   // ── keyboard: the reason this tool exists ─────────────────────────────
 
   useEffect(() => {
-    const key = (cap: string): Shortcut => SHORTCUTS.find((k) => k.cap === cap)!
+    const key = shortcut
     const onKey = (e: KeyboardEvent): void => {
       if (typing(e)) return
 
-      if (matches(e, key('P'))) { e.preventDefault(); void togglePlay(); return }
-      if (matches(e, key('M'))) { e.preventDefault(); measureAll(); return }
-      if (matches(e, key('L'))) { e.preventDefault(); audition(); return }
-      if (matches(e, key('esc'))) { e.preventDefault(); stopRun(); return }
-      if (matches(e, key(`${MOD}↵`))) { e.preventDefault(); applyAll(); return }
-      if (matches(e, key(`${MOD}Z`))) { e.preventDefault(); undoAll(); return }
-      if (matches(e, key(`${MOD}⇧S`))) { e.preventDefault(); saveAll(); return }
-      if (matches(e, key(`${MOD}S`))) { e.preventDefault(); save(); return }
-      if (matches(e, key(`${MOD}N`))) { e.preventDefault(); setPicking(true); return }
+      if (matches(e, key('keys.play'))) { e.preventDefault(); void togglePlay(); return }
+      if (matches(e, key('keys.measure'))) { e.preventDefault(); measureAll(); return }
+      if (matches(e, key('keys.listen'))) { e.preventDefault(); audition(); return }
+      if (matches(e, key('keys.stopRun'))) { e.preventDefault(); stopRun(); return }
+      if (matches(e, key('keys.apply'))) { e.preventDefault(); applyAll(); return }
+      if (matches(e, key('keys.undo'))) { e.preventDefault(); undoAll(); return }
+      if (matches(e, key('keys.saveAll'))) { e.preventDefault(); saveAll(); return }
+      if (matches(e, key('keys.saveOne'))) { e.preventDefault(); save(); return }
+      if (matches(e, key('keys.addPreset'))) { e.preventDefault(); setPicking(true); return }
       if (e.metaKey || e.ctrlKey || e.altKey) return
 
       if (e.key === 'ArrowLeft') { e.preventDefault(); goto(focus <= 0 ? bench.length - 1 : focus - 1) }

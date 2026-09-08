@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SHORTCUTS, grouped, matches, typing } from '../src/renderer/src/keys.ts'
+import { SHORTCUTS, grouped, matches, shortcut, typing } from '../src/renderer/src/keys.ts'
 import { t } from '../src/shared/i18n/index.ts'
 
 /**
@@ -96,4 +96,23 @@ test('scoping the sheet keeps the app-wide keys visible', () => {
   const bench = grouped('leveling').flatMap(([, r]) => r)
   assert.ok(bench.some((s) => s.scope === 'app'), 'a bench-only sheet loses ⌘1–⌘5 and ?')
   assert.ok(bench.every((s) => s.scope !== 'app' ? s.scope === 'leveling' : true))
+})
+
+test('every shortcut the views look up actually exists', () => {
+  // The bug this catches: `does` became a translation key, and a lookup written
+  // against the old English prose silently returned undefined — which took the
+  // whole keydown handler down with it, so ⌘1–⌘5, ? and ⌘, all died at once
+  // with nothing on screen to say why. `find(...)!` hid it from the compiler.
+  const LOOKED_UP = [
+    'keys.views', 'keys.thisList', 'prefs.open',          // App.tsx
+    'keys.play', 'keys.measure', 'keys.listen', 'keys.stopRun',
+    'keys.apply', 'keys.undo', 'keys.saveAll', 'keys.saveOne', 'keys.addPreset'
+  ] as const
+  for (const k of LOOKED_UP) {
+    assert.doesNotThrow(() => shortcut(k), `${k} is looked up but not declared`)
+  }
+})
+
+test('an undeclared shortcut throws instead of returning undefined', () => {
+  assert.throws(() => shortcut('home.connect'), /no shortcut declared/)
 })

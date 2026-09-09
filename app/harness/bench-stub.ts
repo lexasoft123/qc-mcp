@@ -17,6 +17,7 @@ import type { BenchSlot, LevelEvent, PresetState, ReportRow, SampleState } from 
 const q = new URLSearchParams(location.search)
 export const scenario = q.get('s') ?? 'fresh'
 export const height = Number(q.get('h') ?? 788)
+export const width = Number(q.get('w') ?? 1078)
 
 const SLOTS: BenchSlot[] = [
   { folderKey: 'f', position: 0, name: 'LONESTAR COOL', cloudId: '', scene: null },

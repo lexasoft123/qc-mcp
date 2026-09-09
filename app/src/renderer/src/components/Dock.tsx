@@ -49,7 +49,7 @@ export function Dock({
         const db = o ? toDb(o.level) : null
         const lim = !HP.has(key) && (o?.limit ?? 0) >= 0.5
         return (
-          <span key={key} className={`dp${lim ? ' lim' : ''}`}>
+          <span key={key} className={`dp${lim ? ' lim' : ''}${HP.has(key) ? ' hp' : ''}`}>
             <i>{label}</i>
             <span className="lvl">
               <span className="fill" style={{ width: `${db === null ? 0 : pct(db)}%` }} />

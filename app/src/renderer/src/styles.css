@@ -935,6 +935,7 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
   display: flex; align-items: center; gap: 9px; padding: 12px 16px 6px; min-width: 0;
 }
 .bt-head .badge { white-space: nowrap; }
+.bt-head button, .lvl-top button { white-space: nowrap; flex: none; }
 /* present but invisible: a badge that comes and goes would move its neighbours */
 .badge.hide { visibility: hidden; }
 .bt-sep { width: 1px; height: 20px; background: var(--sz-line); margin: 0 3px; flex: none; }
@@ -961,13 +962,21 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
 /* One grid, shared by the header and every row, so the labels can never drift
    off the numbers they name. Every numeric column has a fixed width. */
 .bt-cols {
-  display: grid; align-items: center; gap: 10px;
+  display: grid; align-items: center; gap: 8px;
   grid-template-columns:
-    20px 16px minmax(110px, 1.3fr)   /* include · slot · name (with chevron)   */
-    58px 66px                        /* live meter · now                       */
-    58px 56px 74px                   /* lufs · true peak · off-by bar          */
-    108px 66px                       /* change (editable) · after              */
-    58px 62px;                       /* unsaved dot / saved · save or undo     */
+    18px 14px minmax(120px, 1.6fr)   /* include · slot · name (with chevron)   */
+    44px 62px                        /* live meter · now                       */
+    52px 50px 64px                   /* lufs · true peak · off-by bar          */
+    104px 62px                       /* change (editable) · after              */
+    52px 58px;                       /* unsaved dot / saved · save or undo     */
+}
+/* The app runs at a 1.1 zoom in a 1078 pt window: ~980 CSS px. Below that the
+   key caps go and the dock drops its headphone pair, so nothing wraps or
+   overflows — a resize is the only thing that changes these, never a state. */
+@media (max-width: 1040px) {
+  .bt-head .btn kbd, .lvl-top .btn kbd { display: none; }
+  .dock .dp.hp, .dock > .eyebrow { display: none; }
+  .dock-run { width: 190px; }
 }
 .bt-colhead {
   position: sticky; top: 0; z-index: 2; padding: 0 11px 6px; margin-bottom: 2px;
@@ -1063,7 +1072,7 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
 /* a fixed 29 px row: the run chip is the tallest thing that can appear in it,
    and the whole band is sized as if it were always there */
 .dock {
-  display: flex; align-items: center; gap: 14px; flex-wrap: nowrap; min-width: 0;
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; min-width: 0; overflow: hidden;
   height: 48px; padding: 0 16px; border-top: 1px solid var(--sz-line); background: var(--sz-footer-fill);
 }
 .dock > * { flex: none; }
@@ -1071,11 +1080,11 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
 .dock.bad { border-color: var(--sz-danger-strong-line); background: var(--sz-danger-strong-wash); }
 .dock .dp { display: flex; align-items: center; gap: 7px; }
 .dock .dp i {
-  font-style: normal; font-size: 8.5px; font-weight: 700; letter-spacing: 0.12em;
-  text-transform: uppercase; color: var(--sz-faint); min-width: 34px;
+  font-style: normal; font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--sz-faint); min-width: 30px;
 }
 .dock .dp .lvl {
-  position: relative; width: 44px; height: 5px; border-radius: 99px; display: block;
+  position: relative; width: 34px; height: 5px; border-radius: 99px; display: block;
   background: rgba(255, 240, 214, 0.07); overflow: hidden;
 }
 .dock .dp .lvl .fill {
@@ -1086,7 +1095,7 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
 .dock .dp.lim .lvl .fill { background: linear-gradient(90deg, #ff8a5c, #ff7a5c); }
 .dock .dp b {
   font-weight: 400; font-family: var(--sz-font-mono); font-size: 10px;
-  color: var(--sz-dim); min-width: 40px; text-align: right;
+  color: var(--sz-dim); min-width: 36px; text-align: right;
   font-variant-numeric: tabular-nums; font-variation-settings: 'wdth' 87.5;
 }
 .dock .dp.lim b { color: var(--sz-danger-strong); }
@@ -1094,8 +1103,8 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
 .dock-run .lvl-run { max-width: 100%; min-width: 0; }
 .lvl-run-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dock-state {
-  font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--sz-faint); min-width: 110px; text-align: right;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--sz-faint); min-width: 96px; text-align: right; white-space: nowrap;
 }
 .dock-state.ok { color: var(--sz-success); }
 .dock-state.bad { color: var(--sz-danger-strong); }

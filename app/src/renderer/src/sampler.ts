@@ -115,8 +115,12 @@ export function useSampler(live: boolean): Sampler {
 
   const discard = useCallback(async (): Promise<void> => {
     stopPoll(); quietSince.current = null
-    try { setSample(await window.patchbay.leveling.sampleDiscard()) }
-    catch (e) { setError((e as Error).message) }
+    try {
+      await window.patchbay.leveling.sampleDiscard()
+      // discard answers only {state: idle}; the take already on disk is still
+      // the reference, so read its facts back or the transport says "no riff"
+      setSample(await window.patchbay.leveling.sampleStatus())
+    } catch (e) { setError((e as Error).message) }
   }, [])
 
   const pick = useCallback(async (name: string): Promise<void> => {

@@ -600,7 +600,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'lvl.tp.playToStart': '弹奏即开始',
   'lvl.tp.source': '来源',
   'lvl.tp.yourTake': '你的录音',
-  'lvl.tp.noTake': '你的录音——尚未录制',
+  'lvl.tp.noTake': '你的录音——暂无',
   'lvl.tp.loading': '{name}——加载中…',
   'lvl.tp.through': '正通过 {name} 播放',
   'lvl.tp.running': '乐句正逐个播入各预设',

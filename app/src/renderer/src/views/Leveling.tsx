@@ -424,13 +424,17 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       // Stop clears nothing itself: the service's `play` event does, once the
       // stream has actually stopped.
       if (playing) { await window.patchbay.leveling.sampleStopPlay(); return }
+      // The same gate as the PLAY button: no take, a recorder that is armed
+      // or rolling, or a run on the device — `P` used to start playback over
+      // all three, because the shortcut never looked at the button.
+      if (!sampler.ready || run !== null) return
       setPlaying(true)
       await window.patchbay.leveling.samplePlay()
     } catch (e) {
       setPlaying(false)
       setError(cleanish((e as Error).message))
     }
-  }, [playing])
+  }, [playing, sampler.ready, run])
 
   // ── the report's actions, as functions ────────────────────────────────
   //
@@ -595,7 +599,12 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if (typing(e) || e.repeat) return
 
-      if (matches(e, key('keys.record'))) { e.preventDefault(); sampler.foot(); return }
+      if (matches(e, key('keys.record'))) {
+        e.preventDefault()
+        // the same gate as the REC button: not over playback, not during a run
+        if (!playing && run === null) sampler.foot()
+        return
+      }
       if (matches(e, key('keys.play'))) { e.preventDefault(); void togglePlay(); return }
       if (matches(e, key('keys.measure'))) { e.preventDefault(); measureAll(); return }
       if (matches(e, key('keys.listen'))) { e.preventDefault(); audition(); return }

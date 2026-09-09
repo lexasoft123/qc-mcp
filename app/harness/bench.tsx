@@ -1,7 +1,7 @@
 /*
  * The whole Leveling view, against a fake bench.
  *
- *   bench.html?s=fresh|measured|applied|error|empty|closed&h=620|788|1000
+ *   bench.html?s=fresh|measured|applied|error|empty|closed&h=620|788|1000&w=980
  *
  * The stub (bench-stub.ts, imported FIRST) answers every call the view makes
  * and streams a meter, so the rail, the rows and the dock move. `measured`
@@ -14,7 +14,7 @@
 // The stub installs `window.patchbay`; the view's store reads it the moment
 // its module evaluates, so the view is imported DYNAMICALLY below, after this
 // module body has run — a static import would let the bundler order the chunks.
-import { height, prefs, scenario, setRerender, snapOf, wait } from './bench-stub'
+import { height, prefs, scenario, setRerender, snapOf, wait, width } from './bench-stub'
 import '@fontsource-variable/bricolage-grotesque'
 import '@fontsource-variable/martian-mono'
 import '@singz/ui/kit.css'
@@ -35,7 +35,7 @@ document.body.style.background = '#0a0908'
 document.body.style.margin = '0'
 void import('../src/renderer/src/views/Leveling').then(({ Leveling }) => {
   createRoot(document.getElementById('root')!).render(
-    <div style={{ width: 1078, height, margin: '20px auto', border: '1px solid #333', borderRadius: 14,
+    <div style={{ width, height, margin: '20px auto', border: '1px solid #333', borderRadius: 14,
                   overflow: 'hidden', background: 'var(--sz-bg)', display: 'grid' }}>
       <Harness Leveling={Leveling} />
     </div>

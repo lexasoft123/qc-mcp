@@ -96,18 +96,18 @@ export function RiffTransport({
           Each line is a stack of alternatives sized by the widest. */}
       <div className="xport-facts">
         <div className="xport-alts">
-          <span className={`row${hasTake && !recording ? ' on' : ''}`}>
+          <span className={`row${['recorded', 'playing', 'running'].includes(face) ? ' on' : ''}`}>
             <b>{(sample?.duration_s ?? 0).toFixed(1)} s</b>
             <b>{fmt(sample?.peak_dbfs)} dBFS</b>
             <b>{fmt(sample?.lufs)} LUFS</b>
             <span className={`dot${verdict ? (verdict.good ? ' good' : ' warn') : ''}`}
                   title={verdict?.text ?? ''} />
           </span>
-          <span className={`row${recording ? ' on' : ''}`}>
+          <span className={`row${face === 'recording' ? ' on' : ''}`}>
             <b>{(sample?.seconds_recorded ?? 0).toFixed(1)} s</b>
             <span>{t('msd.ofMax', { max: (sample?.max_seconds ?? 30).toFixed(0) })}</span>
           </span>
-          <span className={`row${armed ? ' on' : ''}`}><b>{t('lvl.tp.playToStart')}</b></span>
+          <span className={`row${face === 'armed' ? ' on' : ''}`}><b>{t('lvl.tp.playToStart')}</b></span>
         </div>
         <div className="xport-alts">
           <label className={`row${face === 'recorded' || face === 'empty' ? ' on' : ''}`}>
@@ -132,13 +132,14 @@ export function RiffTransport({
               ))}
             </select>
           </label>
-          <span className={`row${armed || recording ? ' on' : ''}`}>
+          {/* exactly one of these four is `on`: the face decides, never two flags */}
+          <span className={`row${face === 'armed' || face === 'recording' ? ' on' : ''}`}>
             <span>{t('msd.inDbfs', { db: fmt(sample?.input_dbfs) })}</span>
             <span className="warn" style={{ visibility: recording && silenceLeft !== null && silenceLeft > 0 ? 'visible' : 'hidden' }}>
               {t('msd.stopsIn', { s: Math.max(0, silenceLeft ?? 0).toFixed(1) })}
             </span>
           </span>
-          <span className={`row${playing ? ' on' : ''}`}>
+          <span className={`row${face === 'playing' ? ' on' : ''}`}>
             <span>{t('lvl.tp.through', { name: presetName ?? '' })}</span>
           </span>
           <span className={`row${face === 'running' ? ' on' : ''}`}>

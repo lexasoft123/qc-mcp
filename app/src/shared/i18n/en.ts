@@ -601,7 +601,7 @@ export const en = {
   'lvl.tp.playToStart': 'play to start',
   'lvl.tp.source': 'Source',
   'lvl.tp.yourTake': 'Your take',
-  'lvl.tp.noTake': 'Your take — nothing recorded',
+  'lvl.tp.noTake': 'Your take — none yet',
   'lvl.tp.loading': '{name} — loading…',
   'lvl.tp.through': 'playing through {name}',
   'lvl.tp.running': 'the riff is playing into each preset',

@@ -1170,12 +1170,27 @@ def set_mode_cycle(modes: list) -> dict:
             "cycle": [MODE_NAMES.get(i, f"#{i}") for i in ids]}
 
 
-INPUT_TYPES = {0.0: "instrument", 0.5: "mic", 1.0: "line"}
+# Measured 2026-09-09 on a QC (CorOS 4.1.0), reading the device against Cortex
+# Control's own I/O panel: input 1 stored 0.0 with the app showing Instrument,
+# input 2 stored 1.0 with the app showing Mic (a condenser, 48V on, +25 dB trim).
+# This was a 3-position guess before — {0: instrument, 0.5: mic, 1.0: line} —
+# which reported that mic input as a LINE input. 0.5 has never been observed;
+# anything that is not one of the two measured values says so rather than being
+# rounded into a name.
+#
+# Measured on a FULL Quad Cortex. The Quad Cortex Mini has no input-type switch
+# at all, so on an ATMA the field is not a user-facing control and these names
+# should not be trusted — report what is stored, do not act on it.
+INPUT_TYPES = {0.0: "instrument", 1.0: "mic"}
 
 
 def _input_type_name(value):
-    """`input_type` is a 3-position normalized control, not a boolean."""
-    return INPUT_TYPES.get(round(float(value) * 2) / 2, f"unknown({value:.3f})")
+    """The port's input type, or `unknown(v)` for a value nobody has measured."""
+    v = float(value)
+    for known, name in INPUT_TYPES.items():
+        if abs(v - known) < 0.01:
+            return name
+    return f"unknown({v:.3f})"
 
 
 @mcp.tool()
@@ -1923,8 +1938,9 @@ def set_io_port(kind: str, port: int, level: float = None, impedance: float = No
     Only the arguments you pass are sent — and that matters: the device
     **silently rejects a write carrying a full port record**, so this is also the
     way to undo a `load_settings_preset('io_settings', …)` from its `previous`
-    snapshot. `input_type` is a 3-position control (0=Instrument, 0.5=Mic,
-    1.0=Line); Cortex Control only exposes the first two."""
+    snapshot. `input_type` is 0=Instrument, 1.0=Mic — measured against the app
+    on both combo inputs. It reads as 3-position in the protobuf, but 0.5 has
+    never been seen on a device and no Line setting is exposed."""
     qc = _conn()
     fields = {k: v for k, v in (("level", level), ("input_zmode", impedance),
                                 ("input_type", input_type),

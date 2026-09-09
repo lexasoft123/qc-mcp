@@ -540,6 +540,8 @@ export const en = {
   'lvl.measuringOf': 'Measuring {n} of {total}{name}',
   'lvl.stop': 'Stop',
   'lvl.stopped': 'Stopped after {n} of {total}.',
+  'lvl.lostEdit': 'Left {name} with an unsaved by-ear trim — the recall dropped it.',
+  'lvl.unattributed': 'A measurement for {name} could not be matched to a bench slot.',
   'lvl.stopping': 'Stopping after this preset',
   'lvl.listenToSet': 'Listen to the set',
   'lvl.listenHint': 'Play the riff through each preset in turn (L)',

@@ -219,11 +219,4 @@ export const sessionFact = (s: Snapshot): string => {
   }
 }
 
-/**
- * A bench slot's identity.
- *
- * Downloads presets all report position 0 — their real key is the cloud id — so
- * keying on folder+position alone collapses a whole cloud folder into one slot.
- */
-export const slotId = (s: { folderKey: string; position: number; cloudId: string }): string =>
-  s.cloudId || `${s.folderKey}:${s.position}`
+export { slotId } from './bench.js'

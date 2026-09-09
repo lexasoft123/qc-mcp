@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Badge, Button } from '@singz/ui'
 import type { BenchSlot, ReportRow } from '@shared/types'
 import { T, t } from '../i18n.js'
+import { slotId } from '../bench.js'
+import type { WrittenMap } from '../bench.js'
 
 /**
  * What every preset on the bench needs, in dB, side by side — as a PROPOSAL.
@@ -114,30 +116,28 @@ function Proposal({ db, edited, disabled, onChange, onNudge, onReset }: {
 }
 
 export function LevelReport({
-  slots, rows, target, metric, busy, progress, applied, saved, proposals, selected,
+  slots, rows, target, metric, busy, progress, written, proposals, selected,
   onToggle, onPropose, onNudge, onResetProposal, onUndoOne,
   onMeasure, onApply, onSave, onRevert
 }: {
   slots: BenchSlot[]
-  /** Keyed by bench position; empty until measured. */
-  rows: Record<number, ReportRow>
+  /** Keyed by slot id; empty until measured. */
+  rows: Record<string, ReportRow>
   target: number
   metric: 'lufs' | 'perceived'
   busy: boolean
   /** Name of the preset being measured right now, for the in-flight row. */
   progress: string | null
-  /** Position -> dB actually written to the device this session. */
-  applied: Record<number, number>
-  /** Positions whose trim has since been saved into the preset. */
-  saved: number[]
-  /** Position -> the correction that will be written, measured or edited. */
-  proposals: Record<number, number>
-  selected: number[]
-  onToggle: (position: number) => void
-  onPropose: (position: number, db: number) => void
-  onNudge: (position: number, by: number) => void
-  onResetProposal: (position: number) => void
-  onUndoOne: (position: number) => void
+  /** Slot id -> what this session wrote to the device, and whether it was saved. */
+  written: WrittenMap
+  /** Slot id -> the correction that will be written, measured or edited. */
+  proposals: Record<string, number>
+  selected: string[]
+  onToggle: (id: string) => void
+  onPropose: (id: string, db: number) => void
+  onNudge: (id: string, by: number) => void
+  onResetProposal: (id: string) => void
+  onUndoOne: (id: string) => void
   onMeasure: () => void
   onApply: () => void
   onSave: () => void
@@ -145,19 +145,21 @@ export function LevelReport({
 }): React.JSX.Element | null {
   if (slots.length === 0) return null
 
-  const measured = slots.filter((s) => rows[s.position]?.measured !== undefined)
+  const ids = slots.map(slotId)
+  const measured = slots.filter((s) => rows[slotId(s)]?.measured !== undefined)
   const vals = measured
-    .map((s) => rows[s.position].measured)
+    .map((s) => rows[slotId(s)].measured)
     .filter((v): v is number => v !== null && v !== undefined)
   const spread = vals.length > 1 ? Math.max(...vals) - Math.min(...vals) : null
   const unit = metric === 'perceived' ? '' : ' LUFS'
-  const unsaved = Object.keys(applied).map(Number).filter((p) => !saved.includes(p))
+  const unsaved = ids.filter((id) => written[id] !== undefined && !written[id].saved)
+  const applied = ids.filter((id) => written[id]?.source === 'apply')
 
   const proposalFor = (s: BenchSlot): number | null | undefined =>
-    proposals[s.position] ?? rows[s.position]?.correction_db
+    proposals[slotId(s)] ?? rows[slotId(s)]?.correction_db
   const isEdited = (s: BenchSlot): boolean => {
-    const p = proposals[s.position]
-    const m = rows[s.position]?.correction_db
+    const p = proposals[slotId(s)]
+    const m = rows[slotId(s)]?.correction_db
     return p !== undefined && m !== undefined && m !== null && Math.abs(p - m) > 0.001
   }
 
@@ -175,9 +177,9 @@ export function LevelReport({
         )}
         <span className="fine">{t('rep.lede')}</span>
         <span className="grow" />
-        {Object.keys(applied).length > 0 && (
+        {applied.length > 0 && (
           <Button size="sm" onClick={onRevert}>
-            {t('rep.undoTrims', { n: String(Object.keys(applied).length) })}
+            {t('rep.undoTrims', { n: String(applied.length) })}
           </Button>
         )}
         <Button size="sm" disabled={busy} onClick={onMeasure}
@@ -209,16 +211,17 @@ export function LevelReport({
           <span className="right">{t('rep.col.proposed')}</span>
         </div>
         {slots.map((s) => {
-          const r = rows[s.position]
-          const on = selected.includes(s.position)
+          const id = slotId(s)
+          const r = rows[id]
+          const on = selected.includes(id)
           const live = progress === s.name
-          const wrote = applied[s.position]
-          const isUnsaved = wrote !== undefined && !saved.includes(s.position)
+          const w = written[id]
+          const isUnsaved = w !== undefined && !w.saved
           return (
-            <div key={`${s.folderKey}:${s.position}`}
+            <div key={id}
                  className={`rep-row${on ? '' : ' skip'}${live ? ' now' : ''}${isUnsaved ? ' unsaved' : ''}`}>
               <button type="button" className={`selbox${on ? ' on' : ''}`}
-                      onClick={() => onToggle(s.position)}
+                      onClick={() => onToggle(id)}
                       aria-label={on ? t('rep.exclude', { name: s.name }) : t('rep.include', { name: s.name })}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
                      stroke="currentColor" strokeWidth="3.4" strokeLinecap="round"
@@ -231,13 +234,14 @@ export function LevelReport({
                     trim lives in the device and not in the preset file. */}
                 {isUnsaved && (
                   <i className="dot-unsaved"
-                     title={t('rep.dotHint', { db: fmt(wrote) })} />
+                     title={t('rep.dotHint', { db: fmt(w.db) })} />
                 )}
                 {s.name}
-                {saved.includes(s.position) && <Badge className="live">{t('rep.saved')}</Badge>}
-                {isUnsaved && (
+                {w?.saved && <Badge className="live">{t('rep.saved')}</Badge>}
+                {/* Only a trim with a known number can be put back. */}
+                {isUnsaved && w.db !== null && (
                   <button type="button" className="rowundo" title={t('rep.undoOneHint')}
-                          onClick={() => onUndoOne(s.position)}>{t('rep.undoOne')}</button>
+                          onClick={() => onUndoOne(id)}>{t('rep.undoOne')}</button>
                 )}
               </span>
               <span className="num">
@@ -249,9 +253,9 @@ export function LevelReport({
                 db={proposalFor(s)}
                 edited={isEdited(s)}
                 disabled={busy || !on}
-                onChange={(db) => onPropose(s.position, db)}
-                onNudge={(by) => onNudge(s.position, by)}
-                onReset={() => onResetProposal(s.position)}
+                onChange={(db) => onPropose(id, db)}
+                onNudge={(by) => onNudge(id, by)}
+                onReset={() => onResetProposal(id)}
               />
               {/* On the row that produced it. One shared error string meant a
                   run that failed three times showed the last one. */}

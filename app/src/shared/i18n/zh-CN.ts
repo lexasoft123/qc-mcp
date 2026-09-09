@@ -539,6 +539,8 @@ export const zhCN: Record<keyof typeof en, string> = {
   'lvl.measuringOf': '正在测量第 {n} / {total} 个{name}',
   'lvl.stop': '停止',
   'lvl.stopped': '已在第 {n} / {total} 个之后停止。',
+  'lvl.lostEdit': '离开 {name} 时有未保存的手动微调——重新调用已将其丢弃。',
+  'lvl.unattributed': '{name} 的测量结果无法对应到工作台上的任何预设。',
   'lvl.stopping': '测完这个预设后停止',
   'lvl.listenToSet': '试听整套',
   'lvl.listenHint': '依次用每个预设播放旋律（L）',

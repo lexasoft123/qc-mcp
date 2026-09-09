@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { BenchSlot, ReportRow } from '../src/shared/types'
 import { LevelReport } from '../src/renderer/src/components/LevelReport'
+import type { WrittenMap } from '../src/renderer/src/bench'
 
 /* The report in the three states that matter: proposed, adjusted, applied. */
 
@@ -18,19 +19,21 @@ const SLOTS: BenchSlot[] = [
   { folderKey: 'f', position: 30, name: 'Fuzz Octave', cloudId: '', scene: null }
 ] as BenchSlot[]
 
-const ROWS: Record<number, ReportRow> = {
-  0: { position: 0, row: 0, measured: -17.9, true_peak: -3.1, correction_db: -0.1 },
-  2: { position: 2, row: 2, measured: -27.8, true_peak: -9.4, correction_db: 9.8 },
-  6: { position: 6, row: 1, measured: -33.7, true_peak: -14.2, correction_db: 15.7 },
-  25: { position: 25, row: 0, measured: -23.2, true_peak: -6.6, correction_db: 5.2 },
-  30: { position: 30, row: 2, measured: -15.4, true_peak: -1.2, correction_db: -2.6 }
+// keyed by slot id (folder:position), like everything the view holds
+const ROWS: Record<string, ReportRow> = {
+  'f:0': { position: 0, row: 0, measured: -17.9, true_peak: -3.1, correction_db: -0.1 },
+  'f:2': { position: 2, row: 2, measured: -27.8, true_peak: -9.4, correction_db: 9.8 },
+  'f:6': { position: 6, row: 1, measured: -33.7, true_peak: -14.2, correction_db: 15.7 },
+  'f:25': { position: 25, row: 0, measured: -23.2, true_peak: -6.6, correction_db: 5.2 },
+  'f:30': { position: 30, row: 2, measured: -15.4, true_peak: -1.2, correction_db: -2.6 }
 }
 
-function Demo({ title, applied, saved, proposals }: {
+const applied = (db: number, saved = false): WrittenMap[string] => ({ db, source: 'apply', saved })
+
+function Demo({ title, written, proposals }: {
   title: string
-  applied: Record<number, number>
-  saved: number[]
-  proposals: Record<number, number>
+  written: WrittenMap
+  proposals: Record<string, number>
 }): React.JSX.Element {
   const [prop, setProp] = useState(proposals)
   return (
@@ -41,8 +44,8 @@ function Demo({ title, applied, saved, proposals }: {
       }}>{title}</div>
       <LevelReport
         slots={SLOTS} rows={ROWS} target={-18} metric="lufs" busy={false} progress={null}
-        applied={applied} saved={saved} proposals={prop}
-        selected={SLOTS.map((s) => s.position)}
+        written={written} proposals={prop}
+        selected={SLOTS.map((s) => `${s.folderKey}:${s.position}`)}
         onToggle={() => {}}
         onPropose={(pos, db) => setProp((p) => ({ ...p, [pos]: db }))}
         onNudge={(pos, by) => setProp((p) => ({
@@ -59,12 +62,13 @@ function Demo({ title, applied, saved, proposals }: {
 document.body.style.background = '#12100d'
 createRoot(document.getElementById('root')!).render(
   <div style={{ padding: 20, width: 940 }}>
-    <Demo title="1 · measured — a proposal, nothing written" applied={{}} saved={[]} proposals={{}} />
+    <Demo title="1 · measured — a proposal, nothing written" written={{}} proposals={{}} />
     <Demo title="2 · two adjusted by hand (lead +2 louder, fuzz left alone)"
-          applied={{}} saved={[]} proposals={{ 6: 17.7, 30: 0 }} />
+          written={{}} proposals={{ 'f:6': 17.7, 'f:30': 0 }} />
     <Demo title="3 · applied — yellow dots: on the device, not in the presets"
-          applied={{ 2: 9.8, 6: 12.0, 25: 5.2 }} saved={[]} proposals={{}} />
+          written={{ 'f:2': applied(9.8), 'f:6': applied(12.0), 'f:25': applied(5.2) }} proposals={{}} />
     <Demo title="4 · two of them saved, one still unsaved"
-          applied={{ 2: 9.8, 6: 12.0, 25: 5.2 }} saved={[2, 25]} proposals={{}} />
+          written={{ 'f:2': applied(9.8, true), 'f:6': applied(12.0), 'f:25': applied(5.2, true) }}
+          proposals={{}} />
   </div>
 )

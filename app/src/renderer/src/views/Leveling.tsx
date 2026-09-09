@@ -4,7 +4,12 @@ import type {
   AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, SceneRow,
   Snapshot
 } from '@shared/types'
-import { cleanError, slotId } from '../derive.js'
+import { cleanError } from '../derive.js'
+import {
+  attribute, appliedIds, focusIndex, forget, forgetApplied, isDirty, leave, markSaved, note,
+  slotId, unsavedIds
+} from '../bench.js'
+import type { Written, WrittenMap } from '../bench.js'
 import { SHORTCUTS, matches, shortcut, typing } from '../keys.js'
 import { act, say } from '../store.js'
 import { T, t } from '../i18n.js'
@@ -54,16 +59,38 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const bench = snap.prefs.bench
   const autoSave = snap.prefs.benchAutoSave
 
-  // -1 = nothing on the bench is the loaded preset, so no column claims to be live
-  const [focus, setFocus] = useState(-1)
+  /** The slot whose preset is loaded on the device; null = none of ours, so no
+   *  column claims to be live. An id, not an index: two Downloads presets share
+   *  position 0 and a dropped column must not hand its focus to a neighbour. */
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const focus = focusIndex(bench, focusId)
+  const focusRef = useRef<string | null>(null)
+  focusRef.current = focusId
   const [preset, setPreset] = useState<PresetState | null>(null)
   const [meter, setMeter] = useState<Record<string, MeterOutput> | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [dirty, setDirty] = useState(false)
+  /**
+   * Everything this session wrote to the device that a preset file does not
+   * hold yet, by slot id — the by-ear knob, an Apply, a scene pass. One record,
+   * one yellow dot: `dirty`, `applied` and `saved` used to be three states that
+   * meant overlapping things and were never reconciled.
+   */
+  const [written, setWritten] = useState<WrittenMap>({})
   /** …and as a ref: auto-save fires from inside the same gesture that sets it,
    *  so a closure would still be reading the pre-change value. */
-  const dirtyRef = useRef(false)
-  const mark = useCallback((v: boolean): void => { dirtyRef.current = v; setDirty(v) }, [])
+  const writtenRef = useRef<WrittenMap>({})
+  const putWritten = useCallback((f: (w: WrittenMap) => WrittenMap): void => {
+    writtenRef.current = f(writtenRef.current)
+    setWritten(writtenRef.current)
+  }, [])
+  /** The loaded preset now differs from its file — or, `false`, was just saved. */
+  const mark = useCallback((v: boolean, source: Written['source'] = 'ear'): void => {
+    const id = focusRef.current
+    if (id === null) return
+    putWritten((w) => (v ? note(w, id, null, source) : markSaved(w, id)))
+  }, [putWritten])
+  const dirtyNow = (): boolean => isDirty(writtenRef.current, focusRef.current)
+  const dirty = isDirty(written, focusId)
   const [picking, setPicking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /** Loudest dB seen per slot this session. Deliberately not persisted: it
@@ -73,24 +100,19 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
    *  sat in front of: every pass replays the whole riff. */
   const [autoStep, setAutoStep] = useState<AutoStep | null>(null)
   const [target, setTarget] = useState(-18)
-  /** The report, keyed by bench position. Empty until Measure all is pressed. */
-  const [rows, setRows] = useState<Record<number, ReportRow>>({})
+  /** The report, keyed by slot id. Empty until Measure all is pressed. */
+  const [rows, setRows] = useState<Record<string, ReportRow>>({})
+  /** What the running measurement was sent, and which index it is on: the
+   *  service names a row only by position, and Downloads all have position 0. */
+  const sent = useRef<BenchSlot[]>([])
+  const runIndex = useRef<number | null>(null)
   const [measuring, setMeasuring] = useState<string | null>(null)
   const [busyAll, setBusyAll] = useState(false)
-  /** Positions whose fader an Apply moved, so Undo has something to offer. */
-  /**
-   * Three states, kept apart on purpose.
-   *
-   * `proposals` is what will be written — seeded from the measurement, and
-   * overwritten the moment somebody disagrees with it. `applied` is what
-   * actually reached the device, so Undo has a number to put back and the
-   * yellow dot has something to be about. `saved` is what made it into the
-   * preset file, which is the only one of the three that survives a reload.
-   */
-  const [applied, setApplied] = useState<Record<number, number>>({})
-  const [saved, setSaved] = useState<number[]>([])
-  const [proposals, setProposals] = useState<Record<number, number>>({})
-  const [chosen, setChosen] = useState<number[] | null>(null)
+  /** What will be written, by slot id — seeded from the measurement and
+   *  overwritten the moment somebody disagrees with it. What actually reached
+   *  the device is `written`. */
+  const [proposals, setProposals] = useState<Record<string, number>>({})
+  const [chosen, setChosen] = useState<string[] | null>(null)
   const [playTick, setPlayTick] = useState(0)
   const [helping, setHelping] = useState(false)
   const [scenes, setScenes] = useState<Record<number, SceneRow>>({})
@@ -103,7 +125,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
    *  riff was wrong meant waiting out three more. */
   const abort = useRef(false)
   const [runAt, setRunAt] = useState<{ n: number; total: number } | null>(null)
-  const [auditing, setAuditing] = useState<number | null>(null)
+  const [auditing, setAuditing] = useState<string | null>(null)
   const [keysOpen, setKeysOpen] = useState(false)
   const [playing, setPlaying] = useState(false)
 
@@ -138,10 +160,13 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       else if (e.event === 'autolevel') setAutoStep(e.step)
       else if (e.event === 'measuring') {
         setMeasuring(e.name)
+        runIndex.current = e.index
         setRunAt({ n: e.index + 1, total: e.total })
       }
       else if (e.event === 'measured') {
-        setRows((r) => ({ ...r, [e.row.position]: e.row }))
+        const id = attribute(sent.current, runIndex.current, e.row)
+        if (id === null) setError(t('lvl.unattributed', { name: e.row.name ?? String(e.row.position) }))
+        else setRows((r) => ({ ...r, [id]: e.row }))
       } else if (e.event === 'cancelled') {
         setRunAt(null)
         say(t('lvl.stopped', { n: String(e.done), total: String(e.total) }), false)
@@ -163,7 +188,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         const i = bench.findIndex(
           (b) => b.folderKey === p.folderKey && b.position === p.position
         )
-        if (i >= 0) { setFocus(i); setPreset(p) }
+        if (i >= 0) { setFocusId(slotId(bench[i])); setPreset(p) }
       })
       .catch((e: Error) => { if (!gone) setError(e.message) })
     return () => { gone = true; off() }
@@ -202,8 +227,14 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       const p = await window.patchbay.leveling.open(
         target.folderKey, target.position, false, target.cloudId
       )
-      setFocus(index)
-      mark(false)
+      // The recall reloaded the device from flash: a by-ear trim on the preset
+      // we just left lived only in the working grid, and is gone. Say so.
+      const left = leave(writtenRef.current, focusRef.current)
+      if (left.lost) {
+        putWritten(() => left.next)
+        say(t('lvl.lostEdit', { name: slot?.name ?? '' }), true)
+      }
+      setFocusId(slotId(target))
       setMeter(null)
       // Come back to the scene you left on — but only if you ever left one.
       // A slot you have not visited keeps whatever scene the preset loads with.
@@ -297,7 +328,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   }
 
   const save = useCallback((): void => {
-    if (!preset || !dirtyRef.current) return
+    if (!preset || !dirtyNow()) return
     void guard('save', async () => {
       const r = await window.patchbay.leveling.save(preset.name)
       mark(false)
@@ -325,7 +356,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   useEffect(() => {
     if (!live || focus < 0) return
     const t = setInterval(() => {
-      if (busy || dirtyRef.current || timer.current) return
+      if (busy || dirtyNow() || timer.current) return
       if (Date.now() - writeAt.current < 1500) return
       reconcile()
     }, 6000)
@@ -334,14 +365,18 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
 
   const commit = (db: number): void => {
     applyLevel(db, true)
-    if (!dirtyRef.current) return   // the gesture changed nothing: don't save, don't re-read
+    if (!dirtyNow()) return   // the gesture changed nothing: don't save, don't re-read
     if (autoSave) setTimeout(save, 250)
     else setTimeout(reconcile, 350)
   }
 
   const drop = (index: number): void => {
+    const gone = bench[index]
+    if (!gone) return
     void saveBench(bench.filter((_, i) => i !== index))
-    if (focus >= bench.length - 1) setFocus(Math.max(0, bench.length - 2))
+    // A dropped focus is no focus: the preset is still loaded, but showing its
+    // lanes under a neighbour's name would be a lie.
+    putWritten((w) => forget(w, slotId(gone)))
   }
 
   const add = (slots: BenchSlot[]): void => {
@@ -358,8 +393,11 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
    * failed on three presets showed the last one and lost the other two — in a
    * bar at the bottom of the page, away from the thing that caused it.
    */
-  const rowFail = useCallback((position: number, why: string): void => {
-    setRows((r) => ({ ...r, [position]: { ...(r[position] ?? { position }), error: why } }))
+  const rowFail = useCallback((b: BenchSlot, why: string): void => {
+    const id = slotId(b)
+    setRows((r) => ({
+      ...r, [id]: { ...(r[id] ?? { position: b.position, name: b.name }), error: why }
+    }))
   }, [])
 
   /** Play the riff through the preset in front of you, or stop it. */
@@ -382,13 +420,15 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   // whose whole premise is that your hands are busy.
 
   const wanted = useCallback(
-    (): number[] => chosen ?? bench.map((b) => b.position), [chosen, bench])
+    (): string[] => chosen ?? bench.map(slotId), [chosen, bench])
 
   const measureAll = useCallback((): void => {
     if (busyAll || bench.length === 0) return
     abort.current = false
     const want = wanted()
-    const list = bench.filter((b) => want.includes(b.position))
+    const list = bench.filter((b) => want.includes(slotId(b)))
+    sent.current = list
+    runIndex.current = null
     setBusyAll(true); setRows({}); setProposals({}); setError(null)
     setRunAt({ n: 0, total: list.length })
     void window.patchbay.leveling
@@ -410,56 +450,56 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     const want = wanted()
     setBusyAll(true)
     void (async () => {
-      for (const b of bench.filter((x) => want.includes(x.position))) {
+      for (const b of bench.filter((x) => want.includes(slotId(x)))) {
         if (abort.current) break
-        const r = rows[b.position]
-        const db = proposals[b.position] ?? r?.correction_db
+        const id = slotId(b)
+        const r = rows[id]
+        const db = proposals[id] ?? r?.correction_db
         if (db === null || db === undefined) continue
         try {
           const res = await window.patchbay.leveling.applyTrim({
             folderKey: b.folderKey, position: b.position,
             isFactory: false, cloudId: b.cloudId, row: r?.row, db
           })
-          if (res.error) { rowFail(b.position, res.error); continue }
-          setApplied((a) => ({ ...a, [b.position]: res.applied_db }))
-          setSaved((v) => v.filter((p) => p !== b.position))
+          if (res.error) { rowFail(b, res.error); continue }
+          putWritten((w) => note(w, id, res.applied_db, 'apply'))
           if (res.limited_by === 'range') {
-            rowFail(b.position,
+            rowFail(b,
               `fader ran out — ${res.applied_db.toFixed(1)} of ${db.toFixed(1)} dB given`)
           }
-        } catch (e) { rowFail(b.position, cleanish((e as Error).message)) }
+        } catch (e) { rowFail(b, cleanish((e as Error).message)) }
       }
       setBusyAll(false)
       void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
     })()
-  }, [busyAll, bench, wanted, rows, proposals])
+  }, [busyAll, bench, wanted, rows, proposals, rowFail, putWritten])
 
   const saveAll = useCallback((): void => {
-    const pending = Object.keys(applied).map(Number).filter((p) => !saved.includes(p))
+    const pending = unsavedIds(written)
     if (pending.length === 0 || busyAll) return
     setBusyAll(true)
     void (async () => {
-      for (const b of bench.filter((x) => pending.includes(x.position))) {
+      for (const b of bench.filter((x) => pending.includes(slotId(x)))) {
         try {
           await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
           await window.patchbay.leveling.save()
-          setSaved((v) => (v.includes(b.position) ? v : [...v, b.position]))
-        } catch (e) { rowFail(b.position, cleanish((e as Error).message)) }
+          putWritten((w) => markSaved(w, slotId(b)))
+        } catch (e) { rowFail(b, cleanish((e as Error).message)) }
       }
       setBusyAll(false)
     })()
-  }, [applied, saved, busyAll, bench])
+  }, [written, busyAll, bench, rowFail, putWritten])
 
   const undoAll = useCallback((): void => {
-    if (Object.keys(applied).length === 0) return
+    if (appliedIds(written).length === 0) return
     void window.patchbay.leveling
       .revertLevels()
       .then(() => {
-        setApplied({}); setSaved([])
+        putWritten(forgetApplied)
         return window.patchbay.leveling.state().then(setPreset)
       })
       .catch((e: Error) => setError(cleanish(e.message)))
-  }, [applied])
+  }, [written, putWritten])
 
   /**
    * Listen to the set, one preset after another.
@@ -472,20 +512,20 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     if (bench.length === 0) return
     abort.current = false
     const want = wanted()
-    const list = bench.filter((b) => want.includes(b.position))
+    const list = bench.filter((b) => want.includes(slotId(b)))
     void (async () => {
       for (const b of list) {
         if (abort.current) break
-        setAuditing(b.position)
+        setAuditing(slotId(b))
         try {
           await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
           await window.patchbay.leveling.samplePlay()
-        } catch (e) { rowFail(b.position, cleanish((e as Error).message)); break }
+        } catch (e) { rowFail(b, cleanish((e as Error).message)); break }
       }
       setAuditing(null)
       abort.current = false
     })()
-  }, [auditing, bench, wanted])
+  }, [auditing, bench, wanted, rowFail])
 
   const stopRun = useCallback((): void => {
     if (!busyAll && auditing === null) return
@@ -600,7 +640,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           // The run moved the fader on the device; re-read so the bench agrees.
           setAutoStep(null)
           void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
-          mark(true)
+          mark(true, 'auto')
         }}
       />
 
@@ -611,38 +651,36 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         metric="lufs"
         busy={busyAll}
         progress={measuring}
-        applied={applied}
-        saved={saved}
+        written={written}
         proposals={proposals}
-        selected={chosen ?? bench.map((b) => b.position)}
-        onPropose={(pos, db) => setProposals((p) => ({ ...p, [pos]: db }))}
-        onNudge={(pos, by) => setProposals((p) => {
+        selected={chosen ?? bench.map(slotId)}
+        onPropose={(id, db) => setProposals((p) => ({ ...p, [id]: db }))}
+        onNudge={(id, by) => setProposals((p) => {
           // Functional, and against whatever is in there now: two clicks in one
           // tick have to be two steps.
-          const base = p[pos] ?? rows[pos]?.correction_db ?? 0
-          return { ...p, [pos]: Math.round((base + by) * 10) / 10 }
+          const base = p[id] ?? rows[id]?.correction_db ?? 0
+          return { ...p, [id]: Math.round((base + by) * 10) / 10 }
         })}
-        onResetProposal={(pos) => setProposals((p) => {
-          const { [pos]: _gone, ...rest } = p
+        onResetProposal={(id) => setProposals((p) => {
+          const { [id]: _gone, ...rest } = p
           return rest
         })}
-        onToggle={(pos) => {
-          const now = chosen ?? bench.map((b) => b.position)
-          setChosen(now.includes(pos) ? now.filter((p) => p !== pos) : [...now, pos])
+        onToggle={(id) => {
+          const now = chosen ?? bench.map(slotId)
+          setChosen(now.includes(id) ? now.filter((p) => p !== id) : [...now, id])
         }}
-        onUndoOne={(pos) => {
-          const b = bench.find((x) => x.position === pos)
-          const db = applied[pos]
-          if (!b || db === undefined) return
+        onUndoOne={(id) => {
+          const b = bench.find((x) => slotId(x) === id)
+          const db = written[id]?.db
+          if (!b || db === null || db === undefined) return
           void (async () => {
             try {
               await window.patchbay.leveling.applyTrim({
                 folderKey: b.folderKey, position: b.position,
-                isFactory: false, cloudId: b.cloudId, row: rows[pos]?.row, db: -db
+                isFactory: false, cloudId: b.cloudId, row: rows[id]?.row, db: -db
               })
-              setApplied((a) => { const { [pos]: _g, ...rest } = a; return rest })
-              setSaved((v) => v.filter((p2) => p2 !== pos))
-            } catch (e) { rowFail(pos, cleanish((e as Error).message)) }
+              putWritten((w) => forget(w, id))
+            } catch (e) { rowFail(b, cleanish((e as Error).message)) }
           })()
         }}
         onMeasure={measureAll}
@@ -675,7 +713,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
             .levelScenes({ target, scenes: sceneSel })
             .then(() => window.patchbay.leveling.state().then(setPreset))
             .catch((e: Error) => setError(e.message))
-            .finally(() => { setSceneBusy(false); mark(true) })
+            .finally(() => { setSceneBusy(false); mark(true, 'scenes') })
         }}
       />
 

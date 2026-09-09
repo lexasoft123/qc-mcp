@@ -534,6 +534,45 @@ def test_input_type_names_only_what_was_measured():
     assert S._input_type_name(1.0) == "mic"
     for stray in (0.5, 0.25, 0.75):
         assert S._input_type_name(stray).startswith("unknown"), stray
+def _closed_backends():
+    """One never-opened, once-closed transport per backend THIS OS can import.
+
+    winhid imports anywhere (that is the point of it); iohid binds IOKit at
+    import time, so it exists only on a Mac and the Windows runner gets the
+    Windows half alone.
+    """
+    made = [winhid.WinHIDTransport()]
+    if sys.platform == "darwin":
+        from qc_mcp import iohid                 # noqa: PLC0415
+        made.append(iohid.IOHIDTransport())
+    for t in made:
+        t.close()                                # never opened: must be a no-op
+    return made
+
+
+def test_neither_backend_writes_into_a_closed_device():
+    """A write after close() must raise, on BOTH backends.
+
+    macOS had no guard: close() sets `self.dev = None`, ctypes handed that NULL
+    to IOHIDDeviceSetReport, and the process died with SIGSEGV
+    (KERN_INVALID_ADDRESS at 0x18) — no traceback, no catchable exception. It
+    fired on every Disconnect once transport.close() began sending a Connection
+    frame of its own: the daemon closes twice on SIGTERM (the handler, then
+    serve_forever's finally), and the second pass wrote to a released device.
+    Windows raised RuntimeError here all along; this keeps the pair honest.
+    """
+    for t in _closed_backends():
+        try:
+            t.set_report(1, b"\x00" * 8)
+            raise AssertionError(f"{type(t).__name__} wrote into a closed device")
+        except RuntimeError:
+            pass
+
+
+def test_closing_twice_is_safe_on_both_backends():
+    """close() is called twice on every daemon SIGTERM; it must not care."""
+    for t in _closed_backends():
+        t.close()
 
 
 if __name__ == "__main__":

@@ -225,6 +225,14 @@ class QuadCortex:
         return self.protocol_version
 
     def close(self):
+        # Idempotent. The daemon closes twice on every SIGTERM — the handler
+        # calls close() and then sys.exit(), and the SystemExit unwinds
+        # serve_forever()'s `finally: self.close()`. With a send inside close()
+        # the second pass wrote to a released device and segfaulted the process,
+        # so "Disconnect" killed the daemon instead of stopping it.
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         self._stop_heartbeat()
         if self._owns_session():
             # End our session now. Without this the device keeps it alive ~10 s
@@ -268,9 +276,14 @@ class QuadCortex:
         self._hb_thread.start()
 
     def _stop_heartbeat(self):
+        # Join it: the thread calls send() every 200ms, so signalling and
+        # walking away leaves it free to write into a device close() is about
+        # to release.
         if self._hb_stop:
             self._hb_stop.set()
-        self._hb_thread = None
+        t, self._hb_thread = self._hb_thread, None
+        if t and t is not threading.current_thread():
+            t.join(timeout=1.0)
 
     def __enter__(self):
         return self.open()

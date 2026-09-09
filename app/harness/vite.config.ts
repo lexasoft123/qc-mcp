@@ -10,7 +10,7 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        main: resolve(__dirname, 'index.html'),
+        transport: resolve(__dirname, 'transport.html'),
         modes: resolve(__dirname, 'modes.html'),
         keys: resolve(__dirname, 'keys.html'),
         bench: resolve(__dirname, 'bench.html')

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@singz/ui'
 import type {
-  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, SampleState, SceneRow,
-  Snapshot
+  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, SceneRow, Snapshot
 } from '@shared/types'
 import { cleanError } from '../derive.js'
 import {
@@ -15,7 +14,8 @@ import { act, say } from '../store.js'
 import { t } from '../i18n.js'
 import { loudest } from '../components/Meter.js'
 import { PresetPicker } from '../modals/PresetPicker.js'
-import { Measured } from '../components/Measured.js'
+import { RiffTransport } from '../components/RiffTransport.js'
+import { useSampler } from '../sampler.js'
 import { BenchTable } from '../components/BenchTable.js'
 import { RowDrawer } from '../components/RowDrawer.js'
 import { InputRail } from '../components/InputRail.js'
@@ -97,10 +97,6 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(true)
   /** A recall in flight, and towards which slot — its row shows a skeleton. */
   const [pendingId, setPendingId] = useState<string | null>(null)
-  /** The recorder, as Measured reports it: the rail follows the DI while it is
-   *  armed or rolling, and the drawer's tools need a take to exist. */
-  const [sampleIn, setSampleIn] = useState<SampleState | null>(null)
-  const [riffReady, setRiffReady] = useState(false)
   /** The newest pass of a measured run, so the strip can be watched rather than
    *  sat in front of: every pass replays the whole riff. */
   const [autoStep, setAutoStep] = useState<AutoStep | null>(null)
@@ -144,10 +140,12 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const playWaiters = useRef<Array<() => void>>([])
   /** Resolves when the riff has finished (or failed) — the `play` event. */
   const played = (): Promise<void> => new Promise((res) => playWaiters.current.push(res))
-  /** What the space bar does right now: the recorder's foot, owned by Measured. */
-  const foot = useRef<(() => void) | null>(null)
 
   const live = snap.daemon.state === 'running'
+  /** The recorder. Owned here, not by the transport that draws it: the input
+   *  rail follows the DI while it is armed or rolling, and the drawer's tools
+   *  need to know a take exists. */
+  const sampler = useSampler(live)
   const slot: BenchSlot | undefined = bench[focus]
   const level = levelOf(preset)
 
@@ -572,7 +570,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if (typing(e) || e.repeat) return
 
-      if (matches(e, key('keys.record'))) { e.preventDefault(); foot.current?.(); return }
+      if (matches(e, key('keys.record'))) { e.preventDefault(); sampler.foot(); return }
       if (matches(e, key('keys.play'))) { e.preventDefault(); void togglePlay(); return }
       if (matches(e, key('keys.measure'))) { e.preventDefault(); measureAll(); return }
       if (matches(e, key('keys.listen'))) { e.preventDefault(); audition(); return }
@@ -624,8 +622,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     )
   }
 
-  const recorder = sampleIn?.state ?? 'idle'
-  const inLive = recorder === 'armed' || recorder === 'recording'
+  const inLive = sampler.state === 'armed' || sampler.state === 'recording'
   const runText = auditing !== null
     ? t('lvl.listening')
     : busyAll
@@ -645,10 +642,10 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   return (
     <div className="view lvl">
       <InputRail
-        inDbfs={inLive ? sampleIn?.input_dbfs ?? null : null}
+        inDbfs={inLive ? sampler.sample?.input_dbfs ?? null : null}
         outDb={meter ? loudest(meter) : null}
-        armed={recorder === 'armed'}
-        thresholdDbfs={sampleIn?.threshold_dbfs ?? -40}
+        armed={sampler.state === 'armed'}
+        thresholdDbfs={sampler.sample?.threshold_dbfs ?? -40}
         live={live}
       />
 
@@ -668,13 +665,12 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           <Button size="sm" variant="ghost" onClick={() => setKeysOpen(true)}>{t('keys.all')} <kbd>?</kbd></Button>
         </div>
 
-        <Measured
-          live={live}
-          presetName={preset?.name ?? slot?.name ?? null}
+        <RiffTransport
+          sampler={sampler}
           playing={playing}
           onPlay={() => void togglePlay()}
-          foot={foot}
-          onSample={(smp, ready) => { setSampleIn(smp); setRiffReady(ready) }}
+          presetName={preset?.name ?? slot?.name ?? null}
+          running={busyAll || auditing !== null}
         />
 
         <BenchTable
@@ -779,7 +775,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
                 }
               }}
               tools={{
-                target, step: autoStep, ready: riffReady,
+                target, step: autoStep, ready: sampler.ready,
                 onTrimmed: () => {
                   // The run moved the fader on the device; re-read so the bench agrees.
                   setAutoStep(null)

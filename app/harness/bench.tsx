@@ -1,12 +1,13 @@
 /*
  * The whole Leveling view, against a fake bench.
  *
- *   bench.html?s=fresh|measured|applied|error|empty|drawer&h=620|788|1000
+ *   bench.html?s=fresh|measured|applied|error|empty|closed&h=620|788|1000
  *
  * The stub (bench-stub.ts, imported FIRST) answers every call the view makes
  * and streams a meter, so the rail, the rows and the dock move. `measured`
  * presses M for you and the stub emits a measurement per preset; `applied`
- * then presses ⌘↵; `error` fails one preset; `drawer` opens the focused row.
+ * then presses ⌘↵; `error` fails one preset; `closed` presses ↵ to shut the
+ * focused row's drawer (it opens by default).
  * Nothing here is typechecked by `npm run typecheck` — build it
  * (`npx vite build -c harness/vite.config.ts`) and look.
  */
@@ -51,6 +52,6 @@ setTimeout(() => {
       await wait(500 * (prefs.bench.length + 1) + 400)
       if (scenario === 'applied') { key('Enter', true); await wait(3000) }
     }
-    if (scenario === 'drawer') key('Enter')
+    if (scenario === 'closed') key('Enter')
   })()
 }, 900)

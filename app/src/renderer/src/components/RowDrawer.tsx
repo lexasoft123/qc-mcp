@@ -113,7 +113,7 @@ export function RowDrawer({
           const on = preset?.scene === si
           return (
             <button key={s} type="button"
-                    className={`drw-chip${on ? ' on' : ''}${label ? '' : ' empty'}`}
+                    className={`drw-chip${on ? ' on' : ''}${label ? '' : ' blank'}`}
                     disabled={busy} title={label || t('lvl.scene', { s })}
                     onClick={() => onScene(si)}>
               <b>{s}</b>{label ? ` ${label}` : ' ·'}

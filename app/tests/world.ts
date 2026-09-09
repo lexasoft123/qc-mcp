@@ -19,7 +19,7 @@ export type World = Facts & {
   breaks?: keyof SessionOps
 }
 
-export const MODES: Mode[] = ['auto', 'bridge', 'direct']
+export const MODES: Mode[] = ['bridge', 'direct']
 export const GOALS: Goal[] = ['connect', 'disconnect', 'show-app', 'take-over']
 
 /**

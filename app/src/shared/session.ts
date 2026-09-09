@@ -95,10 +95,11 @@ export type Goal = 'connect' | 'disconnect' | 'show-app' | 'take-over'
  * chose direct — is what made the mode unpredictable.
  */
 export function resolveSession(mode: Mode, f: Facts): SessionMode {
-  const shared = f.platform === 'win' ? 'shared' : 'bridge'
+  // Windows shares a second non-exclusive handle where macOS rides the app's
+  // session through the interposer; both are "bridge" as far as the user's
+  // choice goes.
   if (mode === 'direct') return 'direct'
-  if (mode === 'bridge') return shared
-  return f.bridgeReady || f.cortexRunning ? shared : 'direct'
+  return f.platform === 'win' ? 'shared' : 'bridge'
 }
 
 /** The steps that reach `session` from here, before any teardown. */
@@ -258,4 +259,60 @@ export function planWords(goal: Goal, mode: Mode, f: Facts, p: Plan): string {
         : t('plan.sharesOpen')
 
   return `${swap ? t('plan.swap') : t('plan.patchbay')}${body}`
+}
+
+/**
+ * Everything the poll needs to know before it connects on the user's behalf.
+ *
+ * `stayDisconnected` is the one that was missing. Autoconnect is evaluated on
+ * every tick, so with no memory of an explicit Disconnect the button did
+ * nothing you could see: it stopped the daemon, the next poll found a stopped
+ * daemon beside a present device, and started it again. Three presses, three
+ * reconnects, and a crash each time on the way through.
+ *
+ * A session lost because the device went away must NOT set it — unplugging and
+ * re-plugging should still come back on its own.
+ */
+/**
+ * How many bridge sessions may die young before Patchbay stops reopening one.
+ *
+ * Cortex Control segfaults under the interposer often enough that a bare
+ * "reconnect when the session is gone" rule turns one crash into a loop: the
+ * app dies, the poll sees the bridge lost, the daemon is stopped, autoconnect
+ * launches the app again, and it dies again. Measured on a real run: four
+ * launches and four crashes in about two minutes, none of them asked for.
+ */
+export const BRIDGE_RETRY_LIMIT = 3
+
+/** A bridge session shorter than this did not fail, it never started. */
+export const BRIDGE_YOUNG_MS = 60_000
+
+export function bridgeDiedYoung(startedAt: number | null, now: number): boolean {
+  if (startedAt === null) return true          // never got far enough to say
+  return now - startedAt < BRIDGE_YOUNG_MS
+}
+
+export interface AutoFacts {
+  autoconnect: boolean
+  stayDisconnected: boolean
+  /** Bridge sessions keep dying; stop reopening the app on our own. */
+  retriesExhausted: boolean
+  busy: boolean
+  devicePresent: boolean
+  daemonState: 'stopped' | 'starting' | 'running'
+  daemonError: boolean
+  daemonSupported: boolean
+  setupPending: boolean
+}
+
+export function shouldAutoconnect(f: AutoFacts): boolean {
+  if (!f.autoconnect) return false
+  if (f.stayDisconnected) return false
+  if (f.retriesExhausted) return false         // asking again is the user's call
+  if (f.busy) return false                     // a plan is already running
+  if (!f.devicePresent) return false
+  if (f.daemonState !== 'stopped') return false
+  if (f.daemonError || !f.daemonSupported) return false
+  if (f.setupPending) return false             // Patchbay can still fix something
+  return true
 }

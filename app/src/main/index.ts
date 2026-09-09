@@ -2,7 +2,9 @@ import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron'
 import { join } from 'node:path'
 import type { CheckId, Mode, Prefs, Progress, Snapshot } from '../shared/types.js'
 import type { Goal } from '../shared/session.js'
-import { modeSwitch } from '../shared/session.js'
+import {
+  BRIDGE_RETRY_LIMIT, bridgeDiedYoung, modeSwitch, shouldAutoconnect
+} from '../shared/session.js'
 import * as clients from './clients.js'
 import * as cortex from './cortex.js'
 import * as install from './install.js'
@@ -34,10 +36,21 @@ function emit(channel: string, payload: unknown): void {
   win?.webContents.send(channel, payload)
 }
 
+/**
+ * How much bigger than the CSS the interface is drawn.
+ *
+ * Every size in styles.css is a hard px — 120 of them, one `rem` in the whole
+ * sheet — so raising `body { font-size }` scales nothing but the few things
+ * that inherit it. The zoom factor is the honest lever: it scales type,
+ * spacing and icons together, exactly as if the sheet had been authored in
+ * rem. The window grows with it so the same amount of content still fits.
+ */
+const UI_SCALE = 1.1
+
 function create(): void {
   win = new BrowserWindow({
-    width: 980,
-    height: 716,
+    width: Math.round(980 * UI_SCALE),
+    height: Math.round(716 * UI_SCALE),
     minWidth: 720,
     minHeight: 520,
     show: false,
@@ -63,6 +76,9 @@ function create(): void {
     }
   })
 
+  // After the load, not before: a zoom set on an empty webContents is reset
+  // when the document arrives.
+  win.webContents.on('did-finish-load', () => win?.webContents.setZoomFactor(UI_SCALE))
   win.on('ready-to-show', () => win?.show())
   // `emit` guards on null, which only helps if something nulls it. On macOS
   // `window-all-closed` deliberately does not quit, so without this `win` keeps
@@ -157,6 +173,13 @@ function handlers(): void {
   // daemon, launch the app, write a preference — and pressing them in an order
   // nobody had thought about left the app describing a session it did not have.
   const pursue = async (goal: Goal, mode?: Mode): Promise<Snapshot> => {
+    if (goal === 'disconnect') stayDisconnected = true
+    if (goal === 'connect' || goal === 'take-over') {
+      stayDisconnected = false
+      bridgeFailures = 0                       // asked for by hand: try again
+      saidGaveUp = false
+      state.setBridgeGaveUp(false)
+    }
     const out = await session.pursue(goal, mode, (label) =>
       emit('progress', { label, done: 0, total: 0 }))
     emit('progress', {
@@ -216,6 +239,9 @@ function handlers(): void {
     const snap = state.current() ?? (await state.refresh())
     if (snap.daemon.state === 'running' && snap.daemon.session === 'bridge') {
       leveling?.stop()
+      // Quitting the app is the user asking for the session to end, so hold it
+      // ended — otherwise autoconnect relaunches the very app they just quit.
+      stayDisconnected = true
       await session.pursue('disconnect', undefined, () => {})
     }
     await cortex.quit(state.getPaths().repo)
@@ -306,6 +332,30 @@ function handlers(): void {
 /** Consecutive polls that have not seen the Quad Cortex. */
 let missing = 0
 
+/**
+ * The user asked to be disconnected, and means it.
+ *
+ * Autoconnect is evaluated on every poll, so without this Disconnect was a
+ * button that did nothing: it stopped the daemon, the next tick saw a stopped
+ * daemon and a present device, and connected straight back. Set by an explicit
+ * disconnect, cleared by an explicit connect — a session dropped because the
+ * device went away does NOT set it, so re-plugging still reconnects.
+ */
+let stayDisconnected = false
+
+/**
+ * Consecutive bridge sessions that died almost as soon as they opened.
+ *
+ * Cortex Control segfaults under the interposer, and a poll that simply
+ * reopens whatever is missing turns one crash into a loop — four launches and
+ * four crashes in two minutes, none of them asked for. Past the limit
+ * Patchbay stops reopening the app and says so; Connect resets the budget,
+ * because asking again is the user's call and not the poll's.
+ */
+let bridgeFailures = 0
+/** So the give-up sentence is said once, not on every poll. */
+let saidGaveUp = false
+
 async function tick(): Promise<void> {
   const snap = await state.push()
 
@@ -322,9 +372,20 @@ async function tick(): Promise<void> {
     // takes the session with it — every call then fails with "inject FIFO
     // unavailable" against a daemon that still looks healthy.
     const bridgeLost = snap.daemon.session === 'bridge' && !snap.cortex.running
+    // A bridge session that has been up a while is a working one: whatever
+    // happens to it later is not a reason to stop trusting the mode.
+    if (!bridgeLost && !bridgeDiedYoung(snap.daemon.startedAt, Date.now())) {
+      bridgeFailures = 0
+      saidGaveUp = false
+    }
     missing = snap.device.present && !bridgeLost ? 0 : missing + 1
     if (missing >= 2) {
       missing = 0
+      // Count only a bridge that died young — an unplugged device is not
+      // Cortex Control's fault and must not spend the retry budget.
+      if (bridgeLost && bridgeDiedYoung(snap.daemon.startedAt, Date.now())) {
+        bridgeFailures += 1
+      }
       leveling?.stop()
       await state.getDaemon().stop()
       await state.push()
@@ -334,11 +395,25 @@ async function tick(): Promise<void> {
     missing = 0
   }
 
-  if (!snap.prefs.autoconnect) return
-  if (session.busy()) return                 // a plan is already running
-  if (!snap.device.present || snap.daemon.state !== 'stopped') return
-  if (snap.daemon.error || !snap.daemon.supported) return
-  if (snap.checks.some((c) => c.fixable && c.status !== 'ok')) return
+  const exhausted = bridgeFailures >= BRIDGE_RETRY_LIMIT
+  state.setBridgeGaveUp(exhausted)
+  if (exhausted && !saidGaveUp) {
+    saidGaveUp = true
+    const why = t('bridge.givenUp', { n: String(bridgeFailures) })
+    emit('progress', { label: why, done: 1, total: 1, finished: true, error: why })
+    await state.push()                         // so the strip appears at once
+  }
+  if (!shouldAutoconnect({
+    autoconnect: snap.prefs.autoconnect,
+    stayDisconnected,
+    retriesExhausted: exhausted,
+    busy: session.busy(),
+    devicePresent: snap.device.present,
+    daemonState: snap.daemon.state,
+    daemonError: Boolean(snap.daemon.error),
+    daemonSupported: snap.daemon.supported,
+    setupPending: snap.checks.some((c) => c.fixable && c.status !== 'ok')
+  })) return
   // Through the plan, like every other route in. Starting the daemon directly
   // here meant autoconnect in Bridge mode fired at a closed Cortex Control and
   // failed on the daemon's own BridgeError — a connection the plan would have

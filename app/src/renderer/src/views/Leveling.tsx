@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Badge, Button, StatusDot } from '@singz/ui'
+import { Button } from '@singz/ui'
 import type {
-  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, SceneRow,
+  AutoStep, BenchSlot, LevelEvent, MeterOutput, PresetState, ReportRow, SampleState, SceneRow,
   Snapshot
 } from '@shared/types'
 import { cleanError } from '../derive.js'
@@ -10,15 +10,15 @@ import {
   slotId, unsavedIds
 } from '../bench.js'
 import type { Written, WrittenMap } from '../bench.js'
-import { SHORTCUTS, matches, shortcut, typing } from '../keys.js'
+import { MOD, matches, shortcut, typing } from '../keys.js'
 import { act, say } from '../store.js'
-import { T, t } from '../i18n.js'
-import { Knob } from '../components/Knob.js'
-import { Meter, loudest } from '../components/Meter.js'
+import { t } from '../i18n.js'
+import { loudest } from '../components/Meter.js'
 import { PresetPicker } from '../modals/PresetPicker.js'
 import { Measured } from '../components/Measured.js'
-import { LevelReport } from '../components/LevelReport.js'
-import { Scenes } from '../components/Scenes.js'
+import { BenchTable } from '../components/BenchTable.js'
+import { RowDrawer } from '../components/RowDrawer.js'
+import { InputRail } from '../components/InputRail.js'
 import { Dock } from '../components/Dock.js'
 import { LevelingHelp } from '../modals/LevelingHelp.js'
 import { Shortcuts } from '../modals/Shortcuts.js'
@@ -27,9 +27,7 @@ import { Shortcuts } from '../modals/Shortcuts.js'
 const cleanish = (m: string): string => cleanError(m) ?? m
 
 const SCENES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
-/** The QC grid is four rows, so every column reserves four lane slots and the
- *  cards stay the same size whatever is loaded in them. */
-const LANE_SLOTS = 4
+const TARGETS = [-14, -16, -18, -20, -23]
 /** The lane output range, calibrated against Cortex Control. */
 const MIN_DB = -40
 const MAX_DB = 12
@@ -40,8 +38,6 @@ const WRITE_MS = 80
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 
 interface Run { kind: 'measure' | 'apply' | 'save' | 'audition'; at?: string }
-const show = (db: number): string => `${db > 0 ? '+' : ''}${db.toFixed(1)}`
-
 /**
  * The lanes that carry the preset out of the box.
  *
@@ -95,9 +91,16 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const dirty = isDirty(written, focusId)
   const [picking, setPicking] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  /** Loudest dB seen per slot this session. Deliberately not persisted: it
-   *  describes a performance, not the preset. */
-  const [peaks, setPeaks] = useState<Record<string, number>>({})
+  /** Where each slot's fader was when it was last loaded, so a row keeps its
+   *  "now" after the focus moves on. Not persisted: a session's memory. */
+  const [lastLevel, setLastLevel] = useState<Record<string, number>>({})
+  const [drawerOpen, setDrawerOpen] = useState(true)
+  /** A recall in flight, and towards which slot — its row shows a skeleton. */
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  /** The recorder, as Measured reports it: the rail follows the DI while it is
+   *  armed or rolling, and the drawer's tools need a take to exist. */
+  const [sampleIn, setSampleIn] = useState<SampleState | null>(null)
+  const [riffReady, setRiffReady] = useState(false)
   /** The newest pass of a measured run, so the strip can be watched rather than
    *  sat in front of: every pass replays the whole riff. */
   const [autoStep, setAutoStep] = useState<AutoStep | null>(null)
@@ -146,7 +149,6 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
 
   const live = snap.daemon.state === 'running'
   const slot: BenchSlot | undefined = bench[focus]
-  const lanes = outs(preset)
   const level = levelOf(preset)
 
   const saveBench = useCallback(
@@ -215,14 +217,11 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live])
 
-  /** Peak-hold per slot, so columns you are not on still say how loud they were. */
+  /** Remember the focused preset's level, so its row still says so later. */
   useEffect(() => {
-    if (!meter || !slot) return
-    const now = loudest(meter)
-    if (now === null) return
-    const id = slotId(slot)
-    setPeaks((p) => (p[id] !== undefined && now <= p[id] ? p : { ...p, [id]: now }))
-  }, [meter, slot])
+    if (focusId === null || !preset) return
+    setLastLevel((m) => (m[focusId] === level ? m : { ...m, [focusId]: level }))
+  }, [focusId, preset, level])
 
   // ── actions ───────────────────────────────────────────────────────────
 
@@ -243,6 +242,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const goto = (index: number): void => {
     const target = bench[index]
     if (!target || index === focus || busy) return
+    setPendingId(slotId(target))
     void guard('load', async () => {
       const p = await window.patchbay.leveling.open(
         target.folderKey, target.position, false, target.cloudId
@@ -264,7 +264,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       } else {
         setPreset(p)
       }
-    })
+    }).finally(() => setPendingId(null))
   }
 
   const pickScene = (index: number): void => {
@@ -582,6 +582,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       if (matches(e, key('keys.saveAll'))) { e.preventDefault(); saveAll(); return }
       if (matches(e, key('keys.saveOne'))) { e.preventDefault(); save(); return }
       if (matches(e, key('keys.addPreset'))) { e.preventDefault(); setPicking(true); return }
+      if (matches(e, key('keys.openRow'))) { e.preventDefault(); if (focus >= 0) setDrawerOpen((v) => !v); return }
       if (e.metaKey || e.ctrlKey || e.altKey) return
 
       if (e.key === 'ArrowLeft') { e.preventDefault(); goto(focus <= 0 ? bench.length - 1 : focus - 1) }
@@ -605,6 +606,12 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   })
 
   // ── render ────────────────────────────────────────────────────────────
+  //
+  // Four bands down the right of a full-height input rail: a thin top bar, the
+  // recorder, one row per preset with a drawer under the focused one, and the
+  // outputs dock. Only the rows scroll. Every band whose content varies keeps
+  // its size — that is what the rail, the dock's run cell and the drawer's
+  // fixed height are for.
 
   if (!live) {
     return (
@@ -617,271 +624,175 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     )
   }
 
+  const recorder = sampleIn?.state ?? 'idle'
+  const inLive = recorder === 'armed' || recorder === 'recording'
+  const runText = auditing !== null
+    ? t('lvl.listening')
+    : busyAll
+      ? runAt
+        ? t('lvl.measuringOf', {
+            n: String(runAt.n), total: String(runAt.total),
+            name: measuring ? ` · ${measuring}` : ''
+          })
+        : t('lvl.working')
+      : null
+  const rowErrors = bench.map((b) => rows[slotId(b)]?.error).filter((x): x is string => Boolean(x))
+  const footline = error ?? (rowErrors.length ? rowErrors[rowErrors.length - 1] : null)
+  const nowDb: Record<string, number> = focusId !== null && preset
+    ? { ...lastLevel, [focusId]: level }
+    : lastLevel
+
   return (
     <div className="view lvl">
-      <div className="lvl-bar">
-        <div>
-          <h2>{t('lvl.title')}</h2>
-          <div className="fine"><T k="lvl.intro" /></div>
-        </div>
-        <span className="grow" />
-        <label className="lvl-auto" title={t('lvl.autosaveTitle')}>
-          <input
-            type="checkbox"
-            checked={autoSave}
-            onChange={(e) => void act(() => window.patchbay.setPrefs({ benchAutoSave: e.target.checked }))}
-          />
-          {t('lvl.autosave')}
-        </label>
-        <Button size="sm" onClick={() => setHelping(true)}>{t('lvl.howThisWorks')}</Button>
-        {/* A run you can watch and stop. Five presets used to be seventy-five
-            seconds of nothing you could do, with a name as the only sign of
-            life. */}
-        {(busyAll || auditing !== null) && (
-          <span className="lvl-run">
-            <span className="lvl-run-dot" />
-            {auditing !== null
-              ? t('lvl.listening')
-              : runAt
-                ? t('lvl.measuringOf', {
-                    n: String(runAt.n), total: String(runAt.total),
-                    name: measuring ? ` · ${measuring}` : ''
-                  })
-                : t('lvl.working')}
-            <button type="button" onClick={stopRun}>{t('lvl.stop')}</button>
-          </span>
-        )}
-        <Button size="sm" disabled={bench.length === 0 || busyAll}
-                onClick={audition} title={t('lvl.listenHint')}>
-          {auditing !== null ? t('lvl.stop') : t('lvl.listenToSet')}
-        </Button>
-        <Button size="sm" onClick={() => setPicking(true)}>{t('lvl.addPreset')}</Button>
-      </div>
-
-      <Measured
+      <InputRail
+        inDbfs={inLive ? sampleIn?.input_dbfs ?? null : null}
+        outDb={meter ? loudest(meter) : null}
+        armed={recorder === 'armed'}
+        thresholdDbfs={sampleIn?.threshold_dbfs ?? -40}
         live={live}
-        presetName={preset?.name ?? slot?.name ?? null}
-        target={target}
-        onTarget={setTarget}
-        step={autoStep}
-        playing={playing}
-        onPlay={() => void togglePlay()}
-        foot={foot}
-        onTrimmed={() => {
-          // The run moved the fader on the device; re-read so the bench agrees.
-          setAutoStep(null)
-          void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
-          mark(true, 'auto')
-        }}
       />
 
-      <LevelReport
-        slots={bench}
-        rows={rows}
-        target={target}
-        metric="lufs"
-        busy={busyAll}
-        progress={measuring}
-        written={written}
-        proposals={proposals}
-        selected={chosen ?? bench.map(slotId)}
-        onPropose={(id, db) => setProposals((p) => ({ ...p, [id]: db }))}
-        onNudge={(id, by) => setProposals((p) => {
-          // Functional, and against whatever is in there now: two clicks in one
-          // tick have to be two steps.
-          const base = p[id] ?? rows[id]?.correction_db ?? 0
-          return { ...p, [id]: Math.round((base + by) * 10) / 10 }
-        })}
-        onResetProposal={(id) => setProposals((p) => {
-          const { [id]: _gone, ...rest } = p
-          return rest
-        })}
-        onToggle={(id) => {
-          const now = chosen ?? bench.map(slotId)
-          setChosen(now.includes(id) ? now.filter((p) => p !== id) : [...now, id])
-        }}
-        onUndoOne={(id) => {
-          const b = bench.find((x) => slotId(x) === id)
-          const db = written[id]?.db
-          if (!b || db === null || db === undefined) return
-          void (async () => {
-            try {
-              await window.patchbay.leveling.applyTrim({
-                folderKey: b.folderKey, position: b.position,
-                isFactory: false, cloudId: b.cloudId, row: rows[id]?.row, db: -db
-              })
-              putWritten((w) => forget(w, id))
-            } catch (e) { rowFail(b, cleanish((e as Error).message)) }
-          })()
-        }}
-        onMeasure={measureAll}
-        onApply={applyAll}
-        onSave={saveAll}
-        onRevert={undoAll}
-      />
-
-      {/* Two tables that look alike and answer different questions. */}
-      <p className="lvl-divider fine">{t('lvl.divider')}</p>
-
-      <Scenes
-        rows={scenes}
-        busy={sceneBusy}
-        progress={sceneAt}
-        selected={sceneSel}
-        presetName={preset?.name ?? slot?.name ?? null}
-        onToggle={(sc) =>
-          setSceneSel((v) => (v.includes(sc) ? v.filter((x) => x !== sc) : [...v, sc]))}
-        onMeasure={() => {
-          setSceneBusy(true); setScenes({}); setError(null)
-          void window.patchbay.leveling
-            .measureScenes({ target, scenes: sceneSel })
-            .catch((e: Error) => setError(e.message))
-            .finally(() => { setSceneBusy(false); setSceneAt(null) })
-        }}
-        onApply={() => {
-          setSceneBusy(true)
-          void window.patchbay.leveling
-            .levelScenes({ target, scenes: sceneSel })
-            .then(() => window.patchbay.leveling.state().then(setPreset))
-            .catch((e: Error) => setError(e.message))
-            .finally(() => { setSceneBusy(false); mark(true, 'scenes') })
-        }}
-      />
-
-      {error && (
-        <div className="strip bad lvl-err">
-          <span className="grow">{error}</span>
-          <Button size="sm" onClick={() => setError(null)}>{t('lvl.dismiss')}</Button>
+      <div className="lvl-main">
+        <div className="lvl-top">
+          <h2>{t('lvl.title')}</h2>
+          <label className="lvl-target">
+            <span className="eyebrow"><abbr title={t('msd.targetHint')}>{t('msd.target')}</abbr></span>
+            <select value={target} onChange={(e) => setTarget(Number(e.target.value))} disabled={busyAll}
+                    aria-label={t('msd.target')}>
+              {TARGETS.map((v) => <option key={v} value={v}>{v} LUFS</option>)}
+            </select>
+          </label>
+          <span className="grow" />
+          <Button size="sm" onClick={() => setPicking(true)}>{t('lvl.addPreset')} <kbd>{MOD}N</kbd></Button>
+          <Button size="sm" variant="ghost" onClick={() => setHelping(true)}>{t('lvl.howThisWorks')}</Button>
+          <Button size="sm" variant="ghost" onClick={() => setKeysOpen(true)}>{t('keys.all')} <kbd>?</kbd></Button>
         </div>
-      )}
 
-      {bench.length === 0 ? (
-        <div className="empty">
-          <h2>{t('lvl.emptyTitle')}</h2>
-          <p className="fine">{t('lvl.emptyBody')}</p>
-          <Button onClick={() => setPicking(true)}>{t('lvl.addPreset')}</Button>
-        </div>
-      ) : (
-        <div className="lvl-strip">
-          {bench.map((b, i) => {
-            const on = i === focus
-            const p = on ? preset : null
-            const db = on ? level : null
-            return (
-              <article
-                key={slotId(b)}
-                className={on ? 'lvl-col on' : 'lvl-col'}
-                onClick={() => goto(i)}
-              >
-                <header>
-                  <StatusDot tone={on ? 'ok' : 'idle'} />
-                  <span className="lvl-name" title={b.name}>{b.name}</span>
-                  <button className="lvl-x" onClick={(e) => { e.stopPropagation(); drop(i) }}
-                    aria-label={t('lvl.remove', { name: b.name })}>×</button>
-                </header>
+        <Measured
+          live={live}
+          presetName={preset?.name ?? slot?.name ?? null}
+          playing={playing}
+          onPlay={() => void togglePlay()}
+          foot={foot}
+          onSample={(smp, ready) => { setSampleIn(smp); setRiffReady(ready) }}
+        />
 
-                <div className="lvl-db">
-                  <span>{db === null ? <span className="off">—</span> : `${show(db)} dB`}</span>
-                  {on && dirty && <Badge className="attn">{t('lvl.unsaved')}</Badge>}
-                </div>
-
-                {/* meter beside the knob: stacked, a 150px meter plus a knob
-                    pushes the scenes off the bottom of an 716pt window */}
-                <div className="lvl-body">
-                  <Meter
-                    outputs={on ? meter : null}
-                    peak={peaks[slotId(b)] ?? null}
-                    live={on}
-                  />
-                  <Knob
-                    db={db ?? 0}
-                    min={MIN_DB}
-                    max={MAX_DB}
-                    size={76}
-                    disabled={!on || !lanes.length || busy !== null}
-                    onChange={(v) => applyLevel(v, false)}
-                    onCommit={commit}
-                    label={t('lvl.level', { name: b.name })}
-                  />
-                </div>
-
-                <div className="lvl-lanes">
-                  {!p && <div className="lvl-lanes-hint">{t('lvl.clickToLoad')}</div>}
-                  {p && Array.from({ length: LANE_SLOTS }, (_, k) => {
-                    const l = p?.lanes[k]
-                    if (!l) return <div key={k} className="lvl-lane empty" aria-hidden />
-                    return (
-                      <div key={l.row} className={l.active ? 'lvl-lane' : 'lvl-lane off'}>
-                        <span className="lvl-out">{l.out}</span>
-                        <span className="mono">{l.active ? `${show(l.db)} dB` : t('lvl.silent')}</span>
-                        {l.active && (
-                          <span className="lvl-trim">
-                            <button onClick={(e) => { e.stopPropagation(); trim(l.row, -0.5) }}
-                              aria-label={t('lvl.down', { out: l.out })}>−</button>
-                            <button onClick={(e) => { e.stopPropagation(); trim(l.row, +0.5) }}
-                              aria-label={t('lvl.up', { out: l.out })}>+</button>
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-
-                <div className="lvl-scenes">
-                  {SCENES.map((s, si) => {
-                    const label = p?.sceneLabels?.[si] || ''
-                    const used = Boolean(label)
-                    return (
-                      <button
-                        key={s}
-                        className={
-                          (on && p?.scene === si ? 'lvl-scene on' : 'lvl-scene') +
-                          (on && !used ? ' empty' : '')
-                        }
-                        disabled={!on}
-                        title={label || t('lvl.scene', { s })}
-                        onClick={(e) => { e.stopPropagation(); pickScene(si) }}
-                      >
-                        <b>{s}</b>
-                        <em>{on ? (label || '—') : (b.scene === si ? '·' : '')}</em>
-                      </button>
-                    )
-                  })}
-                </div>
-
-                <Button
-                  size="sm"
-                  onClick={(e) => { e.stopPropagation(); save() }}
-                  disabled={!on || !dirty || busy !== null}
-                >
-                  {busy === 'save' && on ? t('lvl.saving') : t('lvl.save')}
-                </Button>
-              </article>
-            )
+        <BenchTable
+          slots={bench}
+          rows={rows}
+          metric="lufs"
+          busy={busyAll}
+          progress={measuring}
+          listening={auditing !== null}
+          written={written}
+          proposals={proposals}
+          selected={chosen ?? bench.map(slotId)}
+          focusId={focusId}
+          pendingId={pendingId}
+          drawerOpen={drawerOpen}
+          nowDb={nowDb}
+          meter={meter}
+          autoSave={autoSave}
+          footline={footline}
+          onDismissFootline={() => {
+            setError(null)
+            // a row's error is dismissed off the row too, or it comes straight back
+            setRows((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, { ...v, error: null }])))
+          }}
+          canSaveRow={(id) => id === focusId && dirty && busy === null}
+          onAutoSave={(on) => void act(() => window.patchbay.setPrefs({ benchAutoSave: on }))}
+          onToggle={(id) => {
+            const now = chosen ?? bench.map(slotId)
+            setChosen(now.includes(id) ? now.filter((p) => p !== id) : [...now, id])
+          }}
+          onPropose={(id, db) => setProposals((p) => ({ ...p, [id]: db }))}
+          onNudge={(id, by) => setProposals((p) => {
+            // Functional, and against whatever is in there now: two clicks in one
+            // tick have to be two steps.
+            const base = p[id] ?? rows[id]?.correction_db ?? 0
+            return { ...p, [id]: Math.round((base + by) * 10) / 10 }
           })}
+          onResetProposal={(id) => setProposals((p) => {
+            const { [id]: _gone, ...rest } = p
+            return rest
+          })}
+          onUndoOne={(id) => {
+            const b = bench.find((x) => slotId(x) === id)
+            const db = written[id]?.db
+            if (!b || db === null || db === undefined) return
+            void (async () => {
+              try {
+                await window.patchbay.leveling.applyTrim({
+                  folderKey: b.folderKey, position: b.position,
+                  isFactory: false, cloudId: b.cloudId, row: rows[id]?.row, db: -db
+                })
+                putWritten((w) => forget(w, id))
+              } catch (e) { rowFail(b, cleanish((e as Error).message)) }
+            })()
+          }}
+          onSaveRow={(id) => { if (id === focusId) save() }}
+          onFocus={(id) => goto(bench.findIndex((b) => slotId(b) === id))}
+          onOpen={(id) => {
+            // Never a recall the focus did not already pay for: the focused
+            // row just toggles; another row's chevron IS the click that loads it.
+            if (id === focusId) setDrawerOpen((v) => !v)
+            else { setDrawerOpen(true); goto(bench.findIndex((b) => slotId(b) === id)) }
+          }}
+          onMeasure={measureAll}
+          onListen={audition}
+          onApply={applyAll}
+          onSave={saveAll}
+          onRevert={undoAll}
+          onAdd={() => setPicking(true)}
+          drawer={slot ? (
+            <RowDrawer
+              slot={slot}
+              preset={preset}
+              level={level}
+              dirty={dirty}
+              busy={busy !== null}
+              saving={busy === 'save'}
+              onLevel={applyLevel}
+              onCommit={commit}
+              onTrim={trim}
+              onScene={pickScene}
+              onSave={save}
+              onRemove={() => drop(focus)}
+              scenes={{
+                rows: scenes, busy: sceneBusy, progress: sceneAt, selected: sceneSel,
+                onToggle: (sc) =>
+                  setSceneSel((v) => (v.includes(sc) ? v.filter((x) => x !== sc) : [...v, sc])),
+                onMeasure: () => {
+                  setSceneBusy(true); setScenes({}); setError(null)
+                  void window.patchbay.leveling
+                    .measureScenes({ target, scenes: sceneSel })
+                    .catch((e: Error) => setError(e.message))
+                    .finally(() => { setSceneBusy(false); setSceneAt(null) })
+                },
+                onApply: () => {
+                  setSceneBusy(true)
+                  void window.patchbay.leveling
+                    .levelScenes({ target, scenes: sceneSel })
+                    .then(() => window.patchbay.leveling.state().then(setPreset))
+                    .catch((e: Error) => setError(e.message))
+                    .finally(() => { setSceneBusy(false); mark(true, 'scenes') })
+                }
+              }}
+              tools={{
+                target, step: autoStep, ready: riffReady,
+                onTrimmed: () => {
+                  // The run moved the fader on the device; re-read so the bench agrees.
+                  setAutoStep(null)
+                  void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
+                  mark(true, 'auto')
+                }
+              }}
+            />
+          ) : null}
+        />
 
-          <button className="lvl-add" onClick={() => setPicking(true)} aria-label={t('aria.addPreset')}>
-            <span>+</span>
-            {t('lvl.addPresetPlain')}
-          </button>
-        </div>
-      )}
-
-      <Dock outputs={meter} hpLimit={hpLimit} />
-
-      {/* Written from keys.ts, not by hand. The hand-written version listed
-          five bindings and left out `space`, which is the one you use most and
-          the only one that works with both hands on the guitar. */}
-      <div className="lvl-keys fine">
-        {SHORTCUTS.filter((k) => k.scope === 'leveling' && !k.local).slice(0, 7).map((k) => (
-          <span key={k.cap}>
-            {k.cap.split(' ').map((c) => <kbd key={c}>{c}</kbd>)}
-            {' '}{t(k.short)}
-          </span>
-        ))}
-        <button type="button" className="lvl-keys-all" onClick={() => setKeysOpen(true)}>
-          {t('keys.all')} <kbd>?</kbd>
-        </button>
+        <Dock outputs={meter} hpLimit={hpLimit}
+              run={runText ? { text: runText, onStop: stopRun } : null} />
       </div>
 
       {helping && <LevelingHelp onClose={() => setHelping(false)} />}

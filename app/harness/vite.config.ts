@@ -12,8 +12,8 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         modes: resolve(__dirname, 'modes.html'),
-        report: resolve(__dirname, 'report.html'),
-        keys: resolve(__dirname, 'keys.html')
+        keys: resolve(__dirname, 'keys.html'),
+        bench: resolve(__dirname, 'bench.html')
       }
     }
   }

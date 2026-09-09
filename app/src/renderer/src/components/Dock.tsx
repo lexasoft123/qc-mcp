@@ -27,12 +27,16 @@ const pct = (db: number): number =>
   Math.max(0, Math.min(1, (db - FLOOR) / (CEIL - FLOOR))) * 100
 
 export function Dock({
-  outputs, hpLimit
+  outputs, hpLimit, run
 }: {
   /** Whatever the device last streamed, or null when nothing is arriving. */
   outputs: Record<string, MeterOutput> | null
   /** The single shared headphone limiter flag. */
   hpLimit?: boolean
+  /** A run you can watch and stop — measuring, listening. Its cell is always
+   *  there; five presets used to be seventy-five seconds of nothing you could
+   *  do, with a name as the only sign of life. */
+  run?: { text: string; onStop: () => void } | null
 }): React.JSX.Element {
   const heard = Boolean(outputs && Object.keys(outputs).length)
   const limiting = PORTS.some(([k]) => !HP.has(k) && (outputs?.[k]?.limit ?? 0) >= 0.5)
@@ -55,6 +59,15 @@ export function Dock({
         )
       })}
       <span className="grow" />
+      <span className="dock-run">
+        {run && (
+          <span className="lvl-run">
+            <span className="lvl-run-dot" />
+            <span className="lvl-run-text" title={run.text}>{run.text}</span>
+            <button type="button" onClick={run.onStop}>{t('lvl.stop')}</button>
+          </span>
+        )}
+      </span>
       {/* "No reading" is a resting state: the QC sends frames only while audio is
           actually moving, so silence here is not a fault. */}
       <span className={`dock-state${limiting ? ' bad' : heard ? ' ok' : ''}`}>

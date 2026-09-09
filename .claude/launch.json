@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "harness",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd app && npx vite preview -c harness/vite.config.ts --port 4173 --strictPort"],
+      "port": 4173
+    }
+  ]
+}

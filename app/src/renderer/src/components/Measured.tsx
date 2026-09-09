@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
 import { Badge, Button } from '@singz/ui'
-import type {
-  AudioState, AutoResult, AutoStep, Measurement, RiffList, SampleState
-} from '@shared/types'
+import type { AudioState, RiffList, SampleState } from '@shared/types'
 import { T, t } from '../i18n.js'
 import { InputMeter, Pedal, Wave } from './Pedal.js'
 
@@ -19,14 +17,13 @@ import { InputMeter, Pedal, Wave } from './Pedal.js'
  * be used for every preset or the comparison is worthless.
  */
 
-const TARGETS = [-14, -16, -18, -20, -23]
 const POLL_MS = 150
 
 const db = (v: number | null | undefined): string =>
   v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 
 export function Measured({
-  live, presetName, target, onTarget, step, onTrimmed, playing, onPlay, foot
+  live, presetName, playing, onPlay, foot, onSample
 }: {
   /** The daemon is up. Without it there is nothing to talk to. */
   live: boolean
@@ -36,12 +33,9 @@ export function Measured({
    * enters on one and leaves by another, and naming a row here would get it wrong.
    */
   presetName: string | null
-  target: number
-  onTarget: (v: number) => void
-  /** The newest loop iteration, pushed from the service so a run can be watched. */
-  step: AutoStep | null
-  /** A run wrote a trim, so the bench should re-read the preset. */
-  onTrimmed: () => void
+  /** The recorder's state as it changes, and whether there is a take to
+   *  measure with — the input rail and the drawer's tools read both. */
+  onSample?: (s: SampleState | null, ready: boolean) => void
   /** The riff is sounding. Owned by the view: the service's `play` event is
    *  the only thing that clears it, and the view is what hears that event. */
   playing: boolean
@@ -52,9 +46,6 @@ export function Measured({
 }): React.JSX.Element | null {
   const [audio, setAudio] = useState<AudioState | null>(null)
   const [sample, setSample] = useState<SampleState | null>(null)
-  const [reading, setReading] = useState<Measurement | null>(null)
-  const [result, setResult] = useState<AutoResult | null>(null)
-  const [busy, setBusy] = useState<'measure' | 'auto' | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const poll = useRef<ReturnType<typeof setInterval> | null>(null)
   const quietSince = useRef<number | null>(null)
@@ -112,7 +103,7 @@ export function Measured({
   }, [keep])
 
   const arm = useCallback(async (): Promise<void> => {
-    setErr(null); setReading(null); setResult(null); quietSince.current = null
+    setErr(null); quietSince.current = null
     try {
       setSample(await window.patchbay.leveling.sampleArm())
       watch()
@@ -124,25 +115,6 @@ export function Measured({
     try { setSample(await window.patchbay.leveling.sampleDiscard()) }
     catch (e) { setErr((e as Error).message) }
   }, [])
-
-  const measure = async (): Promise<void> => {
-    setBusy('measure'); setErr(null); setResult(null)
-    try {
-      const m = await window.patchbay.leveling.measure()
-      setReading(m)
-      if (m.error) setErr(m.error)
-    } catch (e) { setErr((e as Error).message) } finally { setBusy(null) }
-  }
-
-  const run = async (dryRun: boolean): Promise<void> => {
-    setBusy('auto'); setErr(null); setReading(null)
-    try {
-      const r = await window.patchbay.leveling.autolevel({ target, dryRun })
-      setResult(r)
-      if (r.error) setErr(r.error)
-      if (r.written) onTrimmed()
-    } catch (e) { setErr((e as Error).message) } finally { setBusy(null) }
-  }
 
   const state = (sample?.state ?? 'idle') as 'idle' | 'armed' | 'recording' | 'done'
   const [riffs, setRiffs] = useState<RiffList | null>(null)
@@ -172,6 +144,10 @@ export function Measured({
   const recording = state === 'recording'
   const armed = state === 'armed'
   const busyRecording = recording || armed
+  const ready = Boolean(audio?.sample) && !busyRecording
+  useEffect(() => { onSample?.(sample, ready) },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sample, ready])
 
   /* The pedal is a footswitch, so the space bar is the foot. One key, whatever
      the recorder is doing. The keystroke itself is the view's (keys.ts declares
@@ -193,9 +169,6 @@ export function Measured({
     )
   }
 
-  const ready = Boolean(audio?.sample) && !busyRecording
-  const running = busy === 'auto'
-  const shown = step ?? result?.iterations.at(-1) ?? null
   const peaks = sample?.peaks ?? []
   const silenceLeft = recording && quietSince.current !== null
     ? (sample?.silence_seconds ?? 1.5) - (Date.now() - quietSince.current) / 1000
@@ -212,27 +185,6 @@ export function Measured({
           {busyRecording ? t('msd.hint.recording') : ready ? t('msd.hint.ready') : t('msd.hint.none')}
         </span>
         <span className="grow" />
-        {ready && (
-          <div className="lvl-measured-acts-head">
-            <label className="lvl-measured-target">
-              <abbr title={t('msd.targetHint')}>{t('msd.target')}</abbr>
-              <select value={target} onChange={(e) => onTarget(Number(e.target.value))}
-                      disabled={running}>
-                {TARGETS.map((t) => <option key={t} value={t}>{t} LUFS</option>)}
-              </select>
-            </label>
-            <Button size="sm" disabled={busy !== null} onClick={() => void measure()}>
-              {busy === 'measure' ? t('msd.measuring') : t('msd.measure')}
-            </Button>
-            <Button size="sm" disabled={busy !== null} onClick={() => void run(true)}>
-              {t('msd.suggest')}
-            </Button>
-            <Button size="sm" variant="primary" disabled={busy !== null}
-                    onClick={() => void run(false)}>
-              {running ? t('msd.levelling') : t('msd.levelTo')}
-            </Button>
-          </div>
-        )}
       </div>
 
       {!busyRecording && riffs && riffs.riffs.length > 0 && (
@@ -319,50 +271,6 @@ export function Measured({
                 </Button>
                 <Button size="sm" onClick={() => void arm()}>{t('msd.reRecord')}</Button>
                 <span className="grow" />
-                {(reading || shown || result) && (
-                  <span className="lvl-measured-out">
-                    {reading && !reading.error && (
-                      <>
-                        <b>{db(reading.lufs_integrated)}</b> LUFS
-                        <span className="sep">·</span>
-                        true peak {db(reading.true_peak_dbtp)} dBTP
-                        <span className="sep">·</span>
-                        needs {db(target - (reading.lufs_integrated ?? 0))} dB
-                      </>
-                    )}
-                    {!reading && shown && (
-                      <>
-                        pass {shown.n}<span className="sep">·</span>
-                        <b>{db(shown.measured)}</b> LUFS<span className="sep">·</span>
-                        off by {db(shown.delta_db)} dB
-                        {shown.wrote_db !== null && (
-                          <><span className="sep">·</span>trim {db(shown.wrote_db)} dB</>
-                        )}
-                        {shown.limited_by === 'true_peak' && (
-                          <><span className="sep">·</span>
-                            <span className="warn">
-                              held at {db(shown.backed_off_to_db)} dB — the true peak was
-                              against the ceiling
-                            </span></>
-                        )}
-                      </>
-                    )}
-                    {result && !running && (
-                      <>
-                        <span className="sep">·</span>
-                        {result.suggested_db !== undefined
-                          ? <span>suggestion only, nothing written</span>
-                          : result.converged
-                            ? <span className="ok">
-                                landed within {Math.abs(result.final_delta_db ?? 0).toFixed(1)} dB
-                              </span>
-                            : <span className="warn">
-                                did not settle — {db(result.final_delta_db)} dB out
-                              </span>}
-                      </>
-                    )}
-                  </span>
-                )}
               </div>
             </>
           ) : (

@@ -5,5 +5,6 @@
   cortexFocus: async () => null,
   snapshot: async () => null,
   onSnapshot: () => {},
-  onProgress: () => {}
+  onProgress: () => {},
+  update: { onState: () => () => undefined, state: async () => ({}), check: async () => undefined }
 }

@@ -315,6 +315,9 @@ function handlers(): void {
   ipcMain.handle('leveling:measureMany', (_e, presets, o) => bench().measureMany(presets, o ?? {}))
   ipcMain.handle('leveling:measureScenes', (_e, o) => bench().measureScenes(o ?? {}))
   ipcMain.handle('leveling:levelScenes', (_e, o) => bench().levelScenes(o ?? {}))
+  ipcMain.handle('leveling:inputLevel', (_e, port?: number) => bench().inputLevel(port))
+  ipcMain.handle('leveling:setInputLevel', (_e, db: number, port?: number) =>
+    bench().setInputLevel(db, port))
 
   ipcMain.handle('window:isMaximized', () => Boolean(win?.isMaximized()))
   ipcMain.on('window:minimize', () => win?.minimize())

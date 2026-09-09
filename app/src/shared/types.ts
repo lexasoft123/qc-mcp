@@ -243,6 +243,16 @@ export interface PresetFolder {
   presets: PresetRef[]
 }
 
+/** An input port's preamp trim, as the device holds it. */
+export interface InputLevel {
+  port: number
+  db: number
+  minDb: number
+  maxDb: number
+  /** A write asked for more than the range allows; `db` is where it stopped. */
+  clamped?: boolean
+}
+
 /** One output's live reading, straight from the device's IOMeter stream. */
 export interface MeterOutput {
   level: number
@@ -532,6 +542,11 @@ export interface Api {
     ): Promise<ReportResult>
     measureScenes(o?: { target?: number; scenes?: number[] }): Promise<{ rows: SceneRow[] }>
     levelScenes(o?: { target?: number; scenes?: number[] }): Promise<unknown>
+    /** The Quad Cortex's own IN 1/IN 2 LEVEL — a hardware preamp trim, GLOBAL,
+     *  in no preset. -12..+60 dB, calibrated against Cortex Control. */
+    inputLevel(port?: number): Promise<InputLevel>
+    /** Writes it (clamped to the range) and returns what landed. */
+    setInputLevel(db: number, port?: number): Promise<InputLevel>
   }
 
   window: {

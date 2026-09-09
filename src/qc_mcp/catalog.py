@@ -87,6 +87,48 @@ SYMBOLIC = {
     "MAX_MIXER_DB": 12.0,
 }
 
+# I/O port levels, which SYMBOLIC cannot reach: ModelRepo declares IOSettings
+# (31000) levels as a literal min=0 max=1, so `_prange` believes the display
+# range IS 0..1 and every conversion is a no-op. The real range has to be
+# measured against the app and kept here, keyed by (block, param index).
+#
+#   IN 1 LEVEL  -12 .. +60 dB, linear. Measured on a QC (CorOS 4.1.0) 2026-09-09
+#               against Cortex Control's I/O panel: the knob at minimum reads
+#               -12.00 dB, at maximum +60.00 dB, and the untouched setting
+#               0.166667 reads 0.00 dB — an interior point that lands exactly on
+#               the line (-12 + 72/6 = 0), which is what rules out a taper.
+#               Yes, it goes well above 0: it is a preamp trim, not a fader.
+#   IN 2 LEVEL  the same -12 .. +60. Confirmed the same day from a different
+#               resting value entirely: 0.513889 reads 25.00 dB, and
+#               -12 + 0.513889*72 = 25.000. Two ports, four points, one line.
+IO_LEVEL_DB = {
+    (31000, 0): (-12.0, 60.0),      # IN 1 LEVEL
+    (31000, 5): (-12.0, 60.0),      # IN 2 LEVEL
+}
+
+
+def io_level_range(param_index, block_hash=31000):
+    """The measured dB range of an I/O level param, or None if never measured."""
+    return IO_LEVEL_DB.get((block_hash, param_index))
+
+
+def io_level_to_db(param_index, norm, block_hash=31000):
+    """Normalized 0-1 -> dB for a measured I/O level param."""
+    r = io_level_range(param_index, block_hash)
+    if r is None:
+        return None
+    lo, hi = r
+    return lo + float(norm) * (hi - lo)
+
+
+def io_level_from_db(param_index, db, block_hash=31000):
+    """dB -> normalized 0-1, clamped to the range. None if never measured."""
+    r = io_level_range(param_index, block_hash)
+    if r is None:
+        return None
+    lo, hi = r
+    return max(0.0, min(1.0, (float(db) - lo) / (hi - lo)))
+
 
 def _bound(v):
     """A parameter bound as a float: a literal, a calibrated symbolic name, or None."""

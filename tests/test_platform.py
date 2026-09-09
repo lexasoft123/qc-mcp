@@ -522,6 +522,18 @@ def test_stale_records_need_no_cleanup_to_stop_lying():
         L.release(sock)
 
 
+def test_input_type_names_only_what_was_measured():
+    """0=Instrument, 1.0=Mic, measured on a full QC against Cortex Control.
+
+    It was a 3-position guess before (0.5=mic, 1.0=line), which reported a
+    condenser on input 2 as a LINE input. Anything unmeasured must say so
+    rather than be rounded into a confident wrong name -- and the Mini has no
+    input-type switch at all, so there is no third position to find there.
+    """
+    assert S._input_type_name(0.0) == "instrument"
+    assert S._input_type_name(1.0) == "mic"
+    for stray in (0.5, 0.25, 0.75):
+        assert S._input_type_name(stray).startswith("unknown"), stray
 def _closed_backends():
     """One never-opened, once-closed transport per backend THIS OS can import.
 

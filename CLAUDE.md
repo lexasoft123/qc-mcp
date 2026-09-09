@@ -249,10 +249,27 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   Both overwrite **global** state; a Global EQ load is reversible (read all 28
   params first, write them back), an I/O load is not — `load_settings_preset`
   snapshots and demands `confirm=True`.
+- **I/O port levels are a preamp trim, not a fader: IN 1 is -12 .. +60 dB**,
+  linear, and `catalog.io_level_to_db()/io_level_from_db()` are the conversion.
+  SYMBOLIC cannot carry it — ModelRepo declares IOSettings(31000) levels as a
+  literal `min=0 max=1`, so the generic range code believes the display range IS
+  0..1 and converts nothing. Measured 2026-09-09 on CorOS 4.1.0 against the
+  app's I/O panel (min -12.00, max +60.00, and the untouched 0.166667 = 0.00 dB,
+  an interior point exactly on the line). Only IN 1 is measured; every other
+  port returns None rather than a plausible number from the wrong range. Two
+  traps found while measuring: a read taken straight after an I/O write returns
+  the device's ECHO of that write, not its state (drain one read before
+  verifying), and **Cortex Control reads I/O settings only when its panel
+  opens** — it will not redraw for a write from anybody else.
 - **Writing I/O settings**: send ONLY the fields you're changing. A full port
   record (every field, e.g. a protobuf `CopyFrom`) is silently rejected — that's
-  why I/O writes look impossible. `input_type` is 3-position: 0=Instrument,
-  0.5=Mic, 1.0=Line (the app only offers the first two).
+  why I/O writes look impossible. `input_type` is **0=Instrument, 1.0=Mic**
+  — measured 2026-09-09 against the app on both combo inputs (in 1 stored 0.0 /
+  Instrument, in 2 stored 1.0 / Mic with a condenser on 48V). It was documented
+  as 3-position with 1.0=Line, which made `get_io_settings` report a mic input
+  as a line input; 0.5 has never been observed. **Full QC only** — the Mini has
+  no input-type switch, so on an ATMA the field is not a control and the names
+  should not be trusted.
 - **Stomp assignments live on `Grid`**, not their own message: Grid UPDATE with
   `preset.stomp_mode_assignments[]{row, column, stomp_index, type}` (A-H = 0-7;
   `type` PRIMARY/SECONDARY = the 4.1 dual-footswitch). DELETE unassigns.

@@ -988,22 +988,64 @@ class QuadCortex:
         self.send("Grid", g)
         return echo
 
-    BYPASS_PARAM = 4   # a block's bypass control is param index 4 (verified on OD/amp)
+    def bypass_param_index(self, row, column, preset=None):
+        """The index of a block's bypass param: ONE PAST its last readable param.
 
-    def set_block_bypass(self, row, column, bypassed=True, scenes=None, bypass_param=BYPASS_PARAM):
-        """Bypass or re-enable the block at (row, column). Verified message shape:
-        Grid UPDATE preset.bypass[{ row, colBypass{ column, sceneBypass{bypass} } }].
-        scenes=None -> single sceneBypass for the current scene (what the app sends);
-        pass a list of up to 8 bools for explicit per-scene (A-H) bypass."""
+        A read returns N param slots for a block; the bypass control lives at
+        index N, which never appears in a read. Captured from Cortex Control's
+        own "Assign to Scenes" right-click on the bypass button: a 7-slot amp
+        emits `params{index:7, scene_mode:true}` and a 23-slot delay emits
+        `index:23`. Both verified against the device.
+
+        This used to be hardcoded to 4, which is a REAL param on anything but a
+        4-slot block — VOLUME on a Neural Capture, TONE CUT on UK C30 TopBoost,
+        LOW PASS on Tape Delay. That is also the whole of the old "per-scene
+        bypass is a silent no-op on Delay blocks" note: delays were never
+        special, the write just landed on a filter knob.
+        """
+        bp = preset if preset is not None else self.get_current_preset()
+        if bp is None:
+            raise QCError("cannot read the preset to locate the bypass param")
+        # positional addressing: in a read the row/column FIELDS are 0
+        try:
+            model = bp.chains[row].models[column]
+        except IndexError:
+            model = None
+        if model is None or not model.hash:
+            raise QCError(f"no block at row{row} col{column} to bypass")
+        return len(model.params)
+
+    def set_block_bypass(self, row, column, bypassed=True, scenes=None,
+                         bypass_param=None):
+        """Bypass or re-enable the block at (row, column).
+
+        scenes=None -> one sceneBypass flag for the CURRENT scene, which is
+        exactly what the app sends. Pass up to 8 bools for per-scene (A-H)
+        bypass; the block is assigned to scenes first (it silently keeps one
+        shared value otherwise) and then each scene is made active and given a
+        plain single-flag bypass, the same two steps a per-scene param needs.
+
+        `bypass_param` overrides the index this looks up per block; leave it
+        None so it is read from the device.
+        """
         if scenes is None:
             self._write_bypass(row, column, bool(bypassed))
             return
-        # per-scene bypass is just the block's BYPASS PARAM (index `bypass_param`, =4 for
-        # most single blocks) assigned to scenes — reversed from the right-click "Assign
-        # to Scenes" on the bypass button, which emits params{index:4, scene_mode:true}.
-        # 1.0 = bypassed, 0.0 = active.
-        self.set_param_scenes(row, column, bypass_param,
-                              [1.0 if s else 0.0 for s in list(scenes)[:8]])
+        flags = [bool(s) for s in list(scenes)[:8]]
+        idx = self.bypass_param_index(row, column) if bypass_param is None else bypass_param
+        # 1. assign the bypass param to scenes. Without this the device keeps ONE
+        #    bypass value for the block and every per-scene write overwrites it.
+        self.assign_param_to_scenes(row, column, idx)
+        time.sleep(0.05)
+        # 2. per scene: make it active (confirmed — a fixed sleep drops values),
+        #    then write the plain bypass map entry the app sends.
+        for scene, want in enumerate(flags):
+            self.set_scene(scene)
+            self._await_scene(scene)
+            self._write_bypass(row, column, want)
+            time.sleep(0.04)
+        self.set_scene(0)
+        self._await_scene(0)
 
     def _write_bypass(self, row, column, bypassed):
         g = P.message_class("Grid")()
@@ -1014,17 +1056,6 @@ class QuadCortex:
         cb = b.colBypass.add()
         cb.column = column
         cb.sceneBypass.add().bypass = bool(bypassed)
-        self.send("Grid", g)
-
-    def _assign_bypass_to_scenes(self, row, column):
-        g = P.message_class("Grid")()
-        g.action = P.ACTION["UPDATE"]
-        g.request_id = self.next_request_id()
-        b = g.preset.bypass.add()
-        b.row = row
-        cb = b.colBypass.add()
-        cb.column = column
-        cb.sceneMode = True
         self.send("Grid", g)
 
     def recall(self, folder_key="", position=0, is_factory=False,

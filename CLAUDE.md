@@ -122,11 +122,22 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   `set_param_typed`) or string params (cab mic names, capture `file_name`, IR path) drop.
 - **Per-scene param**: assign to scenes (`params{index, scene_mode:true}`, no values), then
   per scene set active scene + write a plain value — it lands on the active scene.
-- **Per-scene bypass** = the same, on the block's **bypass param (index 4)** (1.0=bypassed).
-  Verified on drives/amps; **silent no-op on Delay blocks** (trails-capable → different
-  bypass path? pending a capture of the app's toggle) — scene the delay's **MIX** instead
-  (0=off, preserves trails). And **scene switches must be confirmed** (Scene READ) before
-  writing a scene value — a fixed sleep races the device and drops values (`_await_scene`).
+- **Per-scene bypass** = assign the block's **bypass param** to scenes
+  (`params{index:N, scene_mode:true}`), then per scene set the active scene and send a
+  PLAIN bypass map entry with ONE `sceneBypass` flag — the same two steps a per-scene
+  param needs, and exactly what the app emits (captured off its right-click "Assign to
+  Scenes"). `N` is **one past the block's last readable param** — `len(model.params)`
+  from a device read, NOT the catalog count: ModelRepo declares 2 params for cabsim
+  12013 and the device reports 22. `transport.bypass_param_index()` is the one place
+  that decides it. This was hardcoded to **4** for a long time, which is a real knob on
+  anything but a 4-slot block (VOLUME on a Neural Capture, TONE CUT on UK C30 TopBoost,
+  LOW PASS on Tape Delay) — and that, not anything about trails, is the whole of the old
+  "silent no-op on Delay blocks" note. Verified on amp/reverb/capture/cabsim/delay/IR.
+  **`colBypass.sceneMode` is read-only**: writes are ignored and the device takes only
+  the FIRST `sceneBypass` flag as a plain bypass, so an 8-flag message sets all 8 the
+  same. Only the param assign flips it. And **scene switches must be confirmed** (Scene
+  READ) before writing a scene value — a fixed sleep races the device and drops values
+  (`_await_scene`).
 - **Scene labels/colors = dedicated `SceneLabel`(23)/`SceneColor`(48) UPDATEs** `{index,
   label|color}` — a Grid UPDATE with preset-level `scene_labels[]` is a silent no-op.
   Preset **name** is set by the save (File CREATE), not settable on the live grid.
@@ -145,9 +156,8 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   scene values + `scene_mode` flags at once (strings too). Lane sub-blocks
   (input/output control, splitter, mixer) take ONE value per message; their
   scene params need assign (`scene_mode:true`) + write per active scene.
-- **The bypass param index is the block's param count**, not always 4 (4 for a
-  4-param pedal, 7 for a capture — index 4 there is VOLUME). Bypass-map
-  row/column are array positions in a read, like everything else.
+- **Bypass-map row/column are array positions in a read**, like everything else.
+  (For the bypass param index itself, see the per-scene bypass note above.)
 - **`default_scene` = the scene active at save time.** Set the scene, then
   File CREATE. A Grid UPDATE with `default_scene` is a no-op.
 - **File ops** (copy/delete/rename/setlist create, author rules): see

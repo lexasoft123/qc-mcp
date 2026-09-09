@@ -114,6 +114,78 @@ class TestLane(unittest.TestCase):
         self.assertIsNone(leveling._lane(0, _Chain(19, None)))
 
 
+class _Frame:
+    """A decoded RecallPreset broadcast as the transport buffers it."""
+
+    def __init__(self, name):
+        self.preset = type("BP", (), {"name": name, "chains": [], "scene_labels": []})()
+
+    def HasField(self, f):
+        return f == "preset"
+
+
+class _RecallQC:
+    """A device that already holds a stale broadcast (from a save) when the
+    recall is asked for, then answers the recall with the real one."""
+
+    def __init__(self, stale, real, pointer_lag=1):
+        self._pending = [(P_RECALL, _Frame(stale), b"", b"x")]
+        self.real = real
+        self.recalled = []
+        self.pointer = None
+        self.lag = pointer_lag          # collects before the pointer moves
+        self.collects = 0
+
+    def recall(self, folder_key="", position=0, is_factory=False, downloads_key=""):
+        self.recalled.append((folder_key, position))
+        self.target = position
+
+    def _collect(self, _t):
+        self.collects += 1
+        if self.recalled and self.collects == self.lag + 1:
+            self._pending.append((P_RECALL, _Frame(self.real), b"", b"y"))
+            self.pointer = self.target
+
+    def get_setlist_position(self):
+        return {"folder_key": "f", "position": self.pointer, "is_factory": False}
+
+    def read_state(self, *_a, **_k):
+        return None
+
+    def get_current_preset(self):
+        return _Frame(self.real).preset
+
+
+P_RECALL = leveling.P.NAME_TO_CMD["RecallPreset"]
+
+
+class TestOpenTakesItsOwnBroadcast(unittest.TestCase):
+    """A save leaves a RecallPreset payload in the buffer; open() must not take
+    it for its own recall's answer. On hardware that shifted every later open by
+    one preset for the rest of the session."""
+
+    def test_stale_broadcast_is_drained_before_the_recall(self):
+        qc = _RecallQC(stale="Saved One", real="Wanted")
+        st = leveling.Bench(qc).open("f", 7, settle=1.0)
+        self.assertEqual(qc.recalled, [("f", 7)])
+        self.assertEqual(st["name"], "Wanted")
+        self.assertEqual(st["position"], 7)
+
+    def test_a_payload_before_the_pointer_moved_is_not_believed(self):
+        # the drain happens, but a second stale frame arrives AFTER the recall
+        # was sent and BEFORE the pointer moved: the pointer check rejects it
+        qc = _RecallQC(stale="Saved One", real="Wanted", pointer_lag=3)
+        orig = qc._collect
+
+        def collect(t):
+            orig(t)
+            if qc.collects == 1:
+                qc._pending.append((P_RECALL, _Frame("Late Echo"), b"", b"z"))
+        qc._collect = collect
+        st = leveling.Bench(qc).open("f", 7, settle=2.0)
+        self.assertEqual(st["name"], "Wanted")
+
+
 if __name__ == "__main__":
     r = unittest.main(exit=False, verbosity=0).result
     total = r.testsRun

@@ -248,14 +248,24 @@ class Bench:
         it made the device behave oddly while it worked.
 
         Falls back to a plain read if the broadcast never comes.
+
+        The broadcast we take has to be THIS recall's. A File CREATE (a save)
+        makes the device broadcast a RecallPreset payload too, and it sits in
+        the buffer until somebody reads it: taking the first payload in the
+        queue then shifted every later open by one — measured on hardware
+        2026-09-09, after Save-all `open(B)` returned A's grid and `open(A)`
+        returned B's, for the rest of the session. So: drain what is already
+        buffered before asking, and confirm the pointer before believing a
+        payload.
         """
+        want = P.NAME_TO_CMD["RecallPreset"]
+        self._drain(want)
         if cloud_id:
             self.qc.recall(downloads_key=cloud_id)
         else:
             self.qc.recall(folder_key=folder_key, position=int(position),
                            is_factory=bool(is_factory))
 
-        want = P.NAME_TO_CMD["RecallPreset"]
         bp = None
         deadline = time.time() + settle
         while bp is None and time.time() < deadline:
@@ -267,14 +277,30 @@ class Bench:
             for cmd, obj, _raw, _pb in batch:
                 if cmd == want and obj is not None and obj.HasField("preset"):
                     bp = obj.preset
+            if bp is not None and not cloud_id and not self._landed(folder_key, position):
+                bp = None            # a stale payload: keep listening
 
         if bp is None:
             return self.preset_state()
-        # The broadcast IS the confirmation the recall landed, so the pointer we
-        # asked for is the pointer the device is on — no need to read it back.
         return self._state(bp, folder_key=folder_key,
                            position=None if cloud_id else int(position),
                            is_factory=bool(is_factory))
+
+    def _drain(self, cmd):
+        """Throw away buffered frames of one kind, so a later wait cannot mistake
+        an old one for the answer."""
+        try:
+            self.qc._collect(0.05)
+        except Exception:
+            pass
+        self.qc._pending = [x for x in self.qc._pending if x[0] != cmd]
+
+    def _landed(self, folder_key, position):
+        """Is the device's pointer where the recall asked? One cheap read."""
+        pos = self.qc.get_setlist_position() or {}
+        if pos.get("position") != int(position):
+            return False
+        return not folder_key or pos.get("folder_key") == folder_key
 
     def set_db(self, row, db):
         lo, hi = db_range()

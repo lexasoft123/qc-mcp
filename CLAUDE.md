@@ -191,6 +191,13 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   the legend and the `?` sheet are generated from that list, and `shortcut(key)`
   is the only way to look one up — `SHORTCUTS.find(...)!` returned undefined
   after a rename and took every keydown in the window down with it.
+- **A save makes the device broadcast a `RecallPreset` payload**, and it sits in
+  the transport's buffer until something reads it. `Bench.open()` listens for
+  that broadcast as proof the recall landed, so it must DRAIN the buffer before
+  asking and confirm the setlist pointer before believing a payload — without
+  that, after a Save-all every `open()` returned the PREVIOUS recall's preset
+  for the rest of the session (measured 2026-09-09: open(B) gave A's lanes,
+  open(A) gave B's). `tests/test_leveling.py` fakes the stale frame.
 - **A bench run is ONE call that loops server-side.** Stopping it needs the
   `cancel` op (`leveling.py` sets a flag `measure_many` reads between presets);
   a client-side flag stops only what the renderer loops over itself — Apply and

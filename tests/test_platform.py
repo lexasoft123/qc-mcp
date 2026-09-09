@@ -522,6 +522,22 @@ def test_stale_records_need_no_cleanup_to_stop_lying():
         L.release(sock)
 
 
+def _closed_backends():
+    """One never-opened, once-closed transport per backend THIS OS can import.
+
+    winhid imports anywhere (that is the point of it); iohid binds IOKit at
+    import time, so it exists only on a Mac and the Windows runner gets the
+    Windows half alone.
+    """
+    made = [winhid.WinHIDTransport()]
+    if sys.platform == "darwin":
+        from qc_mcp import iohid                 # noqa: PLC0415
+        made.append(iohid.IOHIDTransport())
+    for t in made:
+        t.close()                                # never opened: must be a no-op
+    return made
+
+
 def test_neither_backend_writes_into_a_closed_device():
     """A write after close() must raise, on BOTH backends.
 
@@ -533,11 +549,7 @@ def test_neither_backend_writes_into_a_closed_device():
     serve_forever's finally), and the second pass wrote to a released device.
     Windows raised RuntimeError here all along; this keeps the pair honest.
     """
-    from qc_mcp import iohid                     # noqa: PLC0415
-
-    for make in (lambda: iohid.IOHIDTransport(), lambda: winhid.WinHIDTransport()):
-        t = make()
-        t.close()                                # never opened: must be a no-op
+    for t in _closed_backends():
         try:
             t.set_report(1, b"\x00" * 8)
             raise AssertionError(f"{type(t).__name__} wrote into a closed device")
@@ -547,10 +559,7 @@ def test_neither_backend_writes_into_a_closed_device():
 
 def test_closing_twice_is_safe_on_both_backends():
     """close() is called twice on every daemon SIGTERM; it must not care."""
-    from qc_mcp import iohid                     # noqa: PLC0415
-
-    for t in (iohid.IOHIDTransport(), winhid.WinHIDTransport()):
-        t.close()
+    for t in _closed_backends():
         t.close()
 
 

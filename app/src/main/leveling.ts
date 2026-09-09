@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import type {
   ApplyResult, AudioState, AutoResult, LevelEvent, Measurement, Paths, PresetFolder, PresetState,
-  ReportResult, RiffList, SampleState, SceneRow
+  ReportResult, RiffList, SampleState, SceneRow, InputLevel
 } from '../shared/types.js'
 import { exists } from './util.js'
 import { t } from '../shared/i18n/index.js'
@@ -20,6 +20,12 @@ import { t } from '../shared/i18n/index.js'
  * reply carries the `id` of its request, and anything with an `event` key is
  * unsolicited (meters, or a fatal that means the bench could not attach).
  */
+const toInputLevel = (r: Reply): InputLevel => ({
+  port: r.port as number, db: r.db as number,
+  minDb: r.min_db as number, maxDb: r.max_db as number,
+  clamped: r.clamped as boolean | undefined
+})
+
 export class Leveling {
   private child: ChildProcess | null = null
   private buf = ''
@@ -292,6 +298,16 @@ export class Leveling {
    * loop never read, announce that it was stopping, and then measure every
    * remaining preset anyway.
    */
+  /** The QC's IN n LEVEL trim, in dB. Global hardware state, not the preset's. */
+  async inputLevel(port = 1): Promise<InputLevel> {
+    return toInputLevel(await this.call('input_level', { port }, 10000))
+  }
+
+  async setInputLevel(db: number, port = 1): Promise<InputLevel> {
+    // a write, a settle, an echo drained and a verifying read
+    return toInputLevel(await this.call('set_input_level', { db, port }, 15000))
+  }
+
   async cancel(): Promise<{ cancelling: boolean }> {
     return (await this.call('cancel', {}, 10000)) as unknown as { cancelling: boolean }
   }

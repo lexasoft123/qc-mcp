@@ -52,6 +52,7 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: ['arrowup', 'arrowdown'], cap: '↑ ↓', does: 'keys.scene', short: 'keys.scene', scope: 'leveling', group: 'keys.group.bench' },
   { keys: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], cap: 'A–H', does: 'keys.jump', short: 'keys.jump', scope: 'leveling', group: 'keys.group.bench' },
   { keys: ['-', '_', '=', '+'], cap: '− +', does: 'keys.levelFull', short: 'keys.level', scope: 'leveling', group: 'keys.group.bench' },
+  { keys: ['enter'], cap: '↵', does: 'keys.openRow', short: 'keys.openRow.short', scope: 'leveling', group: 'keys.group.bench' },
   { keys: ['n'], mod: true, cap: `${MOD}N`, does: 'keys.addPreset', short: 'keys.addPreset.short', scope: 'leveling', group: 'keys.group.bench' },
 
   // ── measuring ─────────────────────────────────────────────────────────

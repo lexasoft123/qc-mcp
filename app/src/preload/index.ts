@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   Api, ApplyResult, AudioState, AutoResult, CheckId, LevelEvent, LogLine, Measurement, Mode,
   Prefs, PresetFolder, PresetState, Progress, ReportResult, RiffList, SampleState, SceneRow,
-  Snapshot, UpdateState
+  Snapshot, UpdateState, InputLevel
 } from '../shared/types.js'
 
 /** Subscribe to a main-process push; returns the unsubscribe. */
@@ -102,6 +102,10 @@ const api: Api = {
     measureScenes: (o) =>
       ipcRenderer.invoke('leveling:measureScenes', o) as Promise<{ rows: SceneRow[] }>,
     levelScenes: (o) => ipcRenderer.invoke('leveling:levelScenes', o) as Promise<unknown>,
+    inputLevel: (port?: number) =>
+      ipcRenderer.invoke('leveling:inputLevel', port) as Promise<InputLevel>,
+    setInputLevel: (db: number, port?: number) =>
+      ipcRenderer.invoke('leveling:setInputLevel', db, port) as Promise<InputLevel>,
     onEvent: (cb) => on<LevelEvent>('leveling:event', cb)
   },
 

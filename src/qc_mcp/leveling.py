@@ -807,6 +807,65 @@ def _stdin_reader(q):
     q.put(None)
 
 
+# ── the input trim ──────────────────────────────────────────────────────
+#
+# The QC's own IN 1/IN 2 LEVEL — a preamp trim on the hardware, global, not
+# in any preset. Patchbay's meter rail adjusts it so a quiet guitar can be
+# brought up before the riff is recorded. ModelRepo's IOSettings pseudo-model
+# (31000) declares it as min=0 max=1, so the generic range code converts
+# nothing; catalog.IO_LEVEL_DB carries the measured -12..+60 dB.
+
+IN_LEVEL_PARAM = {1: 0, 2: 5}     # input port id -> param index in model 31000
+
+
+def _in_level_param(port):
+    idx = IN_LEVEL_PARAM.get(int(port))
+    if idx is None or catalog.io_level_range(idx) is None:
+        raise ValueError(f"input port {port}: no calibrated level range (only 1 and 2)")
+    return idx
+
+
+def read_input_level(qc, port=1):
+    """The port's trim in dB, with the calibrated range it sits on."""
+    idx = _in_level_param(port)
+    io = qc.read_message("IOSettings")
+    if io is None or not io.HasField("settings"):
+        raise RuntimeError("could not read the I/O settings")
+    lo, hi = catalog.io_level_range(idx)
+    for p in io.settings.in_port:
+        if p.input_port_id == int(port):
+            return {"db": round(catalog.io_level_to_db(idx, p.level), 2),
+                    "norm": round(p.level, 6), "min_db": lo, "max_db": hi}
+    raise RuntimeError(f"input port {port} is not in the I/O settings the device sent")
+
+
+def write_input_level(qc, db, port=1):
+    """Set the port's trim to `db` (clamped to the range) and read back what landed.
+
+    Sends ONLY the level field — a full port record is silently rejected. And a
+    read taken straight after an I/O write returns the device's ECHO of that
+    write, not its state, so one read is drained before the value is verified.
+    """
+    idx = _in_level_param(port)
+    lo, hi = catalog.io_level_range(idx)
+    want = max(lo, min(hi, float(db)))
+    qc.set_io_port("in", int(port), level=catalog.io_level_from_db(idx, want))
+    qc.read_message("IOSettings")                       # the echo
+    got = read_input_level(qc, port)
+    got.update({"asked_db": float(db), "clamped": want != float(db)})
+    return got
+
+
+def io_ops(bench):
+    """The two stdio ops behind the meter rail's trim stepper."""
+    return {
+        "input_level": lambda m: {"port": int(m.get("port", 1)),
+                                  **read_input_level(bench.qc, m.get("port", 1))},
+        "set_input_level": lambda m: {"port": int(m.get("port", 1)),
+                                      **write_input_level(bench.qc, m["db"], m.get("port", 1))},
+    }
+
+
 def serve(socket_path):
     """Attach to the daemon and serve the bench on stdio until stdin closes."""
     from .daemon import attach
@@ -842,6 +901,7 @@ def serve(socket_path):
         "meter": lambda m: {"metering": _set_metering(bench, qc, m.get("on", True))},
     }
     ops.update(measure_ops(bench, emit))
+    ops.update(io_ops(bench))
 
     while True:
         # Block for a command, and pump once per idle tick. `get_nowait` here

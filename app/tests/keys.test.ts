@@ -105,8 +105,8 @@ test('every shortcut the views look up actually exists', () => {
   // with nothing on screen to say why. `find(...)!` hid it from the compiler.
   const LOOKED_UP = [
     'keys.views', 'keys.thisList', 'prefs.open',          // App.tsx
-    'keys.play', 'keys.measure', 'keys.listen', 'keys.stopRun',
-    'keys.apply', 'keys.undo', 'keys.saveAll', 'keys.saveOne', 'keys.addPreset'
+    'keys.record', 'keys.play', 'keys.measure', 'keys.listen', 'keys.stopRun',
+    'keys.apply', 'keys.undo', 'keys.saveAll', 'keys.saveOne', 'keys.addPreset', 'keys.openRow'
   ] as const
   for (const k of LOOKED_UP) {
     assert.doesNotThrow(() => shortcut(k), `${k} is looked up but not declared`)

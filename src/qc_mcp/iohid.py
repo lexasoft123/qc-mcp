@@ -182,7 +182,17 @@ class IOHIDTransport:
         return self
 
     def set_report(self, report_id, data, include_id=False):
-        """data = the chunk bytes [chunkLen][flags][payload] (report_size long)."""
+        """data = the chunk bytes [chunkLen][flags][payload] (report_size long).
+
+        Refuses a closed device the way the Windows backend does. This is not
+        defensive noise: `close()` sets `self.dev = None`, ctypes then passes
+        NULL straight to IOHIDDeviceSetReport, and the process dies with
+        `EXC_BAD_ACCESS (SIGSEGV) KERN_INVALID_ADDRESS at 0x18` — no traceback,
+        no catchable exception, the daemon simply vanishes. It happened on every
+        disconnect once close() started sending a Connection frame of its own.
+        """
+        if self.dev is None:
+            raise RuntimeError("write on a closed device")
         buf = bytes(data)
         if include_id:
             buf = bytes([report_id]) + buf
@@ -201,9 +211,15 @@ class IOHIDTransport:
         return out
 
     def close(self):
+        # Stop the reader and WAIT for it, like the Windows backend does: it
+        # touches self.dev, so releasing the device under a live thread is the
+        # same NULL dereference by another route.
         if self._runloop:
             CF.CFRunLoopStop(self._runloop)
             self._runloop = None
+        if self._thread:
+            self._thread.join(timeout=1.5)
+            self._thread = None
         if self.dev:
             IOKit.IOHIDDeviceClose(self.dev, 0)
             self.dev = None

@@ -3,7 +3,14 @@
 import type { Language, Locale } from './i18n/rules.js'
 
 export type Platform = 'mac' | 'win'
-export type Mode = 'auto' | 'bridge' | 'direct'
+/**
+ * What the user asked for. Two, not three: `auto` named a DECISION
+ * rather than a session — it resolved to bridge/shared or direct depending on
+ * whether Cortex Control happened to be running — so the front page could not
+ * say what Connect would do without re-deriving it, which is the ambiguity
+ * this whole screen was rebuilt to remove.
+ */
+export type Mode = 'bridge' | 'direct'
 /**
  * What the daemon actually opened. `auto` resolves at connect time, so the
  * preference alone never says whether the session needs Cortex Control —
@@ -168,6 +175,12 @@ export interface Snapshot {
   cortex: CortexInfo
   device: DeviceInfo
   prefs: Prefs
+  /**
+   * Patchbay has stopped reopening Cortex Control on its own, because the
+   * bridge kept dying as soon as it opened. A state, not a moment: the toast
+   * that announced it is long gone by the time anyone looks at the window.
+   */
+  bridgeGaveUp: boolean
 }
 
 // ── the preset-leveling bench ───────────────────────────────────────────

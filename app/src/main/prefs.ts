@@ -11,12 +11,11 @@ export const DEFAULTS: Prefs = {
   quitApp: false,
   verbose: true,
   autoRebuild: false,
-  // 'auto', not 'bridge'. Bridge is the preferred mode WHEN Cortex Control is
-  // up, but as a default it makes the daemon refuse to start on a fresh
-  // install with the app closed — which is the first thing the Connect button
-  // on Home does. Auto picks bridge/shared when the app is running and direct
-  // when it is not.
-  mode: 'auto',
+  // Bridge, because Direct's plan QUITS Cortex Control when it is running and
+  // no default should close somebody's app. The old objection to bridge — that
+  // it failed on a fresh install with the app closed — is gone: the connect
+  // plan opens the app itself as its first step.
+  mode: 'bridge',
   repo: null,
   cortex: null,
   bench: [],
@@ -35,7 +34,12 @@ export const DEFAULTS: Prefs = {
 
 export function load(): Prefs {
   try {
-    return { ...DEFAULTS, ...(JSON.parse(readFileSync(FILE(), 'utf8')) as Partial<Prefs>) }
+    const saved = JSON.parse(readFileSync(FILE(), 'utf8')) as Partial<Prefs>
+    // 'auto' was a third mode until it was removed for naming a decision
+    // rather than a session. Anyone who had it stored gets bridge, the half of
+    // its behaviour that leaves Cortex Control alone.
+    if ((saved.mode as string) === 'auto') saved.mode = 'bridge'
+    return { ...DEFAULTS, ...saved }
   } catch {
     return { ...DEFAULTS }
   }

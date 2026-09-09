@@ -9,7 +9,6 @@ import { Sparkline } from '../components/Sparkline.js'
 import { Clients } from '../modals/Clients.js'
 
 export const modes = (): { value: Mode; label: string }[] => [
-  { value: 'auto', label: t('mode.auto') },
   { value: 'bridge', label: t('mode.bridge') },
   { value: 'direct', label: t('mode.direct') }
 ]

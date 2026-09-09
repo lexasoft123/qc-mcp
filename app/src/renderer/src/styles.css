@@ -106,14 +106,24 @@ body::after {
 
 /* ————————————————————————————————— views ————— */
 
-.view { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 20px 22px 24px; }
+/* `min-height: 0` is what makes overflow-y actually scroll: a flex item
+   defaults to min-height:auto, so .view grew to its content instead of
+   shrinking to the window, and body{overflow:hidden} then cut the bottom off.
+   The scrollbar was declared here all along and could never appear. */
+.view {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden; padding: 20px 22px 24px;
+}
 .view::-webkit-scrollbar { width: 10px; }
 .view::-webkit-scrollbar-thumb {
   background: rgba(255, 240, 214, 0.1); border-radius: 99px;
   border: 3px solid transparent; background-clip: content-box;
 }
 .view.home { display: flex; }
-.view.lvl { display: flex; overflow: hidden; }
+/* The bench is taller than the window once the recorder and the report are
+   both on screen, and `overflow: hidden` simply cut the table off at the
+   bottom edge — the last presets were unreachable, not just unseen. */
+.view.lvl { display: block; overflow-x: hidden; overflow-y: auto; }
 
 /* ————————————————————————————— device strip ————— */
 
@@ -337,7 +347,13 @@ body::after {
 
 .home-mode.r-bridge, .home-mode.r-shared { --m: var(--sz-success); }
 .home-mode.r-direct { --m: var(--sz-danger); }
-.hm-plan { margin-top: 13px; font-size: 12.5px; line-height: 1.6; color: var(--sz-dim); text-wrap: pretty; }
+/* Two lines' worth is reserved whether the sentence needs one or two: this
+   line changes with the mode, and letting it reflow moved every control under
+   it as you compared the three. */
+.hm-plan {
+  margin-top: 13px; font-size: 12.5px; line-height: 1.6; color: var(--sz-dim);
+  text-wrap: pretty; min-height: calc(2em * 1.6);
+}
 .hm-plan i {
   font-style: normal; margin-right: 8px; padding: 2px 7px; border-radius: 6px;
   font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
@@ -573,7 +589,7 @@ body.win .device::after { display: none; }
 
 /* ———————————————————————————— the leveling bench ————— */
 
-.lvl { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+.lvl { display: flex; flex-direction: column; gap: 14px; overflow: visible; }
 
 .lvl-bar { display: flex; align-items: flex-start; gap: 14px; }
 .lvl-bar h2 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
@@ -598,7 +614,7 @@ body.win .device::after { display: none; }
 .lvl-strip {
   /* fills the window: the cards share the width and grow with the height, so a
      bigger window buys a taller meter rather than empty space */
-  flex: 1 1 auto; min-height: 0;
+  flex: 0 0 auto; min-height: 0;
   display: flex; gap: 12px; align-items: stretch;
   overflow-x: auto; overflow-y: hidden; padding: 2px 2px 6px;
 }

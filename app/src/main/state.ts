@@ -19,6 +19,10 @@ let paths = pathsFor(process.cwd())
 let daemon: Daemon
 let snapshot: Snapshot | null = null
 
+/** Set by the poll when the bridge retry budget runs out; cleared on Connect. */
+let bridgeGaveUp = false
+export const setBridgeGaveUp = (v: boolean): void => { bridgeGaveUp = v }
+
 /**
  * The probes that cost real subprocesses and almost never change: the Python
  * version, clang, and Cortex Control's version + codesign state. None of them
@@ -207,7 +211,8 @@ export async function refresh(deep = false): Promise<Snapshot> {
     daemon: info,
     cortex,
     device,
-    prefs
+    prefs,
+    bridgeGaveUp
   }
   return snapshot
 }

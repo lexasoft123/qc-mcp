@@ -153,24 +153,24 @@ test('Windows never reaches for the interposer', () => {
   })
 })
 
-test('auto starts no application that was not already running', () => {
+test('direct never opens Cortex Control', () => {
+  // This used to be auto's promise. Auto is gone — it named a decision rather
+  // than a session — so direct carries the guarantee now: it takes the device
+  // for itself, and the only thing it may do to the app is QUIT one that is
+  // holding the device (asserted separately).
   each((f) => {
-    const p = planFor('connect', 'auto', f)
-    if (f.cortexRunning) return
-    const steps = stepNames(p)
-    assert.ok(!steps.includes('launch-bridge'), 'auto opened Cortex Control unasked')
-    assert.ok(!steps.includes('launch-stock'), 'auto opened Cortex Control unasked')
+    const steps = stepNames(planFor('connect', 'direct', f))
+    assert.ok(!steps.includes('launch-bridge'), 'direct opened Cortex Control')
+    assert.ok(!steps.includes('launch-stock'), 'direct opened Cortex Control')
   })
 })
 
-test('auto and the daemon agree on what auto means', () => {
-  // qc_mcp/daemon.py serve(): a live bridge (or an app holding the device) is
-  // shared; an idle machine is taken directly. The launcher used to disagree.
+test('a mode resolves to one session, and only the platform changes it', () => {
+  // The point of removing auto: what Connect will do is now readable off the
+  // selection alone, with no reference to what happens to be running.
   each((f) => {
-    const want = f.bridgeReady || f.cortexRunning
-      ? (f.platform === 'win' ? 'shared' : 'bridge')
-      : 'direct'
-    assert.equal(resolveSession('auto', f), want)
+    assert.equal(resolveSession('direct', f), 'direct', say(f))
+    assert.equal(resolveSession('bridge', f), f.platform === 'win' ? 'shared' : 'bridge', say(f))
   })
 })
 
@@ -191,7 +191,7 @@ test('Show Cortex Control opens the instrumented build wherever bridge mode coul
   each((f) => {
     if (f.platform !== 'mac' || f.cortexRunning || !f.instrumentedBuilt) return
     if (f.daemonSession === 'direct') return   // covered below: it is refused
-    for (const mode of ['auto', 'bridge'] as Mode[]) {
+    for (const mode of ['bridge'] as Mode[]) {
       assert.ok(stepNames(planFor('show-app', mode, f)).includes('launch-bridge'),
         'opened the stock app when the instrumented one was available')
     }
@@ -245,7 +245,7 @@ test('Show Cortex Control never touches the daemon', () => {
 test('disconnect stops what is running and nothing else', () => {
   each((f) => {
     for (const quitApp of [false, true]) {
-      const steps = stepNames(planFor('disconnect', 'auto', f, quitApp))
+      const steps = stepNames(planFor('disconnect', 'bridge', f, quitApp))
       const ends = steps.includes('stop-daemon') || steps.includes('take-over')
       assert.equal(ends, f.daemonRunning)
       assert.equal(steps.includes('quit-cortex'), quitApp && f.cortexRunning)
@@ -263,7 +263,7 @@ test("disconnecting somebody else's session is named an eviction", () => {
   // ordinary housekeeping.
   each((f) => {
     if (!f.daemonRunning) return
-    const steps = stepNames(planFor('disconnect', 'auto', f))
+    const steps = stepNames(planFor('disconnect', 'bridge', f))
     const foreign = Boolean(f.heldBy && !f.heldBy.ours)
     assert.equal(steps.includes('take-over'), foreign, say(f))
     assert.equal(steps.includes('stop-daemon'), !foreign, say(f))
@@ -335,7 +335,7 @@ test('disconnect leaves nothing running, then reconnect works', async () => {
   for (const f of WORLDS) {
     if (!f.devicePresent) continue
     for (const quitApp of [false, true]) {
-      const d = await play(f, 'disconnect', 'auto', quitApp)
+      const d = await play(f, 'disconnect', 'bridge', quitApp)
       assert.equal(d.world.daemonRunning, false, say(f))
       if (quitApp) assert.equal(d.world.cortexRunning, false, say(f))
       for (const mode of MODES) {
@@ -650,7 +650,7 @@ test('every op throwing, in every world, still returns an outcome', async () => 
   for (const f of WORLDS) {
     if (!f.devicePresent) continue
     for (const goal of GOALS) for (const which of OPS) {
-      const plan = planFor(goal, 'auto', f)
+      const plan = planFor(goal, 'bridge', f)
       if (plan.blocked || plan.satisfied) continue
       const world: World = { ...f }
       const base = ops(world)

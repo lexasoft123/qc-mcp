@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@singz/ui'
 import type { Snapshot } from '@shared/types'
 import type { Mode } from '@shared/types'
-import { modeSwitch } from '@shared/session'
+import { BRIDGE_RETRY_LIMIT, modeSwitch, planFor } from '@shared/session'
 import {
   cleanError, heldButUnreachable, heldByOther, isLinked, isMac, modeFacts, modePlan,
   sessionMode, sessionWords, setupPending, sharedWriters
@@ -12,8 +12,7 @@ import { T, t } from '../i18n.js'
 import { SignalPath } from '../components/SignalPath.js'
 import { Strip } from '../components/Bits.js'
 
-const MODES: { value: Mode; key: 'auto' | 'bridge' | 'direct' }[] = [
-  { value: 'auto', key: 'auto' },
+const MODES: { value: Mode; key: 'bridge' | 'direct' }[] = [
   { value: 'bridge', key: 'bridge' },
   { value: 'direct', key: 'direct' }
 ]
@@ -109,6 +108,8 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
   let disabled = false
   let action: 'connect' | 'disconnect' = 'connect'
   let second: [string, () => void] | null = null
+  /** Set when `second` is an action the plan has already ruled out. */
+  let secondWhyNot: string | null = null
 
   if (busy) {
     title = t('home.busy.title')
@@ -152,6 +153,12 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
       : mac
         ? [t('home.showApp'), () => { void act(() => window.patchbay.cortexFocus()) }]
         : [t('home.quitApp'), () => { void act(() => window.patchbay.cortexQuit()) }]
+    // A direct session holds the device exclusively, so Cortex Control cannot
+    // start into it — planFor() knows that before the press. Offering the
+    // button anyway and answering with an error toast made the app look as if
+    // it had tried and failed at something it had already ruled out.
+    secondWhyNot = planFor('show-app', snap.prefs.mode, modeFacts(snap),
+                           snap.prefs.quitApp).blocked
   }
 
   const press = async (): Promise<void> => {
@@ -196,7 +203,12 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
           >
             {label}
           </Button>
-          {second && <Button onClick={second[1]}>{second[0]}</Button>}
+          {second && (
+            <Button onClick={second[1]} disabled={Boolean(secondWhyNot)}
+                    title={secondWhyNot ?? undefined}>
+              {second[0]}
+            </Button>
+          )}
         </div>
 
         {!busy && snap.device.present && !pending && (
@@ -244,6 +256,15 @@ export function Home({ snap, goto }: { snap: Snapshot; goto: (v: string) => void
                       onClick={() => void act(() => window.patchbay.takeOver())}>
                 {t('takeOver')}
               </Button>
+            </Strip>
+          )}
+          {/* Patchbay stopped reopening a Cortex Control that kept dying. Said
+              here and not only in a toast: by the time anyone reads the window
+              the toast is gone, and "Ready when you are" with autoconnect
+              silently disabled is a lie. */}
+          {!busy && snap.bridgeGaveUp && (
+            <Strip bad>
+              <span className="grow"><T k="bridge.givenUp" vars={{ n: String(BRIDGE_RETRY_LIMIT) }} /></span>
             </Strip>
           )}
           {!busy && sharedWriters(snap) && (

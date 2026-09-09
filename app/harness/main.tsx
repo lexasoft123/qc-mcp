@@ -118,12 +118,14 @@ createRoot(document.getElementById('root')!).render(
     {[1, 2].includes(which) && <AutoArm />}
     <Measured
       live
-      row={0}
       presetName="Fender Scenes"
       target={-18}
       onTarget={() => {}}
       onTrimmed={() => {}}
       step={null}
+      playing={false}
+      onPlay={() => {}}
+      foot={{ current: null }}
       {...rest}
     />
   </div>

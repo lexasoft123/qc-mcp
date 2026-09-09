@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { MutableRefObject } from 'react'
 import { Badge, Button } from '@singz/ui'
 import type {
   AudioState, AutoResult, AutoStep, Measurement, RiffList, SampleState
@@ -25,7 +26,7 @@ const db = (v: number | null | undefined): string =>
   v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`
 
 export function Measured({
-  live, presetName, target, onTarget, step, onTrimmed, playDone
+  live, presetName, target, onTarget, step, onTrimmed, playing, onPlay, foot
 }: {
   /** The daemon is up. Without it there is nothing to talk to. */
   live: boolean
@@ -41,8 +42,13 @@ export function Measured({
   step: AutoStep | null
   /** A run wrote a trim, so the bench should re-read the preset. */
   onTrimmed: () => void
-  /** Playback finished or failed, pushed from the service. */
-  playDone?: number
+  /** The riff is sounding. Owned by the view: the service's `play` event is
+   *  the only thing that clears it, and the view is what hears that event. */
+  playing: boolean
+  onPlay: () => void
+  /** Where this hands the view its footswitch action, so the one keyboard
+   *  handler can route `space` here without owning the recorder. */
+  foot: MutableRefObject<(() => void) | null>
 }): React.JSX.Element | null {
   const [audio, setAudio] = useState<AudioState | null>(null)
   const [sample, setSample] = useState<SampleState | null>(null)
@@ -50,7 +56,6 @@ export function Measured({
   const [result, setResult] = useState<AutoResult | null>(null)
   const [busy, setBusy] = useState<'measure' | 'auto' | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [playing, setPlaying] = useState(false)
   const poll = useRef<ReturnType<typeof setInterval> | null>(null)
   const quietSince = useRef<number | null>(null)
 
@@ -74,8 +79,6 @@ export function Measured({
     poll.current = null
   }
   useEffect(() => stopPoll, [])
-  // The service says when playback ends; the button must not stay on "Stop".
-  useEffect(() => { if (playDone) setPlaying(false) }, [playDone])
 
   const keep = useCallback(async (): Promise<void> => {
     stopPoll()
@@ -121,20 +124,6 @@ export function Measured({
     try { setSample(await window.patchbay.leveling.sampleDiscard()) }
     catch (e) { setErr((e as Error).message) }
   }, [])
-
-  const play = async (): Promise<void> => {
-    setErr(null)
-    try {
-      setPlaying(true)
-      await window.patchbay.leveling.samplePlay()
-    } catch (e) { setErr((e as Error).message); setPlaying(false) }
-  }
-
-  const stopPlay = async (): Promise<void> => {
-    try { await window.patchbay.leveling.sampleStopPlay() }
-    catch { /* it may have finished on its own */ }
-    setPlaying(false)
-  }
 
   const measure = async (): Promise<void> => {
     setBusy('measure'); setErr(null); setResult(null)
@@ -184,22 +173,13 @@ export function Measured({
   const armed = state === 'armed'
   const busyRecording = recording || armed
 
-  /* The pedal is a footswitch, so the space bar is the foot. One key, whatever the
-     recorder is doing — and never while a text field has the caret. */
-  useEffect(() => {
-    if (!live) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.code !== 'Space' || e.repeat) return
-      const el = e.target as HTMLElement | null
-      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return
-      e.preventDefault()
-      if (recording) void keep()
-      else if (armed) void discard()
-      else void arm()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [live, recording, armed, arm, keep, discard])
+  /* The pedal is a footswitch, so the space bar is the foot. One key, whatever
+     the recorder is doing. The keystroke itself is the view's (keys.ts declares
+     it once, beside every other binding); this only says what it does now. */
+  foot.current = !live ? null
+    : recording ? () => void keep()
+    : armed ? () => void discard()
+    : () => void arm()
 
   if (!live) return null
 
@@ -334,9 +314,7 @@ export function Measured({
                   <dd className="muted">{presetName ?? t('msd.noneLoaded')}</dd></div>
               </dl>
               <div className="lvl-measured-acts">
-                <Button size="sm" disabled={playing}
-                        onClick={() => void (playing ? stopPlay() : play())}
-                        title={t('msd.playHint')}>
+                <Button size="sm" onClick={onPlay} title={t('msd.playHint')}>
                   {playing ? t('msd.stop') : t('msd.play')} <kbd>P</kbd>
                 </Button>
                 <Button size="sm" onClick={() => void arm()}>{t('msd.reRecord')}</Button>

@@ -38,6 +38,8 @@ const MAX_DB = 12
 const WRITE_MS = 80
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
+
+interface Run { kind: 'measure' | 'apply' | 'save' | 'audition'; at?: string }
 const show = (db: number): string => `${db > 0 ? '+' : ''}${db.toFixed(1)}`
 
 /**
@@ -107,13 +109,11 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const sent = useRef<BenchSlot[]>([])
   const runIndex = useRef<number | null>(null)
   const [measuring, setMeasuring] = useState<string | null>(null)
-  const [busyAll, setBusyAll] = useState(false)
   /** What will be written, by slot id — seeded from the measurement and
    *  overwritten the moment somebody disagrees with it. What actually reached
    *  the device is `written`. */
   const [proposals, setProposals] = useState<Record<string, number>>({})
   const [chosen, setChosen] = useState<string[] | null>(null)
-  const [playTick, setPlayTick] = useState(0)
   const [helping, setHelping] = useState(false)
   const [scenes, setScenes] = useState<Record<number, SceneRow>>({})
   const [sceneBusy, setSceneBusy] = useState(false)
@@ -125,9 +125,24 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
    *  riff was wrong meant waiting out three more. */
   const abort = useRef(false)
   const [runAt, setRunAt] = useState<{ n: number; total: number } | null>(null)
-  const [auditing, setAuditing] = useState<string | null>(null)
+  /** The one long-running thing, if any. `at` is the slot an audition is on. */
+  const [run, setRun] = useState<Run | null>(null)
+  const busyAll = run !== null && run.kind !== 'audition'
+  const auditing = run?.kind === 'audition' ? run.at ?? null : null
   const [keysOpen, setKeysOpen] = useState(false)
+  /**
+   * One playback model. `playing` goes true when we ask and comes back false
+   * ONLY on the service's `play` event: `do_play` returns the moment it has
+   * spawned its thread, so awaiting the call said nothing about the sound.
+   * Two flags used to disagree about this — `P` twice started two playbacks
+   * and the Stop button was `disabled={playing}`, so it could not be pressed.
+   */
   const [playing, setPlaying] = useState(false)
+  const playWaiters = useRef<Array<() => void>>([])
+  /** Resolves when the riff has finished (or failed) — the `play` event. */
+  const played = (): Promise<void> => new Promise((res) => playWaiters.current.push(res))
+  /** What the space bar does right now: the recorder's foot, owned by Measured. */
+  const foot = useRef<(() => void) | null>(null)
 
   const live = snap.daemon.state === 'running'
   const slot: BenchSlot | undefined = bench[focus]
@@ -170,7 +185,12 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       } else if (e.event === 'cancelled') {
         setRunAt(null)
         say(t('lvl.stopped', { n: String(e.done), total: String(e.total) }), false)
-      } else if (e.event === 'play') { setPlayTick((n) => n + 1) }
+      } else if (e.event === 'play') {
+        setPlaying(false)
+        if (e.error) setError(cleanish(e.error))
+        const w = playWaiters.current; playWaiters.current = []
+        w.forEach((f) => f())
+      }
       else if (e.event === 'scene_measuring') setSceneAt(e.scene)
       else if (e.event === 'scene_measured') {
         setScenes((r) => ({ ...r, [e.row.scene]: e.row }))
@@ -403,13 +423,14 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   /** Play the riff through the preset in front of you, or stop it. */
   const togglePlay = useCallback(async (): Promise<void> => {
     try {
-      if (playing) { await window.patchbay.leveling.sampleStopPlay(); setPlaying(false); return }
+      // Stop clears nothing itself: the service's `play` event does, once the
+      // stream has actually stopped.
+      if (playing) { await window.patchbay.leveling.sampleStopPlay(); return }
       setPlaying(true)
       await window.patchbay.leveling.samplePlay()
     } catch (e) {
-      setError(cleanish((e as Error).message))
-    } finally {
       setPlaying(false)
+      setError(cleanish((e as Error).message))
     }
   }, [playing])
 
@@ -429,7 +450,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     const list = bench.filter((b) => want.includes(slotId(b)))
     sent.current = list
     runIndex.current = null
-    setBusyAll(true); setRows({}); setProposals({}); setError(null)
+    setRun({ kind: 'measure' }); setRows({}); setProposals({}); setError(null)
     setRunAt({ n: 0, total: list.length })
     void window.patchbay.leveling
       .measureMany(
@@ -439,7 +460,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         { target }
       )
       .catch((e: Error) => setError(cleanish(e.message)))
-      .finally(() => { setBusyAll(false); setMeasuring(null); setRunAt(null) })
+      .finally(() => { setRun(null); setMeasuring(null); setRunAt(null) })
   }, [busyAll, bench, wanted, target])
 
   const applyAll = useCallback((): void => {
@@ -448,7 +469,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     // first preset for a reason nobody can see.
     abort.current = false
     const want = wanted()
-    setBusyAll(true)
+    setRun({ kind: 'apply' })
     void (async () => {
       for (const b of bench.filter((x) => want.includes(slotId(x)))) {
         if (abort.current) break
@@ -469,7 +490,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           }
         } catch (e) { rowFail(b, cleanish((e as Error).message)) }
       }
-      setBusyAll(false)
+      setRun(null)
       void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
     })()
   }, [busyAll, bench, wanted, rows, proposals, rowFail, putWritten])
@@ -477,7 +498,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const saveAll = useCallback((): void => {
     const pending = unsavedIds(written)
     if (pending.length === 0 || busyAll) return
-    setBusyAll(true)
+    setRun({ kind: 'save' })
     void (async () => {
       for (const b of bench.filter((x) => pending.includes(slotId(x)))) {
         try {
@@ -486,7 +507,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           putWritten((w) => markSaved(w, slotId(b)))
         } catch (e) { rowFail(b, cleanish((e as Error).message)) }
       }
-      setBusyAll(false)
+      setRun(null)
     })()
   }, [written, busyAll, bench, rowFail, putWritten])
 
@@ -516,13 +537,20 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     void (async () => {
       for (const b of list) {
         if (abort.current) break
-        setAuditing(slotId(b))
+        setRun({ kind: 'audition', at: slotId(b) })
         try {
           await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
-          await window.patchbay.leveling.samplePlay()
+          // Wait for the riff to END, not for the call to return — do_play
+          // answers as soon as its thread is up, so without this the loop
+          // recalled the next preset a few hundred ms into each one.
+          const done = played()
+          setPlaying(true)
+          try { await window.patchbay.leveling.samplePlay() }
+          catch (e) { setPlaying(false); playWaiters.current = []; throw e }
+          await done
         } catch (e) { rowFail(b, cleanish((e as Error).message)); break }
       }
-      setAuditing(null)
+      setRun(null)
       abort.current = false
     })()
   }, [auditing, bench, wanted, rowFail])
@@ -542,8 +570,9 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   useEffect(() => {
     const key = shortcut
     const onKey = (e: KeyboardEvent): void => {
-      if (typing(e)) return
+      if (typing(e) || e.repeat) return
 
+      if (matches(e, key('keys.record'))) { e.preventDefault(); foot.current?.(); return }
       if (matches(e, key('keys.play'))) { e.preventDefault(); void togglePlay(); return }
       if (matches(e, key('keys.measure'))) { e.preventDefault(); measureAll(); return }
       if (matches(e, key('keys.listen'))) { e.preventDefault(); audition(); return }
@@ -635,7 +664,9 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         target={target}
         onTarget={setTarget}
         step={autoStep}
-        playDone={playTick}
+        playing={playing}
+        onPlay={() => void togglePlay()}
+        foot={foot}
         onTrimmed={() => {
           // The run moved the fader on the device; re-read so the bench agrees.
           setAutoStep(null)

@@ -18,6 +18,9 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', (_e, level, msg) => { if (level >= 2) console.error('[page]', msg) })
   await win.loadURL(url)
   await new Promise((r) => setTimeout(r, Number(waitMs)))
+  // a page that keeps a #log (the no-jump check) gets it printed
+  const log = await win.webContents.executeJavaScript("document.getElementById('log')?.textContent ?? ''")
+  if (log) console.log(log)
   const img = await win.webContents.capturePage()
   writeFileSync(out, img.toPNG())
   console.log('wrote', out, img.getSize())

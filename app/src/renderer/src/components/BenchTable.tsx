@@ -5,7 +5,7 @@ import type { BenchSlot, MeterOutput, ReportRow } from '@shared/types'
 import { t } from '../i18n.js'
 import { MOD } from '../keys.js'
 import { slotId } from '../bench.js'
-import type { WrittenMap } from '../bench.js'
+import type { Step, WrittenMap } from '../bench.js'
 import { channels, CEIL, FLOOR } from './Meter.js'
 
 /**
@@ -158,6 +158,8 @@ export interface BenchTableProps {
   nowDb: Record<string, number>
   meter: Record<string, MeterOutput> | null
   autoSave: boolean
+  /** Which of this band's buttons is the screen's one primary, if any. */
+  primary: Step
   /** One line of what went wrong, for the band's footline; null when nothing did. */
   footline: string | null
   onDismissFootline: () => void
@@ -181,7 +183,7 @@ export interface BenchTableProps {
 
 export function BenchTable({
   slots, rows, metric, busy, progress, listening, written, proposals, selected,
-  focusId, pendingId, drawerOpen, drawer, nowDb, meter, autoSave, footline, onDismissFootline,
+  focusId, pendingId, drawerOpen, drawer, nowDb, meter, autoSave, primary, footline, onDismissFootline,
   canSaveRow, onAutoSave, onToggle, onPropose, onNudge, onResetProposal, onUndoOne, onSaveRow,
   onFocus, onOpen, onMeasure, onListen, onApply, onSave, onRevert, onAdd
 }: BenchTableProps): React.JSX.Element {
@@ -215,7 +217,8 @@ export function BenchTable({
           <i className="dot-unsaved" />{t('rep.unsaved', { n: String(unsaved.length) })}
         </Badge>
         <span className="grow" />
-        <Button size="sm" disabled={busy || slots.length === 0} onClick={onMeasure}
+        <Button size="sm" variant={primary === 'measure' ? 'primary' : undefined}
+                disabled={busy || slots.length === 0} onClick={onMeasure}
                 title={t('rep.measureHint')}>
           {t('lvl.measureAll')} <kbd>M</kbd>
         </Button>
@@ -224,7 +227,7 @@ export function BenchTable({
           {listening ? t('lvl.stop') : t('lvl.listen')} <kbd>L</kbd>
         </Button>
         <span className="bt-sep" />
-        <Button size="sm" variant="primary"
+        <Button size="sm" variant={primary === 'apply' ? 'primary' : undefined}
                 disabled={busy || selected.length === 0 || measured.length === 0}
                 onClick={onApply} title={t('rep.applyHint')}>
           {t('lvl.applyN', { n: String(selected.length) })} <kbd>{MOD}↵</kbd>
@@ -232,7 +235,8 @@ export function BenchTable({
         <Button size="sm" variant="ghost" disabled={applied.length === 0} onClick={onRevert}>
           {t('lvl.undo')}
         </Button>
-        <Button size="sm" disabled={busy || unsaved.length === 0} onClick={onSave}>
+        <Button size="sm" variant={primary === 'save' ? 'primary' : undefined}
+                disabled={busy || unsaved.length === 0} onClick={onSave}>
           {t('lvl.saveN', { n: String(unsaved.length) })} <kbd>{MOD}⇧S</kbd>
         </Button>
         <label className="lvl-auto" title={t('lvl.autosaveTitle')}>

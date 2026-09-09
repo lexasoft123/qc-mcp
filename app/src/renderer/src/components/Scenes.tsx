@@ -47,7 +47,7 @@ export function Scenes({
         <Button size="sm" disabled={busy} onClick={onMeasure}>
           {busy ? t('scn.measuring', { at: progress !== null ? LETTERS[progress] : '' }) : t('scn.measure')}
         </Button>
-        <Button size="sm" variant="primary"
+        <Button size="sm"
                 disabled={busy || measured.length === 0 || selected.length === 0}
                 onClick={onApply}>
           {t('scn.apply', { n: String(selected.length) })}

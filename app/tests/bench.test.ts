@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  appliedIds, attribute, focusIndex, forget, forgetApplied, isDirty, leave, markSaved, note,
-  slotId, unsavedIds
+  appliedIds, attribute, focusIndex, forget, forgetApplied, isDirty, leave, markSaved, nextStep, note,
+  savePlan, slotId, unsavedIds
 } from '../src/renderer/src/bench.ts'
 import type { BenchSlot, ReportRow } from '../src/shared/types.ts'
 
@@ -96,4 +96,61 @@ test('an ambiguous row is nobody\'s, never a guess', () => {
   assert.equal(attribute(sent, null, row(0)), null)
   assert.equal(attribute(sent, 9, row(9)), null, 'nothing at that index or position')
   assert.equal(attribute([], 0, row(0)), null)
+})
+
+// ── the single primary ─────────────────────────────────────────────────
+
+test('exactly one primary, walking record → measure → apply → save', () => {
+  const base = { hasTake: false, measured: 0, selected: 5, unsaved: 0, running: false }
+  assert.equal(nextStep(base), 'rec')
+  assert.equal(nextStep({ ...base, hasTake: true }), 'measure')
+  assert.equal(nextStep({ ...base, hasTake: true, measured: 5 }), 'apply')
+  assert.equal(nextStep({ ...base, hasTake: true, measured: 5, unsaved: 2 }), 'save')
+  assert.equal(nextStep({ ...base, unsaved: 1 }), 'save', 'a by-ear edit with no riff still wants saving')
+  assert.equal(nextStep({ ...base, hasTake: true, measured: 5, selected: 0 }), 'measure', 'nothing selected: Apply is dead')
+})
+
+test('a run in progress has no next step', () => {
+  for (const f of [
+    { hasTake: false, measured: 0, selected: 5, unsaved: 0 },
+    { hasTake: true, measured: 5, selected: 5, unsaved: 3 }
+  ]) assert.equal(nextStep({ ...f, running: true }), null)
+})
+
+test('every reachable state yields at most one primary', () => {
+  const seen = new Set<string>()
+  for (const hasTake of [false, true]) for (const measured of [0, 3]) for (const selected of [0, 3])
+    for (const unsaved of [0, 2]) for (const running of [false, true]) {
+      const s = nextStep({ hasTake, measured, selected, unsaved, running })
+      assert.ok(s === null || ['rec', 'measure', 'apply', 'save'].includes(s))
+      seen.add(String(s))
+    }
+  assert.deepEqual([...seen].sort(), ['apply', 'measure', 'null', 'rec', 'save'])
+})
+
+// ── Save-all that saves ────────────────────────────────────────────────
+
+test('the loaded preset saves as it stands, and first', () => {
+  const w = note(note({}, 'b', 2, 'apply'), 'a', null, 'ear')
+  assert.deepEqual(savePlan(w, 'a', ['b', 'a']), [
+    { id: 'a', how: 'save' }, { id: 'b', how: 'reapply', db: 2 }
+  ])
+})
+
+test('an Apply trim elsewhere is applied again after the recall, not just re-saved', () => {
+  const w = note(note({}, 'a', 3.4, 'apply'), 'b', -0.2, 'apply')
+  assert.deepEqual(savePlan(w, null, ['a', 'b']), [
+    { id: 'a', how: 'reapply', db: 3.4 }, { id: 'b', how: 'reapply', db: -0.2 }
+  ])
+})
+
+test('by-ear and scene edits are only saved while loaded', () => {
+  const w = note(note({}, 'a', null, 'ear'), 'b', null, 'scenes')
+  assert.deepEqual(savePlan(w, null, ['a', 'b']), [], 'unrecoverable off the device: not offered')
+  assert.deepEqual(savePlan(w, 'b', ['a', 'b']), [{ id: 'b', how: 'save' }])
+})
+
+test('saved records and slots off the bench are left alone', () => {
+  const w = markSaved(note(note({}, 'a', 1, 'apply'), 'gone', 2, 'apply'), 'a')
+  assert.deepEqual(savePlan(w, 'a', ['a']), [])
 })

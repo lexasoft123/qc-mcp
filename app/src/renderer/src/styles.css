@@ -1060,10 +1060,14 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
 .drw-out.bad { color: var(--sz-danger-surface-text); }
 
 /* ── the dock: a footer band with a permanently reserved run cell ── */
+/* a fixed 29 px row: the run chip is the tallest thing that can appear in it,
+   and the whole band is sized as if it were always there */
 .dock {
   display: flex; align-items: center; gap: 14px; flex-wrap: nowrap; min-width: 0;
-  padding: 9px 16px; border-top: 1px solid var(--sz-line); background: var(--sz-footer-fill);
+  height: 48px; padding: 0 16px; border-top: 1px solid var(--sz-line); background: var(--sz-footer-fill);
 }
+.dock > * { flex: none; }
+.dock .grow { flex: 1 1 auto; }
 .dock.bad { border-color: var(--sz-danger-strong-line); background: var(--sz-danger-strong-wash); }
 .dock .dp { display: flex; align-items: center; gap: 7px; }
 .dock .dp i {
@@ -1086,7 +1090,7 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
   font-variant-numeric: tabular-nums; font-variation-settings: 'wdth' 87.5;
 }
 .dock .dp.lim b { color: var(--sz-danger-strong); }
-.dock-run { flex: none; width: 250px; display: flex; justify-content: flex-end; min-width: 0; }
+.dock-run { width: 250px; height: 29px; display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
 .dock-run .lvl-run { max-width: 100%; min-width: 0; }
 .lvl-run-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dock-state {

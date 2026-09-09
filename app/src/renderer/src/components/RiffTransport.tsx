@@ -27,7 +27,7 @@ const pos = (dbfs: number | null): number =>
   dbfs === null ? 0 : Math.max(0, Math.min(1, (dbfs + 60) / 60))
 
 export function RiffTransport({
-  sampler, playing, onPlay, presetName, running
+  sampler, playing, onPlay, presetName, running, primary
 }: {
   sampler: Sampler
   /** The riff is sounding through the loaded preset. */
@@ -36,6 +36,8 @@ export function RiffTransport({
   presetName: string | null
   /** A measurement or audition owns the device: nothing here may start. */
   running: boolean
+  /** REC is the screen's one accented control right now (no riff yet). */
+  primary: boolean
 }): React.JSX.Element {
   const { audio, sample, riffs, state, ready, silenceLeft, loadingRiff, error } = sampler
   const noAudio = audio !== null && !audio.available
@@ -68,7 +70,7 @@ export function RiffTransport({
       <span className="eyebrow xport-lab">{t('msd.riff')}</span>
 
       <button type="button"
-              className={`xport-btn rec${armed || recording || face === 'empty' ? ' hot' : ''}${armed ? ' pulse' : ''}`}
+              className={`xport-btn rec${armed || recording || primary ? ' hot' : ''}${armed ? ' pulse' : ''}`}
               disabled={recDisabled} onClick={sampler.foot} aria-label={recLabel}>
         <span className="g">{recording ? '■' : '●'}</span>
         <span className="c">{recLabel}</span>

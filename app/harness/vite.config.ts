@@ -13,7 +13,8 @@ export default defineConfig({
         transport: resolve(__dirname, 'transport.html'),
         modes: resolve(__dirname, 'modes.html'),
         keys: resolve(__dirname, 'keys.html'),
-        bench: resolve(__dirname, 'bench.html')
+        bench: resolve(__dirname, 'bench.html'),
+        nojump: resolve(__dirname, 'nojump.html')
       }
     }
   }

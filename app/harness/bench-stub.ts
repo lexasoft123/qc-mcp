@@ -57,6 +57,8 @@ let sample: SampleState = scenario === 'empty'
       path: '/riff.wav', duration_s: 6.8, peak_dbfs: -6.0, lufs: -21.4,
       peaks: Array.from({ length: 160 }, (_, i) => Math.max(0.05, Math.sin(i / 160 * Math.PI) ** 0.6 * (Math.abs(Math.sin(i * 0.7)) ** 2 * 0.75 + 0.3))) }
 
+export const setSample = (s: SampleState): void => { sample = s }
+export const getSample = (): SampleState => sample
 export let prefs = { bench: scenario === 'empty' ? [] : SLOTS, benchAutoSave: false, mode: 'direct', language: 'en' }
 let rerender: (() => void) | null = null
 /** What the main process would push: enough Snapshot for the Leveling view. */

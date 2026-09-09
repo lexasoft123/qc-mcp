@@ -5,8 +5,8 @@ import type {
 } from '@shared/types'
 import { cleanError } from '../derive.js'
 import {
-  attribute, appliedIds, focusIndex, forget, forgetApplied, isDirty, leave, markSaved, note,
-  slotId, unsavedIds
+  attribute, appliedIds, focusIndex, forget, forgetApplied, isDirty, leave, markSaved, nextStep,
+  note, savePlan, slotId, unsavedIds
 } from '../bench.js'
 import type { Written, WrittenMap } from '../bench.js'
 import { MOD, matches, shortcut, typing } from '../keys.js'
@@ -493,21 +493,46 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     })()
   }, [busyAll, bench, wanted, rows, proposals, rowFail, putWritten])
 
+  /**
+   * Save every unsaved trim — actually save it.
+   *
+   * `open` then `save` wrote nothing: a trim lives in the working grid, the
+   * recall reloaded the file over it, and the file was saved onto itself.
+   * `savePlan` says what each slot needs: the loaded preset saves as it
+   * stands (first — its edits die at the next recall); an Apply trim elsewhere
+   * is applied AGAIN after its recall, then saved.
+   */
   const saveAll = useCallback((): void => {
-    const pending = unsavedIds(written)
-    if (pending.length === 0 || busyAll) return
+    const plan = savePlan(writtenRef.current, focusRef.current, bench.map(slotId))
+    if (plan.length === 0 || busyAll) return
     setRun({ kind: 'save' })
     void (async () => {
-      for (const b of bench.filter((x) => pending.includes(slotId(x)))) {
+      let landed: BenchSlot | null = null
+      for (const a of plan) {
+        const b = bench.find((x) => slotId(x) === a.id)
+        if (!b) continue
         try {
-          await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
+          if (a.how === 'reapply') {
+            await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
+            landed = b
+            const res = await window.patchbay.leveling.applyTrim({
+              folderKey: b.folderKey, position: b.position, isFactory: false, cloudId: b.cloudId,
+              row: rows[a.id]?.row, db: a.db
+            })
+            if (res.error) { rowFail(b, res.error); continue }
+          }
           await window.patchbay.leveling.save()
-          putWritten((w) => markSaved(w, slotId(b)))
+          putWritten((w) => markSaved(w, a.id))
         } catch (e) { rowFail(b, cleanish((e as Error).message)) }
+      }
+      // the device is on whichever preset was recalled last; follow it
+      if (landed) {
+        setFocusId(slotId(landed))
+        void window.patchbay.leveling.state().then((p) => { liveLanes.current = p.lanes; setPreset(p) }).catch(() => undefined)
       }
       setRun(null)
     })()
-  }, [written, busyAll, bench, rowFail, putWritten])
+  }, [busyAll, bench, rows, rowFail, putWritten])
 
   const undoAll = useCallback((): void => {
     if (appliedIds(written).length === 0) return
@@ -638,6 +663,14 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const nowDb: Record<string, number> = focusId !== null && preset
     ? { ...lastLevel, [focusId]: level }
     : lastLevel
+  const selectedIds = chosen ?? bench.map(slotId)
+  const primary = nextStep({
+    hasTake: Boolean(sampler.sample?.path),
+    measured: bench.filter((b) => rows[slotId(b)]?.measured !== undefined).length,
+    selected: selectedIds.length,
+    unsaved: unsavedIds(written).filter((id) => bench.some((b) => slotId(b) === id)).length,
+    running: busyAll || auditing !== null
+  })
 
   return (
     <div className="view lvl">
@@ -671,6 +704,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           onPlay={() => void togglePlay()}
           presetName={preset?.name ?? slot?.name ?? null}
           running={busyAll || auditing !== null}
+          primary={primary === 'rec'}
         />
 
         <BenchTable
@@ -682,8 +716,9 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           listening={auditing !== null}
           written={written}
           proposals={proposals}
-          selected={chosen ?? bench.map(slotId)}
+          selected={selectedIds}
           focusId={focusId}
+          primary={primary}
           pendingId={pendingId}
           drawerOpen={drawerOpen}
           nowDb={nowDb}

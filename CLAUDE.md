@@ -191,6 +191,18 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   the legend and the `?` sheet are generated from that list, and `shortcut(key)`
   is the only way to look one up — `SHORTCUTS.find(...)!` returned undefined
   after a rename and took every keydown in the window down with it.
+- **The Leveling screen must not jump.** Every band whose content varies keeps
+  its size: alternatives in one cell are all mounted and toggled by visibility,
+  numeric cells have fixed widths, prose gets one ellipsised footline per band,
+  the dock reserves its run-chip cell, the drawer has a fixed min-height. Only
+  the bench rows scroll. `app/harness/nojump.html` walks the view through its
+  states with a ResizeObserver on every band and logs any jump; run it headless
+  with `npx electron harness/shot.mjs http://localhost:4173/nojump.html out.png
+  19000` after `npx vite build -c harness/vite.config.ts` + `vite preview`
+  (`.claude/launch.json` has the server). `shot.mjs` renders any harness page to
+  a PNG the same way — the Browser pane cannot screenshot while hidden. Exactly
+  ONE control is `variant="primary"` at a time (`bench.nextStep`), and every
+  `backdrop-filter: blur()` needs a `body.win` override (`tests/styles.test.ts`).
 - **A bench run is ONE call that loops server-side.** Stopping it needs the
   `cancel` op (`leveling.py` sets a flag `measure_many` reads between presets);
   a client-side flag stops only what the renderer loops over itself — Apply and

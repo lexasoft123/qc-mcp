@@ -81,7 +81,7 @@ export function RowDrawer({
         <span className="drw-hint">{t('lvl.drawer.hint')}</span>
         <span className="grow" />
         <Badge className={`attn${dirty ? '' : ' hide'}`}>{t('lvl.unsaved')}</Badge>
-        <Button size="sm" variant="primary" disabled={!dirty || busy} onClick={onSave}>
+        <Button size="sm" disabled={!dirty || busy} onClick={onSave}>
           {saving ? t('lvl.saving') : t('lvl.save')}
         </Button>
       </div>

@@ -102,3 +102,58 @@ export function attribute(sent: BenchSlot[], index: number | null, row: ReportRo
   const byPos = sent.filter((b) => b.position === row.position)
   return byPos.length === 1 ? slotId(byPos[0]) : null
 }
+
+/**
+ * The one accented button.
+ *
+ * Exactly one control on the screen is primary at a time, and it walks the
+ * job: record a riff, measure, apply, save. A first-time user and a returning
+ * one get the same obvious next action without a paragraph explaining the
+ * screen — and nothing else may claim the accent.
+ */
+export type Step = 'rec' | 'measure' | 'apply' | 'save' | null
+
+export function nextStep(f: {
+  hasTake: boolean
+  measured: number
+  selected: number
+  unsaved: number
+  /** A run owns the device: nothing is the next thing to do. */
+  running: boolean
+}): Step {
+  if (f.running) return null
+  if (f.unsaved > 0) return 'save'
+  if (!f.hasTake) return 'rec'
+  if (f.measured === 0 || f.selected === 0) return 'measure'
+  return 'apply'
+}
+
+/**
+ * What Save-all has to do, per slot.
+ *
+ * The naive version — open each preset, save it — writes nothing: the trim
+ * lives in the device's working grid, so recalling the preset reloads the
+ * file OVER the trim and saves it back onto itself. The loaded preset can be
+ * saved as it stands. Any other slot's Apply trim is a known number and is
+ * applied again after the recall, then saved. A by-ear or per-scene edit
+ * elsewhere cannot be reconstructed and is not offered — it is only ever
+ * saved while its preset is loaded.
+ */
+export type SaveAction =
+  | { id: string; how: 'save' }
+  | { id: string; how: 'reapply'; db: number }
+
+export function savePlan(w: WrittenMap, loadedId: string | null, ids: string[]): SaveAction[] {
+  const out: SaveAction[] = []
+  // the loaded one first: its edits exist only until the next recall
+  if (loadedId !== null && ids.includes(loadedId) && isDirty(w, loadedId)) {
+    out.push({ id: loadedId, how: 'save' })
+  }
+  for (const id of ids) {
+    if (id === loadedId) continue
+    const x = w[id]
+    if (!x || x.saved) continue
+    if (x.source === 'apply' && x.db !== null) out.push({ id, how: 'reapply', db: x.db })
+  }
+  return out
+}

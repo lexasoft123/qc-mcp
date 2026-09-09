@@ -522,6 +522,38 @@ def test_stale_records_need_no_cleanup_to_stop_lying():
         L.release(sock)
 
 
+def test_neither_backend_writes_into_a_closed_device():
+    """A write after close() must raise, on BOTH backends.
+
+    macOS had no guard: close() sets `self.dev = None`, ctypes handed that NULL
+    to IOHIDDeviceSetReport, and the process died with SIGSEGV
+    (KERN_INVALID_ADDRESS at 0x18) — no traceback, no catchable exception. It
+    fired on every Disconnect once transport.close() began sending a Connection
+    frame of its own: the daemon closes twice on SIGTERM (the handler, then
+    serve_forever's finally), and the second pass wrote to a released device.
+    Windows raised RuntimeError here all along; this keeps the pair honest.
+    """
+    from qc_mcp import iohid                     # noqa: PLC0415
+
+    for make in (lambda: iohid.IOHIDTransport(), lambda: winhid.WinHIDTransport()):
+        t = make()
+        t.close()                                # never opened: must be a no-op
+        try:
+            t.set_report(1, b"\x00" * 8)
+            raise AssertionError(f"{type(t).__name__} wrote into a closed device")
+        except RuntimeError:
+            pass
+
+
+def test_closing_twice_is_safe_on_both_backends():
+    """close() is called twice on every daemon SIGTERM; it must not care."""
+    from qc_mcp import iohid                     # noqa: PLC0415
+
+    for t in (iohid.IOHIDTransport(), winhid.WinHIDTransport()):
+        t.close()
+        t.close()
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

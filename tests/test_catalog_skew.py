@@ -117,6 +117,41 @@ def test_every_numeric_skew_in_the_catalog_round_trips():
     assert checked > 500, "expected hundreds of skewed params, saw %d" % checked
 
 
+def test_input_level_is_the_measured_minus12_to_plus60():
+    """IN 1 LEVEL is a preamp trim, not a fader: it runs -12 .. +60 dB.
+
+    ModelRepo declares IOSettings levels as a literal min=0 max=1, so the
+    generic range code believes the DISPLAY range is 0..1 and converts nothing.
+    Measured on a QC (CorOS 4.1.0) 2026-09-09 against Cortex Control: minimum
+    reads -12.00 dB, maximum +60.00 dB. The interior point is the one that
+    matters -- the untouched 0.166667 reads 0.00 dB, landing exactly on the
+    straight line, which is what rules out a taper.
+    """
+    assert catalog.io_level_range(0) == (-12.0, 60.0)
+    assert abs(catalog.io_level_to_db(0, 0.0) - (-12.0)) < 1e-9
+    assert abs(catalog.io_level_to_db(0, 1.0) - 60.0) < 1e-9
+    # the interior anchor, and the round trip back to it
+    assert abs(catalog.io_level_to_db(0, 0.166667) - 0.0) < 1e-3
+    assert abs(catalog.io_level_from_db(0, 0.0) - 1 / 6) < 1e-9
+
+
+def test_both_inputs_share_the_range():
+    """IN 2 confirmed independently, from a different resting value: 0.513889
+    reads 25.00 dB on the app, and -12 + 0.513889*72 = 25.000."""
+    assert catalog.io_level_range(5) == (-12.0, 60.0)
+    assert abs(catalog.io_level_to_db(5, 0.513889) - 25.0) < 1e-3
+
+
+def test_unmeasured_io_levels_say_so_rather_than_guessing():
+    """Sends, returns, outputs, headphones and USB are still unmeasured; None
+    keeps a caller honest instead of handing back a plausible-looking dB from
+    the wrong range."""
+    for idx in (10, 12, 16, 22, 43):    # SEND 1, RET 1, OUT 3, HP, USB
+        assert catalog.io_level_range(idx) is None, idx
+        assert catalog.io_level_to_db(idx, 0.5) is None, idx
+        assert catalog.io_level_from_db(idx, 0.0) is None, idx
+
+
 if __name__ == "__main__":
     fns = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
     ok = 0

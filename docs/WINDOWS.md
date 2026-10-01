@@ -61,6 +61,20 @@ It separates the three ways this fails and tells you which one you hit:
 `--list` dumps every HID interface on the machine without opening anything, which
 is what to attach to a bug report when the QC doesn't show up.
 
+## Updating an editable install
+
+`pip install -e .` rewrites `.venv\Scripts\qc-mcp.exe`, and Windows will not
+let it while an MCP client still has a server running from that file: pip
+uninstalls the old package, fails on the launcher ("Check the permissions"),
+and leaves the environment with **no `qc_mcp` at all**. Every new session then
+reports `quad-cortex: Connection closed`, while the offline tests still pass
+(they add `src/` to the path themselves). Stop the servers first:
+
+```powershell
+Get-Process qc-mcp -ErrorAction SilentlyContinue | Stop-Process -Force
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
 ## Running alongside Cortex Control
 
 This works on Windows, and needs **no interposer at all**.

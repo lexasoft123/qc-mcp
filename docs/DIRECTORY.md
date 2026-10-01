@@ -288,17 +288,63 @@ wire, and a `File` CREATE without `type` was silently ignored, so always set
 record (plus `UndoRedo` / `RecentsFavorites` echoes). Verified = replayed from
 our own handle and confirmed by re-reading the directory.
 
-- **Create a setlist** (app's request; replay not yet verified — the device
-  **caps user setlists at 12**, and the test unit was full):
-  `File{CREATE, type:0, folder{key:"/media/p4/Presets/<name>", parent_key:"",
-  name:"<name>", is_factory:false, is_plugin:false}}` → reply: the same folder
-  record, no files. Saving into a non-existent folder key does NOT create it.
+**Reading only the user's content (what Cortex Control does on connect).** The
+app's directory READ is `File{READ, omit_factory_content:true}`. The device then
+streams ~28 folders instead of ~590 (user setlists, Downloads, the plugins'
+User folders, user captures and IRs — no factory library), and it **opens the
+stream with a bare `File{user_content_estimate:<n>}`** (request_id 0): the
+number of named items that will follow. So the end of the listing is known —
+stop when that many have arrived — instead of guessed from a quiet window.
+Measured on a Mini with ~2100 user items: 1.7 s, against 6-12 s for the full
+READ that `transport.list_directory()` sends (which is still what a search of
+the factory captures/IRs needs).
+
+- **Create a setlist** — verified 2026-09-20 from our own handle: `File{CREATE, type:0,
+  folder{key:"/media/p4/Presets/<name>", parent_key:"", name:"<name>",
+  is_factory:false, is_plugin:false}}` → reply: the same folder record, no
+  files. Send every field explicitly — the three attempts without `type` were
+  silently ignored. The device **caps user setlists at 12**; saving into a
+  non-existent folder key does NOT create it.
+- **Rename a setlist** — verified 2026-09-20: replayed from our own shared handle
+  with Cortex Control open (34-preset setlist: same presets in the same slots
+  under the new key; **the app's setlist view updated by itself at once**, since
+  the device's `File` UPDATE reply is broadcast to every handle and the app sent
+  nothing in response). The app's request:
+  `File{UPDATE, type:0, folder{key:"/media/p4/Presets/<old>", name:"<new>",
+  is_factory:false}}` → reply `File{UPDATE, folder{key:<old key>},
+  to_folder{key:"/media/p4/Presets/<new>", name:"<new>", …}}`. **The key is the
+  path, so it changes with the name**: every preset in it gets a new file key,
+  and anything holding the old key (current `SetlistPosition`, favourites, a
+  cached directory) must be re-read. The device then re-homes Recents on its
+  own — per recent preset a `RecentsFavorites` DELETE of the old entry followed
+  by a new one under the new folder key.
+- **Delete a setlist** — verified 2026-09-20 from our own handle on a throw-away
+  setlist (created, two presets copied in, deleted; every slot of the ten other
+  setlists unchanged in the listing afterwards). The app's request:
+  `File{DELETE, type:0, folder{key:"/media/p4/Presets/<name>",
+  is_factory:false}, delete_from_library:false}` → reply `File{DELETE,
+  folder{key, name, …}}`. **One message removes the folder and everything in
+  it** (seen on setlists holding 32 and 36 presets — no per-file deletes, no
+  confirmation on the wire; the app asks the user first). Treat as the most
+  destructive op there is: copy out anything unique beforehand.
 - **Copy a preset** between setlists — verified, keeps author/author_id/tags/date:
   `File{COPY, type:0, folder{key:<src setlist>, is_factory:false,
   is_downloads:false, files{key:"<src setlist>/<name>.pb"}},
   to_folder{key:<dst setlist>, files{index:<dst slot>}}}`.
   Reply: `UndoRedo`, then the destination folder with the new file (index, name,
-  author…). Built a 30-preset setlist this way in ~20 s.
+  author…). ~0.25 s per preset. **Byte-identical**: the raw `BinaryPreset` of a
+  copy equals its source minus `hash`/`date` (checked on several presets, MIDI
+  out included) — the device copies the file, nothing is re-encoded.
+- **Move a preset** — verified: the same message with `action: MOVE`
+  (`MessageAction.MOVE` = 4). Works **inside one setlist** too (source slot
+  freed, content byte-identical), which makes it the in-place reorder
+  primitive: ~0.3 s per preset, so a full 30-preset reorder is a few seconds.
+- **Name clashes are not destructive.** A preset file is
+  `<setlist>/<name>.pb`, so a copy landing where that name already exists —
+  another setlist that has an XYZ, or a duplicate inside the same setlist — is
+  stored by the device as `XYZ_1`, then `_2`, `_3`…, content identical. The
+  device picks the name itself: a `name` and/or `key` proposed in
+  `to_folder.files` is ignored. A MOVE inside one setlist keeps its name.
 - **Delete a preset** — verified: `File{DELETE, type:0, folder{key:<setlist>,
   files{key:"<setlist>/<name>.pb"}}}` (the shape the device itself echoes).
 - **Rename** = re-save at the same index under the new name — verified:
@@ -311,7 +357,7 @@ our own handle and confirmed by re-reading the directory.
   `author_id`); a Grid UPDATE with those fields is a no-op and a `File` CREATE
   ignores `preset_payload`. An **Unsaved slot's live preset carries the device
   user as author**, so re-authoring = rebuild on an empty slot, then save over
-  the original. **Not production-ready**: the rebuild in `tools/wip-reauthor/`
+  the original. **Not production-ready**: a block-by-block rebuild
   reproduced blocks, per-scene params/bypass, stomps, lane blocks, labels and
   colors (0-difference `describe()` diff) but **dropped the preset's MIDI out**
   (`midi_messages*`, not covered by `describe()`), found by the owner on the

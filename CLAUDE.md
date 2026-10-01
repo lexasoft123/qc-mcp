@@ -160,11 +160,18 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   (For the bypass param index itself, see the per-scene bypass note above.)
 - **`default_scene` = the scene active at save time.** Set the scene, then
   File CREATE. A Grid UPDATE with `default_scene` is a no-op.
-- **File ops** (copy/delete/rename/setlist create, author rules): see
-  `docs/DIRECTORY.md` "File operations". Always send `type` explicitly.
+- **File ops** (preset copy/move/delete/rename, setlist create/rename/delete,
+  name clashes, author rules): see `docs/DIRECTORY.md` "File operations". Always
+  send `type` explicitly. COPY/MOVE carry the whole file (byte-identical);
+  a setlist DELETE is ONE message that takes every preset with it, unasked.
+  Renaming a setlist changes its key (the key is the path) — re-read after.
+- **User-only catalog read**: `File{READ, omit_factory_content:true}` is what
+  the app sends — ~28 folders instead of ~590, opened by a
+  `user_content_estimate` that says how many items follow (1.7 s vs 6-12 s).
 - **Never "rebuild" a preset from `describe()`** — it is a summary. A rebuild
   verified only against it silently dropped the preset's MIDI out. Diff the
-  raw `BinaryPreset` (every field) before trusting a clone.
+  raw `BinaryPreset` (every field) before trusting a clone;
+  `docs/PRESET-ANATOMY.md` lists every field and how (or whether) it is written.
 - **Captures**: block hash 14000(V1)/14001(V2) + param[5] `file_name`=`<64hex key><name>`;
   also list the key in the preset's `factory_/product_dependencies`.
 - **Loading Downloads/Plugin presets** uses `key_in_downloads` (cloud_id) / plugin key, not

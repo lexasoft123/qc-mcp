@@ -6,7 +6,8 @@ protocol, `docs/DIRECTORY.md` for the preset/capture/IR catalog + scenes,
 and `docs/COROS-4.1.md` for the 4.1 feature set (device presets, stomps,
 Global EQ / I/O presets) with usage examples.
 Supports **CorOS 4.0 and 4.1** — the schema is picked per connection from the
-device's firmware (PROTOCOL.md §12) — on **macOS and Windows** (`docs/WINDOWS.md`).
+device's firmware (PROTOCOL.md §12) — on **macOS and Windows** (`docs/WINDOWS.md`),
+and on **Linux** in direct mode only (`docs/LINUX.md`).
 
 ## Layout
 - `src/qc_mcp/`
@@ -15,6 +16,10 @@ device's firmware (PROTOCOL.md §12) — on **macOS and Windows** (`docs/WINDOWS
     same four methods: `open`/`set_report`/`read_reports`/`close`.
   - `iohid.py` — **macOS**: ctypes IOKit HID transport (input buffer must be
     report_size+1).
+  - `linuxhid.py` — **Linux**: hidraw. Reads and writes carry the report id
+    (`[id][128]`); report lengths come from the sysfs report descriptor. No
+    exclusive open exists, so `seize` is a `flock`; the node needs the udev rule
+    in `udev/` (root-only otherwise).
   - `winhid.py` — **Windows**: ctypes setupapi + hid.dll. Overlapped I/O; picks
     the collection with 129-byte reports; raises the driver's 32-report input
     queue to 512 (a directory dump overruns the default).
@@ -61,8 +66,8 @@ device's firmware (PROTOCOL.md §12) — on **macOS and Windows** (`docs/WINDOWS
 - Tests (all offline, no device): `.venv/bin/python tests/test_directory.py`,
   `tests/test_protocol_versions.py`, `tests/test_tool_docs.py` (keeps the MCP
   self-describing — every gated feature must have a tool behind it),
-  `tests/test_platform.py` (keeps the macOS and Windows backends interchangeable;
-  it's the only check on `winhid.py` from a Mac).
+  `tests/test_platform.py` (keeps the macOS, Windows and Linux backends
+  interchangeable; it's the only check on `winhid.py` from a Mac).
 - Device/GUI tools need the instrumented Cortex Control running (bridge) — see
   `interceptor/run-bridge.sh`.
 
@@ -306,7 +311,11 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   accepts it on blocks with no second function, silently wasting a switch.
   MCP: `assign_stomp` / `unassign_stomp`.
 
-## Platform split (macOS vs Windows)
+## Platform split (macOS vs Windows vs Linux)
+- **Linux is direct mode only.** Cortex Control has no Linux build, so there is
+  no session to share: `bridge_supported('linux')` is False and `connect` goes
+  straight to direct. hidraw has no exclusive open; `seize` takes a `flock` so
+  two qc-mcp processes can't interleave frames.
 - **Direct mode and running-alongside-the-app work on both**, by different means:
   macOS injects a dylib and shares the app's session; **Windows just opens a
   second NON-exclusive handle** (`QuadCortex(share=True)`) because the HID stack

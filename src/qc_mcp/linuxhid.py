@@ -23,7 +23,6 @@ Importable on any OS; only `open()` and `enumerate_devices()` need Linux.
 """
 from __future__ import annotations
 import errno
-import fcntl
 import os
 import select
 import threading
@@ -183,6 +182,7 @@ class LinuxHIDTransport:
         except OSError as e:
             raise RuntimeError(f"open {self.path} failed: {e}") from None
         if self.seize:
+            import fcntl                    # POSIX-only; keeps the module importable on Windows
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:

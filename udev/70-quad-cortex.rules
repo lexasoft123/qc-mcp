@@ -1,0 +1,4 @@
+# Give the logged-in user the Quad Cortex's HID interface (qc-mcp's Linux backend).
+# 0x152A is a USB-audio middleware vendor shared by other products, so match the
+# Neural DSP product ids too: 880a = Quad Cortex, 892f = Quad Cortex Mini.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="152a", ATTRS{idProduct}=="880a|892f", TAG+="uaccess"

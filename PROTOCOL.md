@@ -180,16 +180,20 @@ Implemented in `catalog.to_norm` / `to_display`. (A naive linear conversion put 
 "220 ms" delay at ~25 ms — always use the taper.)
 
 **Symbolic bounds.** Some `ModelRepo.xml` ranges are names, not numbers —
-`MIN_MIXER_DB`, `MAX_EQ_DB`, `MIN_FXLOOP_OUT_GAIN_DB`, `MIN_TEMPO`… (~90
+`MIN_MIXER_DB`, `MIN_EQ_DB`, `MIN_FXLOOP_OUT_GAIN_DB`, `MIN_TEMPO`… (~90
 parameters). The app resolves them from a table compiled into its binary, so the
-XML alone cannot convert those params and `to_display` returns the raw 0..1.
-`catalog.SYMBOLIC` holds the ones we have **calibrated against Cortex Control**;
-add a name only once it has been measured. Solved so far:
+XML alone cannot convert those params. Unresolved names still fall through and
+`to_display` returns the stored float as-is. `catalog.SYMBOLIC` holds the ones
+we have **calibrated against Cortex Control** as a 0–1 ↔ dB map;
+`catalog.RAW_DB_RANGE` is the other case: the device stores the display dB
+itself. Add a name only once it has been measured. Solved so far:
 
 | name | value | how it was measured |
 |---|---|---|
 | `MIN_MIXER_DB` | **-40 dB** | Lane output VOLUME `0.5` reads **-14.0 dB** in the app, |
 | `MAX_MIXER_DB` | **+12 dB** | and the untouched default `0.769230783` is 0 dB. Two points ⇒ linear over -40..+12 (-40/52 = 10/13 exactly). Confirmed on a second lane. |
+| `MIN_EQ_DB` | **-12 dB** | Parametric-3 (`#4001`) band-2 GAIN on CorOS 4.1.1: writes of -12, -7.5, 0, 0.5, 3, 6, 11.9, +12 |
+| `MAX_EQ_DB` | **+12 dB** | all read back exactly as written. Stored as the raw dB float (identity), not 0–1. `steps="241"` ⇒ 0.1 dB. Same symbols on Parametric-8 (`#4000`) and Output EQ (`#4004`). Graphic-9 (`#4005`) uses literal -12..12 and **is** stored normalized. |
 
 Lane **PAN** (idx 1) is stored 0..1 and displayed as 50L…C…50R, i.e.
 `display = (nv - 0.5)·100` — `0.35` reads "15 L", `0.65` reads "15 R".

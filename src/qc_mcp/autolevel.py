@@ -456,7 +456,10 @@ def level_scenes(qc, scenes=None, target=DEFAULT_TARGET_LUFS, metric="lufs",
         trims = [base] * MAX_SCENES
 
         for sc in wanted:
-            if not qc.set_scene(sc) or not qc._await_scene(sc):
+            # set_scene() returns None, so its result must not gate the switch:
+            # `not None` is True and skipped every scene. Confirm by Scene READ only.
+            qc.set_scene(sc)
+            if not qc._await_scene(sc):
                 out["scenes"].append({"scene": sc, "skipped": "scene switch not confirmed"})
                 continue
             res = measure(di_path=di_path, perceived=perceived)

@@ -73,8 +73,9 @@ class FakeQC:
         return True
 
     def set_scene(self, scene):
+        # Like the real QuadCortex.set_scene: fire-and-forget, returns None.
+        # Returning a bool here once hid a bug where level_scenes gated on it.
         self.scenes_set.append(scene)
-        return scene not in self.fail_scene
 
     def _await_scene(self, scene, timeout_s=2.0):
         return scene not in self.fail_scene
@@ -255,6 +256,18 @@ def test_scene_leveling_writes_all_eight_values_once():
     assert len(qc.scene_writes) == 1, "per-scene values must be written in one pass"
     _row, _col, idx, values = qc.scene_writes[0]
     assert idx == leveling.GAIN_LEVEL and len(values) == 8, (idx, len(values))
+
+
+def test_confirmed_scenes_are_measured_although_set_scene_returns_none():
+    """set_scene() returns None on the real transport; only the Scene READ in
+    _await_scene says whether the switch landed. Gating on set_scene's result
+    skipped every scene ("scene switch not confirmed")."""
+    qc = FakeQC()
+    script(m(-24.9), m(-23.2), m(-21.5), m(-25.4))
+    out = leveling.level_scenes(qc, scenes=[0, 1, 2, 3], target=-18.0, dry_run=True)
+    skipped = [s for s in out["scenes"] if s.get("skipped")]
+    assert skipped == [], skipped
+    assert [s["scene"] for s in out["scenes"]] == [0, 1, 2, 3], out["scenes"]
 
 
 def test_unconfirmed_scene_switch_is_skipped_not_written():

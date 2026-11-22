@@ -215,10 +215,16 @@ scene A, on in B. Test: `tools/gui/test_fender_scenes.py` (Fender Deluxe clean/c
 
 ## Block editing — captures, IRs, cabinet mics, bypass (verified live)
 
-**Load a capture into a block** (`transport.set_capture` / MCP `add_capture`): place a
-Neural Capture block (14000 V1 / 14001 V2), then set param[5] `file_name` (string) =
-`<64-hex key><name>`. Verified live: `add_capture(0,0,key,"CA John's 2")` placed the
-block and the editor showed "Neural Capture CA John's 2" loaded.
+**Load a capture into a block** (`transport.set_capture` / MCP `add_capture`): ONE Grid
+UPDATE carrying the Neural Capture model (14000 V1 / 14001 V2) and its param[5]
+`file_name` (string) = the capture's 64-hex key, optionally followed by its name. This is
+what Cortex Control sends (captured 2026-10-22, Cortex Control 4.1.0, CorOS 4.1.1): the
+device adds the name (param[5] reads back key + name), lists the capture in the recents
+and loads it within about a second (DSP load rises ~5 points for a V1, ~10 for a V2).
+Changing a block's capture is the same message with the other key.
+**Two messages do not work** (CorOS 4.1.1): the model placed alone first stays bypassed
+and passes the signal untouched, and a param[5] written to it afterwards does not load.
+`set_capture` used to do exactly that.
 
 **Load an IR into a block** (`transport.set_ir` / MCP `add_ir`): place an IR-loader
 block (29001 mono / 29002 stereo), then set param[2] `IR PATH` (string) = the `CIR_…`

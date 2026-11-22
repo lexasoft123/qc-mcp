@@ -460,9 +460,11 @@ class QuadCortex:
         raise QCError(f"no response to {command} within {timeout_ms}ms")
 
     @_serialized
-    def add_block(self, model_hash, row=0, column=0, wait_echo_ms=800):
+    def add_block(self, model_hash, row=0, column=0, wait_echo_ms=800, params=None):
         """Place a device block on the grid at (row, column). Sends a Grid
         UPDATE carrying just that block; the device echoes it back on success.
+        `params` ({index: value}, a str goes as string_value, else float_value) ride
+        in the same message - what a capture block needs (set_capture).
         Returns the echoed block info or None."""
         g = P.message_class("Grid")()
         g.action = P.ACTION["UPDATE"]
@@ -472,6 +474,13 @@ class QuadCortex:
         m = ch.models.add()
         m.hash = int(model_hash)
         m.column = int(column)
+        for index, value in (params or {}).items():
+            p = m.params.add()
+            p.index = int(index)
+            if isinstance(value, str):
+                p.param_values.add().string_value = value
+            else:
+                p.param_values.add().float_value = float(value)
         self.send("Grid", g)
         # capture echo
         import time
@@ -945,22 +954,14 @@ class QuadCortex:
         key concatenated with its display name (how the device binds a capture to a
         block; see docs/DIRECTORY.md). version 'v1'->block 14000, 'v2'->14001. The
         capture must already be on the device (factory, or downloaded from Cortex
-        Cloud). Returns the echoed block or None."""
+        Cloud). Returns the echoed block or None.
+
+        Model and capture go in ONE Grid UPDATE, as Cortex Control sends them. Placing
+        the empty model first and writing param[5] after it leaves the block bypassed
+        with no capture loaded (CorOS 4.1.1, docs/DIRECTORY.md)."""
         hash_ = self.CAPTURE_V2 if str(version).lower() in ("v2", "2") else self.CAPTURE_V1
-        echo = self.add_block(hash_, row=row, column=column)
-        time.sleep(0.08)
-        g = P.message_class("Grid")()
-        g.action = P.ACTION["UPDATE"]
-        g.request_id = self.next_request_id()
-        ch = g.preset.chains.add()
-        ch.row = row
-        m = ch.models.add()
-        m.column = column
-        p = m.params.add()
-        p.index = self.CAPTURE_FILE_NAME_PARAM
-        p.param_values.add().string_value = f"{capture_key}{capture_name}"
-        self.send("Grid", g)
-        return echo
+        return self.add_block(hash_, row=row, column=column,
+                              params={self.CAPTURE_FILE_NAME_PARAM: f"{capture_key}{capture_name}"})
 
     # IR-loader block ids + param indices (see docs/DIRECTORY.md).
     IR_SINGLE_M = 29001

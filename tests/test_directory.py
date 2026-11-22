@@ -108,6 +108,21 @@ def test_search_all_categories_and_limit():
     assert {h["category"] for h in directory.search(cat, "")} == {"presets", "irs", "captures"}
 
 
+def test_capture_version_from_the_file():
+    v1 = _F(0, "CA John's 2", "aa" * 32); v1.version = "1"; v1.coros_version = "4.1.1"
+    v2 = _F(1, "ENG Feral 120 12", "bb" * 32); v2.version = "2"; v2.coros_version = "4.1.1"
+    bare = _F(2, "No Field", "cc" * 32)          # an entry without the field at all
+    cat = directory.structure_directory([_Msg(2, _Folder("2_q", "My Captures", [v1, v2, bare]))])
+    files = {f["name"]: f for _fo, f in directory.iter_files(cat, "captures")}
+    assert files["ENG Feral 120 12"]["file_version"] == "2"
+    assert files["ENG Feral 120 12"]["version"] == "4.1.1"     # unchanged: coros_version
+    assert directory.capture_version(files["CA John's 2"]) == "v1"
+    assert directory.capture_version(files["ENG Feral 120 12"]) == "v2"
+    assert directory.capture_version(files["No Field"]) == "v1"
+    assert directory.find_capture(cat, "bb" * 32)["name"] == "ENG Feral 120 12"
+    assert directory.find_capture(cat, "dd" * 32) is None
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

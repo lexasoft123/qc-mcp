@@ -78,11 +78,16 @@ def capture_version(file_entry):
 
 
 def find_capture(catalog, key):
-    """The catalog entry of the capture with this key, or None."""
+    """The catalog entry of the capture with this key, or None. A capture is listed in
+    several folders, and some list only its key (My Captures does: no name, no
+    version), so the entry that has a version wins."""
+    found = None
     for _folder, f in iter_files(catalog, "captures"):
         if f["key"] == key:
-            return f
-    return None
+            if f.get("file_version"):
+                return f
+            found = found or f
+    return found
 
 
 def iter_files(catalog, category):

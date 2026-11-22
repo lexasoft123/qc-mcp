@@ -123,6 +123,18 @@ def test_capture_version_from_the_file():
     assert directory.find_capture(cat, "dd" * 32) is None
 
 
+def test_find_capture_prefers_the_entry_with_a_version():
+    # My Captures lists a key alone (no name, no version); the library lists it in full.
+    ref = _F(0, "", "bb" * 32)
+    full = _F(0, "ENG Feral 120 12", "bb" * 32); full.version = "2"
+    cat = directory.structure_directory([
+        _Msg(2, _Folder("2_q", "My Captures", [ref])),
+        _Msg(2, _Folder("/opt/neuraldsp/captures", "Captures Library", [full], is_factory=True)),
+    ])
+    assert next(directory.iter_files(cat, "captures"))[0]["name"] == "My Captures"   # listed first
+    assert directory.capture_version(directory.find_capture(cat, "bb" * 32)) == "v2"
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

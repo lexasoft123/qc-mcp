@@ -56,13 +56,14 @@ class LevelingError(RuntimeError):
 
 
 # ------------------------------------------------------------------ routing ----
-def _lane_ports(qc, row):
-    """Current (in_port, out_port) for a lane, read back from the device."""
-    bp = qc.get_current_preset()
-    if not bp or row >= len(bp.chains):
-        raise LevelingError("could not read the current preset (row %d)" % row)
-    ch = bp.chains[row]
-    return int(getattr(ch, "in_portid", 0)), int(getattr(ch, "out_portid", 0))
+def require_active(qc, expected=None):
+    """Check the target again before each batch write or readback."""
+    pointer = qc.get_setlist_position()
+    if (not pointer or (expected is not None and pointer != expected)
+            or not ((pointer.get("folder_key") and pointer.get("position") is not None)
+                    or pointer.get("downloads_key") or pointer.get("plugin_key"))):
+        raise LevelingError("could not confirm the intended preset is still active")
+    return pointer
 
 
 # Ports that mean "this lane feeds another lane", not "this lane leaves the box".
@@ -81,25 +82,38 @@ def measurement_rows(qc):
     bp = qc.get_current_preset()
     if not bp:
         raise LevelingError("could not read the current preset")
-    in_row = out_row = None
-    for pos, ch in enumerate(bp.chains):
-        has_blocks = any(getattr(m, "hash", 0) for m in ch.models)
-        ip = int(getattr(ch, "in_portid", 0) or 0)
-        op = int(getattr(ch, "out_portid", 0) or 0)
-        if in_row is None and ip in PHYSICAL_IN_PORTS:
-            in_row = pos
-        if op and op not in INTERNAL_OUT_PORTS and has_blocks:
-            out_row = pos                      # the last such lane wins: it is the tail
-    if in_row is None:
-        in_row = 0
-    if out_row is None:
-        out_row = in_row
-    return in_row, out_row
+    head = next((i for i, ch in enumerate(bp.chains) if ch.in_portid in PHYSICAL_IN_PORTS), None)
+    if head is None:
+        raise LevelingError("could not find an instrument input for the reamp")
+    internal = {16: (2,), 17: (3,), 18: (2, 3)}
+    reachable, outputs = [head], []
+    seen = set()
+    while reachable:
+        row = reachable.pop(0)
+        if row in seen or row >= len(bp.chains):
+            continue
+        seen.add(row)
+        chain = bp.chains[row]
+        port = chain.out_portid
+        if port in internal:
+            reachable.extend(internal[port])
+        elif port not in INTERNAL_OUT_PORTS:
+            outputs.append(row)
+        if row + 1 < len(bp.chains) and bp.chains[row + 1].in_portid == 7:
+            reachable.append(row + 1)
+    if outputs:
+        return head, outputs[-1]
+    # Parallel layouts can sum unrouted amp lanes into one shared output lane.
+    mixed = [i for i, chain in enumerate(bp.chains)
+             if chain.out_portid not in INTERNAL_OUT_PORTS]
+    if bp.chains[head].out_portid == 0 and len(mixed) == 1:
+        return head, mixed[0]
+    raise LevelingError("could not find the instrument path's physical output")
 
 
 @contextlib.contextmanager
 def reamp_routing(qc, row=0, in_port=IN_PORT_USB_5_6, out_port=OUT_PORT_USB_5_6,
-                  restore=True, in_row=None, out_row=None, feed=True, tap=True):
+                  restore=True, in_row=None, out_row=None, feed=True, tap=True, expected=None):
     """Point a preset at the USB reamp path for the duration of a measurement.
 
     `in_row`/`out_row` default to `row`; pass both (or let `measurement_rows` find
@@ -112,62 +126,99 @@ def reamp_routing(qc, row=0, in_port=IN_PORT_USB_5_6, out_port=OUT_PORT_USB_5_6,
     """
     ir = row if in_row is None else in_row
     orow = row if out_row is None else out_row
-    orig_in, _ = _lane_ports(qc, ir)
-    _, orig_out = _lane_ports(qc, orow)
-    try:
+    # Reserve the working grid before a concurrent save can pass its guard.
+    with qc._io_lock:
+        if getattr(qc, "_reamp_incomplete", False):
+            raise LevelingError("temporary reamp routing is active or restoration was not verified")
+        expected = require_active(qc, expected)
+        bp = qc.get_current_preset()
+        require_active(qc, expected)
+        if bp is None or not (0 <= ir < len(bp.chains) and 0 <= orow < len(bp.chains)):
+            raise LevelingError("could not read both original reamp routes")
+        orig_in = bp.chains[ir].in_portid
+        orig_out = bp.chains[orow].out_portid
+        routes = []
         if feed:
-            qc.set_routing(ir, in_portid=in_port)
+            routes.append((ir, "in_portid", in_port, orig_in))
         if tap:
-            qc.set_routing(orow, out_portid=out_port)
-        # Let it take, then confirm by reading back rather than trusting the write.
+            routes.append((orow, "out_portid", out_port, orig_out))
+
+        qc._reamp_incomplete = True
+
+    def verify(original):
+        current = qc.get_current_preset()
+        return current is not None and all(
+            r < len(current.chains) and getattr(current.chains[r], field) == (old if original else new)
+            for r, field, new, old in routes)
+
+    touched = []
+    try:
+        for r, field, new, old in routes:
+            require_active(qc, expected)
+            touched.append((r, field, old))
+            qc.set_routing(r, **{field: new})
         time.sleep(ROUTING_SETTLE_S)
-        applied_in, _ = _lane_ports(qc, ir)
-        _, applied_out = _lane_ports(qc, orow)
-        if (feed and applied_in != in_port) or (tap and applied_out != out_port):
+        if not verify(False):
             time.sleep(ROUTING_SETTLE_S)
-            applied_in, _ = _lane_ports(qc, ir)
-            _, applied_out = _lane_ports(qc, orow)
-        yield {"in_row": ir, "out_row": orow,
-               "original_in": orig_in, "original_out": orig_out,
-               "applied_in": applied_in, "applied_out": applied_out,
-               "routing_ok": ((not feed or applied_in == in_port)
-                              and (not tap or applied_out == out_port))}
+            if not verify(False):
+                raise LevelingError("could not verify temporary reamp routing")
+        require_active(qc, expected)
+        yield {"in_row": ir, "out_row": orow, "original_in": orig_in,
+               "original_out": orig_out, "applied_in": in_port if feed else orig_in,
+               "applied_out": out_port if tap else orig_out, "routing_ok": True}
     finally:
         if restore:
+            errors = []
+            for r, field, old in touched:
+                try:
+                    require_active(qc, expected)
+                    qc.set_routing(r, **{field: old})
+                except Exception as exc:
+                    errors.append(f"row {r} {field}: {exc}")
             try:
-                if feed:
-                    qc.set_routing(ir, in_portid=orig_in)
-                if tap:
-                    qc.set_routing(orow, out_portid=orig_out)
-            except Exception:
-                pass
+                time.sleep(ROUTING_SETTLE_S)
+                require_active(qc, expected)
+                if not verify(True):
+                    errors.append("readback did not match the original routes")
+            except Exception as exc:
+                errors.append(f"readback failed: {exc}")
+            if errors:
+                raise LevelingError("could not restore reamp routing: " + "; ".join(errors))
+            qc._reamp_incomplete = False
 
 
 # --------------------------------------------------------------- trim block ----
-def find_gain_block(qc, row):
-    """Column of the Gain block on `row`, or None. Reads position, not the id field."""
+def _gain_positions(qc, row):
     bp = qc.get_current_preset()
-    if not bp or row >= len(bp.chains):
-        return None
-    for col, m in enumerate(bp.chains[row].models):
-        if getattr(m, "hash", 0) == GAIN_HASH:
-            return col
-    return None
+    if bp is None or not 0 <= row < len(bp.chains):
+        raise LevelingError(f"could not read row {row} for the Gain trim")
+    chain = bp.chains[row]
+    blocks = [i for i, model in enumerate(chain.models) if model.hash]
+    # A gain after every other block and after the mix point scales the entire
+    # row. A gain feeding an amp or only one side of a split changes the tone.
+    last_block = max(blocks, default=-1)
+    last_mix = max((point.mix for point in getattr(chain, "split_control_points", ())), default=-1)
+    if (last_block >= 0 and last_block > last_mix
+            and chain.models[last_block].hash == GAIN_HASH):
+        return last_block, None
+    return None, max(last_block, last_mix) + 1
+
+
+def find_gain_block(qc, row):
+    return _gain_positions(qc, row)[0]
 
 
 def ensure_gain_block(qc, row):
-    """Return the column of the lane's Gain trim, adding one at the end if absent."""
-    col = find_gain_block(qc, row)
-    if col is not None:
-        return col, False
-    bp = qc.get_current_preset()
-    used = [i for i, m in enumerate(bp.chains[row].models) if getattr(m, "hash", 0)]
-    col = (max(used) + 1) if used else 0
-    qc.add_block(GAIN_HASH, row=row, column=col)
-    placed = find_gain_block(qc, row)
-    if placed is None:
-        raise LevelingError("failed to add a Gain trim block on row %d" % row)
-    return placed, True
+    """Return the verified downstream Gain column, adding one if necessary."""
+    existing, column = _gain_positions(qc, row)
+    if existing is not None:
+        return existing, False
+    if column >= 8:
+        raise LevelingError(f"no downstream slot for a Gain trim on row {row}")
+    qc.add_block(GAIN_HASH, row=row, column=column)
+    if find_gain_block(qc, row) != column:
+        raise LevelingError(f"failed to add a Gain trim block on row {row}")
+    return column, True
 
 
 def set_trim_db(qc, row, col, db):
@@ -178,17 +229,29 @@ def set_trim_db(qc, row, col, db):
     return db
 
 
-def read_trim_db(qc, row, col):
-    from . import catalog
+def _trim_values(qc, row, col):
     bp = qc.get_current_preset()
     try:
-        pv = bp.chains[row].models[col].params[GAIN_LEVEL]
-    except (IndexError, AttributeError):
-        return 0.0
-    raw = getattr(pv, "value", None)
-    if raw is None:
-        raw = getattr(pv, "float_value", 0.0)
-    return float(catalog.to_display(GAIN_HASH, GAIN_LEVEL, float(raw)))
+        block = bp.chains[row].models[col]
+        p = block.params[GAIN_LEVEL]
+    except (AttributeError, IndexError) as exc:
+        raise LevelingError("could not read the Gain block's LEVEL") from exc
+    values = [v.float_value for v in p.param_values if v.WhichOneof("value") == "float_value"]
+    if (block.hash != GAIN_HASH or len(values) != len(p.param_values)
+            or len(values) not in (1, MAX_SCENES) or (p.scene_mode and len(values) != MAX_SCENES)):
+        raise LevelingError("could not read the Gain block's LEVEL values")
+    return p.scene_mode, values if p.scene_mode else values[:1] * MAX_SCENES
+
+
+def read_trim_db(qc, row, col, scene=None):
+    from . import catalog
+    varying, values = _trim_values(qc, row, col)
+    if scene is None and varying:
+        st = qc.read_state("Scene", strict=True)
+        if st is None or not st.HasField("selected_scene") or not 0 <= st.selected_scene < MAX_SCENES:
+            raise LevelingError("could not read the active Gain trim scene")
+        scene = st.selected_scene
+    return float(catalog.to_display(GAIN_HASH, GAIN_LEVEL, values[scene or 0]))
 
 
 # ----------------------------------------------------------------- trims ----
@@ -296,7 +359,7 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
                   tolerance=DEFAULT_TOLERANCE_LU, max_iterations=DEFAULT_MAX_ITERATIONS,
                   row=0, di_path=None, perceived=None, dry_run=False,
                   true_peak_ceiling=TRUE_PEAK_CEILING_DBTP, trim=None, on_step=None,
-                  in_row=None, out_row=None):
+                  in_row=None, out_row=None, expected=None):
     """Measure -> correct -> verify the CURRENT preset until it lands within tolerance.
 
     `dry_run=True` measures once and reports the correction without touching anything —
@@ -312,17 +375,20 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
     block. `on_step(step)` is called after each iteration so a UI can follow along
     instead of waiting for the whole run.
     """
+    expected = require_active(qc, expected)
     if perceived is None:
         perceived = (metric == "perceived")
     if in_row is None or out_row is None:
         found_in, found_out = measurement_rows(qc)
         in_row = found_in if in_row is None else in_row
         out_row = found_out if out_row is None else out_row
+    if trim is None:
+        row = out_row
     out = {"target": target, "metric": metric, "tolerance": tolerance,
            "row": row, "in_row": in_row, "out_row": out_row,
            "iterations": [], "written": False}
 
-    with reamp_routing(qc, in_row=in_row, out_row=out_row):
+    with reamp_routing(qc, in_row=in_row, out_row=out_row, expected=expected):
         first = measure(di_path=di_path, perceived=perceived)
         if first.get("error"):
             out["error"] = first["error"]
@@ -359,6 +425,7 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
             return out
 
         knob = trim or GainBlockTrim(qc, row)
+        require_active(qc, expected)
         out["trim_block"] = knob.prepare()
         lo, hi = knob.limits
         current = knob.read()
@@ -371,6 +438,7 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
             # remaining pass and then report "did not converge" with no reason —
             # from the outside, a preset that simply refuses to level.
             pinned = abs(ideal - want) > 1e-6
+            require_active(qc, expected)
             current = knob.write(want)
             out["written"] = True
             res = measure(di_path=di_path, perceived=perceived)
@@ -390,6 +458,7 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
             # reason to accept clipping; the ceiling is a ceiling.
             if tp is not None and tp > true_peak_ceiling:
                 back = current - (tp - true_peak_ceiling)
+                require_active(qc, expected)
                 current = knob.write(loudness.clamp_db(back, lo, hi))
                 step["limited_by"] = "true_peak"
                 step["backed_off_to_db"] = current
@@ -431,62 +500,76 @@ def level_current(qc, target=DEFAULT_TARGET_LUFS, metric="lufs",
 
 def level_scenes(qc, scenes=None, target=DEFAULT_TARGET_LUFS, metric="lufs",
                  tolerance=DEFAULT_TOLERANCE_LU, row=0, di_path=None, dry_run=False,
-                 in_row=None, out_row=None):
+                 in_row=None, out_row=None, expected=None):
     """Measure and trim each scene of the current preset independently.
 
     Per-scene values only exist once the parameter is assigned to scenes, which is what
     `set_param_scenes` does; it also confirms each scene switch before writing, because
     a fixed sleep races the device and silently drops values.
     """
-    perceived = (metric == "perceived")
-    wanted = list(scenes) if scenes else list(range(MAX_SCENES))
-    out = {"target": target, "metric": metric, "row": row, "scenes": [],
-           "written": False}
+    from . import catalog
 
+    wanted = list(range(MAX_SCENES)) if scenes is None else list(dict.fromkeys(scenes))
+    if any(not isinstance(scene, int) or not 0 <= scene < MAX_SCENES for scene in wanted):
+        raise LevelingError("scenes must be numbered 0–7")
+    perceived = metric == "perceived"
+    if not wanted:
+        return {"target": target, "metric": metric, "row": row, "scenes": [], "written": False}
+    expected = require_active(qc, expected)
     if in_row is None or out_row is None:
         found_in, found_out = measurement_rows(qc)
         in_row = found_in if in_row is None else in_row
         out_row = found_out if out_row is None else out_row
-    col = None
-    with reamp_routing(qc, in_row=in_row, out_row=out_row):
-        if not dry_run:
+    row = out_row
+    out = {"target": target, "metric": metric, "row": row, "scenes": [], "written": False}
+    col = None if dry_run else find_gain_block(qc, row)
+    unity = catalog.to_norm(GAIN_HASH, GAIN_LEVEL, 0.0)
+    assigned, values = (False, [unity] * MAX_SCENES) if col is None else _trim_values(qc, row, col)
+    trims = {}
+    with reamp_routing(qc, in_row=in_row, out_row=out_row, expected=expected):
+        try:
+            for scene in wanted:
+                require_active(qc, expected)
+                qc.set_scene(scene)
+                if not qc._await_scene(scene):
+                    error = "scene switch not confirmed"
+                    out["scenes"].append({"scene": scene, "skipped": error})
+                    out["error"] = error
+                    break
+                res = measure(di_path=di_path, perceived=perceived)
+                if res.get("error"):
+                    out["scenes"].append({"scene": scene, "skipped": res["error"]})
+                    continue
+                delta = _delta(res, target, metric)
+                tp = res.get("true_peak_dbtp")
+                result = {"scene": scene, "measured": _metric(res, metric),
+                          "delta_db": delta, "true_peak_dbtp": tp}
+                if delta is not None and not dry_run:
+                    base = catalog.to_display(GAIN_HASH, GAIN_LEVEL, values[scene])
+                    headroom = None if tp is None else TRUE_PEAK_CEILING_DBTP - tp
+                    if headroom is not None and delta > headroom:
+                        delta = headroom
+                        result["limited_by"] = "true_peak"
+                    want = loudness.clamp_db(base + delta, GAIN_MIN_DB, GAIN_MAX_DB)
+                    result["trim_db"] = want
+                    if abs(base - want) > tolerance:
+                        trims[scene] = catalog.to_norm(GAIN_HASH, GAIN_LEVEL, want)
+                out["scenes"].append(result)
+        finally:
+            require_active(qc, expected)
+            qc.set_scene(0)
+            if not qc._await_scene(0):
+                raise LevelingError("could not restore scene A")
+
+        if trims and not out.get("error"):
+            require_active(qc, expected)
             col, added = ensure_gain_block(qc, row)
             out["trim_block"] = {"row": row, "column": col, "added": added}
-        base = read_trim_db(qc, row, col) if col is not None else 0.0
-        trims = [base] * MAX_SCENES
-
-        for sc in wanted:
-            # set_scene() returns None, so its result must not gate the switch:
-            # `not None` is True and skipped every scene. Confirm by Scene READ only.
-            qc.set_scene(sc)
-            if not qc._await_scene(sc):
-                out["scenes"].append({"scene": sc, "skipped": "scene switch not confirmed"})
-                continue
-            res = measure(di_path=di_path, perceived=perceived)
-            if res.get("error"):
-                out["scenes"].append({"scene": sc, "skipped": res["error"]})
-                continue
-            delta = _delta(res, target, metric)
-            row_out = {"scene": sc, "measured": _metric(res, metric),
-                       "delta_db": delta, "true_peak_dbtp": res.get("true_peak_dbtp")}
-            if delta is not None:
-                want = loudness.clamp_db(base + delta, GAIN_MIN_DB, GAIN_MAX_DB)
-                tp = res.get("true_peak_dbtp")
-                headroom = None if tp is None else (TRUE_PEAK_CEILING_DBTP - tp)
-                if headroom is not None and delta > headroom:
-                    want = loudness.clamp_db(base + headroom, GAIN_MIN_DB, GAIN_MAX_DB)
-                    row_out["limited_by"] = "true_peak"
-                row_out["trim_db"] = want
-                trims[sc] = want
-            out["scenes"].append(row_out)
-
-        if not dry_run and col is not None and any(
-                r.get("trim_db") is not None for r in out["scenes"]):
-            from . import catalog
-            qc.set_param_scenes(row, col, GAIN_LEVEL,
-                                [catalog.to_norm(GAIN_HASH, GAIN_LEVEL, t)
-                                 for t in trims])
+            if assigned:
+                qc.set_assigned_param_scenes(row, col, GAIN_LEVEL, trims, expected=expected)
+            else:
+                for scene, value in trims.items():
+                    values[scene] = value
+                qc.set_param_scenes(row, col, GAIN_LEVEL, values, expected=expected)
             out["written"] = True
-        qc.set_scene(0)
-        qc._await_scene(0)
     return out

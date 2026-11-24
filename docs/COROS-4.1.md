@@ -67,16 +67,20 @@ set_global_eq(prev["global_eq"], prev["bypassed"])      # exact undo
 **I/O Settings is not reversible that cheaply**: loading one rewrites the hardware
 input levels, impedance and type, so it requires `confirm=True`, and it is refused
 outright if the current settings can't be read first (there would be no way back).
-Put values back with `set_io_port`, one port at a time:
+The returned `previous` snapshot includes restorable input fields (level,
+impedance, type, ground lift) and output fields (level, ground lift, mute),
+as provided by each port. Apply those fields with `set_io_port`, one port at a time.
 
 ```
 set_io_port("in", 2, level=0.3196, impedance=0.125, input_type=1.0)
 ```
 
-`input_type` is a **3-position** control — `0.0` instrument · `0.5` mic · `1.0`
-line. Cortex Control's own panel only offers instrument and mic, so a port set to
-*line* on the unit's screen can be read and restored here but **not** through the
-app. `get_io_settings` names it correctly.
+The snapshot also records pairing, headphones, USB, MIDI and expression state.
+Use the device or Cortex Control to restore those settings if needed.
+`input_type` is `0.0` for Instrument and `1.0` for Mic on the verified
+full-size combo inputs. The Quad Cortex Mini reports the raw input type when present.
+Use `get_io_settings` to confirm the applied values.
+
 
 ## 3. Footswitch assignments, including dual (secondary)
 

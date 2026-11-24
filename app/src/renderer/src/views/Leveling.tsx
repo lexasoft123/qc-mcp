@@ -5,8 +5,8 @@ import type {
 } from '@shared/types'
 import { cleanError } from '../derive.js'
 import {
-  attribute, appliedIds, focusIndex, forget, forgetApplied, isDirty, leave, markSaved, nextStep,
-  note, savePlan, slotId, unsavedIds
+  activeSlot, attribute, appliedIds, focusIndex, forget, isDirty, leave, markSaved, nextStep,
+  note, noteApply, savePlan, saveTrim, slotId, unsavedIds
 } from '../bench.js'
 import type { Written, WrittenMap } from '../bench.js'
 import { MOD, matches, shortcut, typing } from '../keys.js'
@@ -37,7 +37,10 @@ const WRITE_MS = 80
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 
-interface Run { kind: 'measure' | 'apply' | 'save' | 'audition'; at?: string }
+const isFactory = (slot: BenchSlot): boolean =>
+  slot.isFactory ?? slot.folderKey.startsWith('/opt/neuraldsp/')
+
+interface Run { kind: 'measure' | 'apply' | 'save' | 'undo' | 'audition'; at?: string }
 /**
  * The lanes that carry the preset out of the box.
  *
@@ -63,8 +66,14 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
   const [focusId, setFocusId] = useState<string | null>(null)
   const focus = focusIndex(bench, focusId)
   const focusRef = useRef<string | null>(null)
-  focusRef.current = focusId
   const [preset, setPreset] = useState<PresetState | null>(null)
+  const adopt = useCallback((p: PresetState): void => {
+    const active = activeSlot(p)
+    const id = bench.some((b) => slotId(b) === active) ? active : null
+    focusRef.current = id
+    setFocusId(id)
+    setPreset(id ? p : null)
+  }, [bench])
   const [meter, setMeter] = useState<Record<string, MeterOutput> | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   /**
@@ -205,10 +214,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
       .state()
       .then((p) => {
         if (gone) return
-        const i = bench.findIndex(
-          (b) => b.folderKey === p.folderKey && b.position === p.position
-        )
-        if (i >= 0) { setFocusId(slotId(bench[i])); setPreset(p) }
+        adopt(p)
       })
       .catch((e: Error) => { if (!gone) setError(e.message) })
     return () => { gone = true; off() }
@@ -239,11 +245,11 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
 
   const goto = (index: number): void => {
     const target = bench[index]
-    if (!target || index === focus || busy) return
+    if (!target || index === focus || busy || busyAll || playing) return
     setPendingId(slotId(target))
     void guard('load', async () => {
       const p = await window.patchbay.leveling.open(
-        target.folderKey, target.position, false, target.cloudId
+        target.folderKey, target.position, isFactory(target), target.cloudId
       )
       // The recall reloaded the device from flash: a by-ear trim on the preset
       // we just left lived only in the working grid, and is gone. Say so.
@@ -252,7 +258,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         putWritten(() => left.next)
         say(t('lvl.lostEdit', { name: slot?.name ?? '' }), true)
       }
-      setFocusId(slotId(target))
+      adopt(p)
       setMeter(null)
       // Come back to the scene you left on — but only if you ever left one.
       // A slot you have not visited keeps whatever scene the preset loads with.
@@ -345,23 +351,34 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     void window.patchbay.leveling.level(row, next).catch(() => undefined)
   }
 
+  const saveSlot = useCallback(async (target: BenchSlot, name?: string) => {
+    const trim = saveTrim(writtenRef.current[slotId(target)])
+    if (trim) {
+      const res = await window.patchbay.leveling.applyTrim({
+        ...target, ...trim, isFactory: isFactory(target), absolute: true
+      })
+      if (res.error) throw new Error(res.error)
+    }
+    return await window.patchbay.leveling.save(name, target)
+  }, [])
+
   const save = useCallback((): void => {
-    if (!preset || !dirtyNow()) return
+    if (!preset || !slot || !dirtyNow()) return
     void guard('save', async () => {
-      const r = await window.patchbay.leveling.save(preset.name)
+      const r = await saveSlot(slot, preset.name)
       mark(false)
       say(t('lvl.saved', { name: r.name }))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preset, mark])
+  }, [preset, slot, mark, saveSlot])
 
   /** Re-read the device so the number on screen is the device's, not ours. */
   const reconcile = useCallback((): void => {
     window.patchbay.leveling
       .state()
-      .then((p) => { liveLanes.current = p.lanes; setPreset(p) })
+      .then(adopt)
       .catch(() => undefined)
-  }, [])
+  }, [adopt])
 
   /**
    * Follow the device.
@@ -457,13 +474,17 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
     void window.patchbay.leveling
       .measureMany(
         list.map((b) => ({
-          folder_key: b.folderKey, position: b.position, name: b.name, cloud_id: b.cloudId
+          folder_key: b.folderKey, position: b.position, name: b.name, cloud_id: b.cloudId,
+          is_factory: isFactory(b)
         })),
         { target }
       )
       .catch((e: Error) => setError(cleanish(e.message)))
-      .finally(() => { setRun(null); setMeasuring(null); setRunAt(null) })
-  }, [busyAll, bench, wanted, target])
+      .finally(async () => {
+        await window.patchbay.leveling.state().then(adopt).catch(() => undefined)
+        setRun(null); setMeasuring(null); setRunAt(null)
+      })
+  }, [busyAll, bench, wanted, target, adopt])
 
   const applyAll = useCallback((): void => {
     if (busyAll) return
@@ -482,20 +503,20 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         try {
           const res = await window.patchbay.leveling.applyTrim({
             folderKey: b.folderKey, position: b.position,
-            isFactory: false, cloudId: b.cloudId, row: r?.row, db
+            isFactory: isFactory(b), cloudId: b.cloudId, row: r?.row, db
           })
           if (res.error) { rowFail(b, res.error); continue }
-          putWritten((w) => note(w, id, res.applied_db, 'apply'))
+          putWritten((w) => noteApply(w, id, res.row, res.from_db, res.db))
           if (res.limited_by === 'range') {
             rowFail(b,
               `fader ran out — ${res.applied_db.toFixed(1)} of ${db.toFixed(1)} dB given`)
           }
         } catch (e) { rowFail(b, cleanish((e as Error).message)) }
       }
+      await window.patchbay.leveling.state().then(adopt).catch(() => undefined)
       setRun(null)
-      void window.patchbay.leveling.state().then(setPreset).catch(() => undefined)
     })()
-  }, [busyAll, bench, wanted, rows, proposals, rowFail, putWritten])
+  }, [busyAll, bench, wanted, rows, proposals, rowFail, putWritten, adopt])
 
   /**
    * Save every unsaved trim — actually save it.
@@ -503,51 +524,70 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
    * `open` then `save` wrote nothing: a trim lives in the working grid, the
    * recall reloaded the file over it, and the file was saved onto itself.
    * `savePlan` says what each slot needs: the loaded preset saves as it
-   * stands (first — its edits die at the next recall); an Apply trim elsewhere
-   * is applied AGAIN after its recall, then saved.
+   * stands first so working-grid edits survive. Save verifies the absolute
+   * value of every staged Apply, since a visit to that slot can reload its file.
    */
   const saveAll = useCallback((): void => {
-    const plan = savePlan(writtenRef.current, focusRef.current, bench.map(slotId))
-    if (plan.length === 0 || busyAll) return
+    if (busyAll) return
+    abort.current = false
     setRun({ kind: 'save' })
     void (async () => {
-      let landed: BenchSlot | null = null
-      for (const a of plan) {
-        const b = bench.find((x) => slotId(x) === a.id)
-        if (!b) continue
-        try {
-          if (a.how === 'reapply') {
-            await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
-            landed = b
-            const res = await window.patchbay.leveling.applyTrim({
-              folderKey: b.folderKey, position: b.position, isFactory: false, cloudId: b.cloudId,
-              row: rows[a.id]?.row, db: a.db
-            })
-            if (res.error) { rowFail(b, res.error); continue }
-          }
-          await window.patchbay.leveling.save()
-          putWritten((w) => markSaved(w, a.id))
-        } catch (e) { rowFail(b, cleanish((e as Error).message)) }
+      try {
+        const active = await window.patchbay.leveling.state()
+        adopt(active)
+        const plan = savePlan(writtenRef.current, activeSlot(active), bench.map(slotId))
+        for (const action of plan) {
+          if (abort.current) break
+          const b = bench.find((x) => slotId(x) === action.id)
+          if (!b) continue
+          try {
+            await saveSlot(b)
+            putWritten((w) => markSaved(w, action.id))
+          } catch (e) { rowFail(b, cleanish((e as Error).message)) }
+        }
+      } catch (e) {
+        setError(cleanish((e as Error).message))
+      } finally {
+        await window.patchbay.leveling.state().then(adopt).catch(() => undefined)
+        setRun(null)
       }
-      // the device is on whichever preset was recalled last; follow it
-      if (landed) {
-        setFocusId(slotId(landed))
-        void window.patchbay.leveling.state().then((p) => { liveLanes.current = p.lanes; setPreset(p) }).catch(() => undefined)
-      }
-      setRun(null)
     })()
-  }, [busyAll, bench, rows, rowFail, putWritten])
+  }, [busyAll, bench, rowFail, putWritten, adopt, saveSlot])
 
-  const undoAll = useCallback((): void => {
-    if (appliedIds(written).length === 0) return
-    void window.patchbay.leveling
-      .revertLevels()
-      .then(() => {
-        putWritten(forgetApplied)
-        return window.patchbay.leveling.state().then(setPreset)
-      })
-      .catch((e: Error) => setError(cleanish(e.message)))
-  }, [written, putWritten])
+  const undo = useCallback((ids: string[]): void => {
+    if (busyAll || ids.length === 0) return
+    abort.current = false
+    setRun({ kind: 'undo' })
+    void (async () => {
+      try {
+        for (const id of ids) {
+          if (abort.current) break
+          const b = bench.find((x) => slotId(x) === id)
+          const record = writtenRef.current[id]
+          if (!b || !record?.baseline) continue
+          const { row, db, appliedDb } = record.baseline
+          try {
+            const active = await window.patchbay.leveling.state()
+            if (record.saved || activeSlot(active) === id) {
+              const res = await window.patchbay.leveling.applyTrim({
+                ...b, isFactory: isFactory(b), row, db, absolute: true
+              })
+              if (res.error) throw new Error(res.error)
+            }
+            putWritten((w) => record.saved
+              ? { ...w, [id]: { ...record, db: db - appliedDb, saved: false,
+                    baseline: { row, db: appliedDb, appliedDb: db } } }
+              : forget(w, id))
+          } catch (e) { rowFail(b, cleanish((e as Error).message)) }
+        }
+      } finally {
+        await window.patchbay.leveling.state().then(adopt).catch(() => undefined)
+        setRun(null)
+      }
+    })()
+  }, [busyAll, bench, rowFail, putWritten, adopt])
+
+  const undoAll = useCallback((): void => undo(appliedIds(writtenRef.current)), [undo])
 
   /**
    * Listen to the set, one preset after another.
@@ -566,7 +606,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
         if (abort.current) break
         setRun({ kind: 'audition', at: slotId(b) })
         try {
-          await window.patchbay.leveling.open(b.folderKey, b.position, false, b.cloudId)
+          await window.patchbay.leveling.open(b.folderKey, b.position, isFactory(b), b.cloudId)
           // Wait for the riff to END, not for the call to return — do_play
           // answers as soon as its thread is up, so without this the loop
           // recalled the next preset a few hundred ms into each one.
@@ -577,10 +617,11 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
           await done
         } catch (e) { rowFail(b, cleanish((e as Error).message)); break }
       }
+      await window.patchbay.leveling.state().then(adopt).catch(() => undefined)
       setRun(null)
       abort.current = false
     })()
-  }, [auditing, bench, wanted, rowFail])
+  }, [auditing, bench, wanted, rowFail, adopt])
 
   const stopRun = useCallback((): void => {
     if (!busyAll && auditing === null) return
@@ -756,20 +797,7 @@ export function Leveling({ snap }: { snap: Snapshot }): React.JSX.Element {
             const { [id]: _gone, ...rest } = p
             return rest
           })}
-          onUndoOne={(id) => {
-            const b = bench.find((x) => slotId(x) === id)
-            const db = written[id]?.db
-            if (!b || db === null || db === undefined) return
-            void (async () => {
-              try {
-                await window.patchbay.leveling.applyTrim({
-                  folderKey: b.folderKey, position: b.position,
-                  isFactory: false, cloudId: b.cloudId, row: rows[id]?.row, db: -db
-                })
-                putWritten((w) => forget(w, id))
-              } catch (e) { rowFail(b, cleanish((e as Error).message)) }
-            })()
-          }}
+          onUndoOne={(id) => undo([id])}
           onSaveRow={(id) => { if (id === focusId) save() }}
           onFocus={(id) => goto(bench.findIndex((b) => slotId(b) === id))}
           onOpen={(id) => {

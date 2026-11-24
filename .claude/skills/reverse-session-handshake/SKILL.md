@@ -37,3 +37,10 @@ a **heartbeat** the device requires before it treats a client as present.
 
 Reference: `src/qc_mcp/transport.py` (`_handshake`, `_start_heartbeat`,
 `get_current_preset`). See PROTOCOL.md §3.
+
+## Shared Quad Cortex sessions
+The Cortex Control interposer owns the macOS bridge handshake. The MCP server and
+attached daemon clients obtain firmware from sanitized startup metadata. Missing
+or malformed metadata fails connection before any firmware-gated operation.
+Windows can observe the stock app's session through a non-exclusive handle.
+Cold startup waits for live device reports before joining that session.

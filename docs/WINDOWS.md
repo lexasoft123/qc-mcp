@@ -1,10 +1,8 @@
 # Windows
 
-qc-mcp runs on Windows in **direct mode**: it opens the Quad Cortex's HID
-interface exclusively and speaks the same protocol as on macOS. Every device tool
-works — reading presets, building them, scenes, footswitches, device presets,
-Global EQ / I/O. What is *not* available is bridge mode and the GUI harness; both
-are macOS-only for reasons below.
+qc-mcp supports exclusive direct HID and a non-exclusive handle alongside stock
+Cortex Control on Windows. Preset and I/O verification uses the same wire reads
+as on macOS. The bundled GUI automation requires macOS.
 
 ## Install
 
@@ -34,14 +32,11 @@ the escaped backslashes JSON requires):
 
 ## Connecting
 
-`connect()` on Windows goes straight to direct mode — there is no second option
-to ask about. **Cortex Control must be closed**: it holds the HID interface
-exclusively, and so do we. If it is running, `connect` says so; pass
-`quit_app=True` to have the MCP close it first (a normal `taskkill` close
-request, not a force kill).
-
-When you want the app back, call `disconnect()` first — the device is only ever
-open to one program at a time.
+`connect()` joins a running Cortex Control by opening a shared HID handle.
+When the app is down, select `mode='bridge'` to launch and join it, or
+`mode='direct'` for exclusive access. Cold shared startup waits for live device
+reports before riding the app's session. Exclusive access requires the app to
+be closed; `quit_app=True` authorizes a normal close request.
 
 ## Checking the device is reachable
 

@@ -22,10 +22,11 @@ real app setting known display values and fitting the curve.
    Solve `k` from two points: `k = ln((d2-min)/(max-min)) / ln((d1-min)/(max-min)) ...`
    or just `p = ln(r2)/ln(nv2)` where `r=(d-min)/(max-min)`. Check it holds across all
    points.
-4. **Find the rule** that decides which params use which taper. Here every freq/time/
-   ratio param fit the *same* exponent **k ≈ 1.667** (`nv = r^0.6`), while dB/%/level
-   params were linear. The classifier that matched all data: **`min > 0` and
-   `max/min ≥ 5` → power taper; else linear.**
+4. **Check the specific parameter's metadata and wire values.** A declared JUCE
+   XML skew uses `norm = fraction ** skew`; cabinet HPF/LPF use skew 0.3. The
+   historical positive-range heuristic is a fallback and must be checked against
+   observations. Some EQ gains with symbolic `MIN_EQ_DB` / `MAX_EQ_DB` bounds
+   travel raw in dB; other controls with literal dB ranges can be normalized.
 5. **Implement both directions** and use them everywhere (write *and* read), so you
    always speak real display units. See `catalog.to_norm` / `to_display`.
 
@@ -36,5 +37,8 @@ real app setting known display values and fitting the curve.
   `(default-min)/(max-min)` for tapered params — don't infer the taper from defaults.
 - Capture logs can contain sensitive data — keep them out of version control.
 
-Worked example: QC uses `nv = ((display-min)/(max-min))^0.6` for freq/time/ratio;
-linear for dB/%. A naive-linear "220 ms" delay was actually ~25 ms. See PROTOCOL.md §5.
+Example: verify cabinet cutoff writes at known display values against the
+hardware or Cortex Control as well as the protocol readback. A write and read
+that use the same incorrect curve can agree with each other. The bundled GUI
+automation is macOS-only; protocol reads and manual hardware checks work across
+supported platforms.

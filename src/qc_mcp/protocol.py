@@ -72,7 +72,8 @@ def parse_version(text):
     """'4.1.0' / 'v4.1' / (4, 1) -> comparable tuple. Unparseable -> ()."""
     if isinstance(text, (tuple, list)):
         return tuple(int(x) for x in text)
-    return tuple(int(n) for n in re.findall(r"\d+", str(text or ""))[:3])
+    match = re.fullmatch(r"[vV]?(\d+(?:\.\d+){0,2})", str(text or "").strip())
+    return tuple(map(int, match[1].split("."))) if match else ()
 
 
 def generation(firmware):

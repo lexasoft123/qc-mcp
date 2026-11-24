@@ -204,7 +204,9 @@ export class Daemon {
     // Wait generously: serve() opens the device, handshakes and detects the
     // firmware BEFORE it listens, so a busy device or a cold USB bus can push
     // first light well past a few seconds.
-    for (let i = 0; i < 150; i++) {
+    const startupMs = process.platform === 'win32' ? 50000 : 30000
+    const deadline = Date.now() + startupMs
+    while (Date.now() < deadline) {
       if (this.child === null) return
       if (await this.endpointUp()) {
         this.state = 'running'

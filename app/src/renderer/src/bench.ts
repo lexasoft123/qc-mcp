@@ -1,4 +1,4 @@
-import type { BenchSlot, ReportRow } from '@shared/types'
+import type { BenchSlot, PresetState, ReportRow } from '@shared/types'
 
 /**
  * The bench's bookkeeping, without React.
@@ -24,6 +24,11 @@ import type { BenchSlot, ReportRow } from '@shared/types'
 export const slotId = (s: { folderKey: string; position: number; cloudId: string }): string =>
   s.cloudId || `${s.folderKey}:${s.position}`
 
+export const activeSlot = (p: PresetState): string | null =>
+  p.cloudId || (p.folderKey && p.position !== null ? slotId({
+    folderKey: p.folderKey, position: p.position, cloudId: ''
+  }) : null)
+
 export const focusIndex = (bench: BenchSlot[], focusId: string | null): number =>
   focusId === null ? -1 : bench.findIndex((b) => slotId(b) === focusId)
 
@@ -41,12 +46,30 @@ export interface Written {
   /** The trim has since been saved into the preset. Stays in the record so the
    *  row can say "saved" — a reload would then find it in the file. */
   saved: boolean
+  baseline?: { row: number; db: number; appliedDb: number }
 }
 
 export type WrittenMap = Record<string, Written>
 
 export const note = (w: WrittenMap, id: string, db: number | null, source: Written['source']): WrittenMap =>
   ({ ...w, [id]: { db, source, saved: false } })
+
+export const noteApply = (
+  w: WrittenMap, id: string, row: number, before: number, after: number
+): WrittenMap => {
+  const previous = w[id]
+  const baseline = previous?.saved ? undefined : previous?.baseline
+  const db = baseline?.row === row ? baseline.db : before
+  return { ...w, [id]: {
+    db: after - db, source: 'apply', saved: false, baseline: { row, db, appliedDb: after }
+  } }
+}
+
+export function saveTrim(record: Written | undefined): { row: number; db: number } | undefined {
+  if (record?.source !== 'apply') return undefined
+  if (!record.baseline) throw new Error('No verified trim to save')
+  return { row: record.baseline.row, db: record.baseline.appliedDb }
+}
 
 export const markSaved = (w: WrittenMap, id: string): WrittenMap =>
   w[id] ? { ...w, [id]: { ...w[id], saved: true } } : w
@@ -133,9 +156,9 @@ export function nextStep(f: {
  *
  * The naive version — open each preset, save it — writes nothing: the trim
  * lives in the device's working grid, so recalling the preset reloads the
- * file OVER the trim and saves it back onto itself. The loaded preset can be
- * saved as it stands. Any other slot's Apply trim is a known number and is
- * applied again after the recall, then saved. A by-ear or per-scene edit
+ * file OVER the trim and saves it back onto itself. Stage the loaded slot
+ * first, then reapply the stored absolute trim for every Apply record, even
+ * if its slot is active after a recall. A by-ear or per-scene edit
  * elsewhere cannot be reconstructed and is not offered — it is only ever
  * saved while its preset is loaded.
  */

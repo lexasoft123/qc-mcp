@@ -247,16 +247,20 @@ quirk or that session's device state is unresolved — so a client should treat
 
 - **Save = `File`(4) `action=CREATE`** with `folder{key, files[{index:<position>,
   name:<preset name>}]}` and **no `preset_payload`** — the device commits its live
-  working grid to `<folder>/<name>.pb` at `<position>` (~65-byte request). The reply
-  `File{UPDATE}` carries the assigned path, author, a fresh UUID, and fw version;
-  the device then pushes `RecallPreset` + `Scene` + `SetlistPosition` +
+  working grid to `<folder>/<name>.pb` at `<position>` (~65-byte request). The correlated
+  `File{CREATE}` reply includes the destination folder, slot, path, name, and save
+  timestamp; the device then pushes `RecallPreset` + `Scene` + `SetlistPosition` +
   `RecentsFavorites` + `PresetDirty:false`.
 - **Do NOT save via `RecallPreset`(15) UPDATE `reason=SAVE`** — on a slot with no
   preset file yet ("Unsaved") it **hangs the device** (hard reboot required) and
   commits nothing.
 - `transport.write_preset_file(folder_key, position, name)`; MCP `save_preset`
-  (current slot) / `save_preset_as` (any slot; refuses to clobber a different-named
-  occupant unless `overwrite=True`).
+  (current local slot) / `save_preset_as` (verified local destination). Both
+  require a correlated active pointer and a complete live 256-entry folder
+  table. Any previous occupant requires `overwrite=True`. A matching File CREATE
+  carrying the destination and assigned file metadata, followed by a new complete
+  folder read, verifies the commit even when reusing the name. A verified Downloads
+  or plugin grid can be saved to an explicitly supplied local folder and slot.
 
 ### 6a. DIRECTORY — catalog listing, captures & IRs
 
@@ -463,7 +467,11 @@ The wire schema is **not frozen across CorOS releases**, so the MCP ships one
 descriptor set per generation in `src/qc_mcp/descriptors/qc_descriptors-<gen>.pb`
 and picks one per connection:
 
-1. `QuadCortex.open()` calls `detect_version()`, which READs `Version`(10).
+1. `QuadCortex.open()` negotiates the schema from the session identity. An owned
+   direct session reads Version(10). The macOS bridge reads sanitized identity
+   observed during Cortex Control startup, and attached clients get identity
+   from the daemon hello. A Windows shared handle can passively observe the
+   app's Version reply before making a Windows HID read.
 2. The human CorOS version is in **`zenos_git_hash`** ("4.1.0") — *not* in
    `app_fw_version`, which holds a build hash ("d14e"). `protocol.generation()`
    maps it to the newest generation ≤ that version (unknown-newer firmware falls
@@ -580,10 +588,9 @@ what makes I/O writes look impossible. Confirmed by writing the same port three
 ways: `{port_id, level}` and `{port_id, level, plugged}` both landed; the full
 record did nothing.
 
-`input_type` is a **3-position normalized control**, not a boolean:
-`0.0` Instrument · `0.5` Mic · `1.0` Line. Cortex Control's panel only exposes
-Instrument/Mic, so a port set to Line from the unit's own screen can be read and
-restored over the protocol but not through the app.
+On the verified full-size combo inputs, `input_type` is `0.0` for Instrument
+and `1.0` for Mic. The MCP reports other values as unknown. A correlated
+IOSettings READ verifies the device state after a write.
 
 ## 12b. Footswitch (stomp) assignments — `Grid`(1)
 

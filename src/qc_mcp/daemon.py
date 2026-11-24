@@ -240,6 +240,7 @@ class Daemon:
                     "firmware": self.qc.firmware,
                     "device_type": self.qc.device_type,
                     "mode": self.mode,
+                    "identity": (getattr(self.qc, "_version_info", b"") or b"").hex(),
                 })
             elif op == "write":
                 data = bytes.fromhex(msg["data"])
@@ -340,6 +341,7 @@ class SocketTransport:
         self.client_id = None
         self.req_base = 0
         self.firmware = None
+        self._identity = b""
         self._id = 0
         self._lock = threading.Lock()
 
@@ -379,7 +381,19 @@ class SocketTransport:
         self.client_id = hello.get("client")
         self.req_base = hello.get("req_base", 0)
         self.firmware = hello.get("firmware")
+        self._identity = bytes.fromhex(hello.get("identity", ""))
         return self
+
+    def cached_version(self, timeout=2.5):
+        """Use daemon-owned identity; attached clients never renegotiate USB."""
+        if self._identity:
+            return self._identity
+        # Older daemons advertise firmware in hello. This safely preserves
+        # schema negotiation without issuing a potentially destructive READ.
+        if self.firmware:
+            from . import protocol as P
+            return P.message_class("Version")(zenos_git_hash=self.firmware).SerializeToString()
+        raise BridgeError("daemon identity unavailable; reconnect after the device is ready")
 
     def set_report(self, report_id, data, include_id=False):
         self._rpc({"op": "write", "report_id": report_id,
@@ -428,7 +442,7 @@ def serve(socket_path: str, mode: str = "auto", takeover: bool = False,
     from .backend import bridge_supported
     from . import lockfile
 
-    from .server import _bridge_running, _cortex_running
+    from .server import _bridge_running, _cortex_running, _wait_shared_handle
 
     # Whoever is already holding the device says so in the lock, and says how.
     # Refusing here — before touching the USB endpoint — is the difference
@@ -479,7 +493,12 @@ def serve(socket_path: str, mode: str = "auto", takeover: bool = False,
                 "mode.")
 
     resolved = "bridge" if bridge else "shared" if share else "direct"
-    qc = QuadCortex(bridge=bridge, share=share).open(handshake=True)
+    app_owns_session = share and _cortex_running()
+    if app_owns_session:
+        err = _wait_shared_handle(time.time() + 30)
+        if err:
+            raise BridgeError(err)
+    qc = QuadCortex(bridge=bridge, share=share, require_riding=app_owns_session).open(handshake=True)
     daemon = Daemon(qc, socket_path, mode=resolved)
 
     # The record goes in AFTER the device is open, so it never claims a session

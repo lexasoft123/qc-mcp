@@ -52,7 +52,7 @@ export function PresetPicker({
 
   const slotFor = (folder: PresetFolder, p: PresetRef): BenchSlot => ({
     folderKey: folder.key, position: p.position, name: p.name,
-    cloudId: p.cloudId, scene: null
+    cloudId: p.cloudId, isFactory: folder.isFactory, scene: null
   })
 
   const has = (id: string): boolean => picked.some((p) => slotId(p) === id)

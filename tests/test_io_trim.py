@@ -1,8 +1,7 @@
 """Offline tests for the bench's input-trim ops (qc_mcp.leveling.read/write_input_level).
 
 The QC's IN 1 LEVEL is a -12..+60 dB preamp trim stored normalized; these pin
-the dB round trip, the clamp, the port -> param mapping and the two wire traps
-(send only the level field; drain the echo before verifying)."""
+the dB round trip, the clamp, the port -> param mapping and the write shape (send only the level field and verify using a fresh READ)."""
 import os
 import sys
 import unittest
@@ -27,26 +26,20 @@ class _IO:
 
 
 class FakeQC:
-    """Holds two input ports; a write is echoed once before it is real."""
+    """Holds the port state that a correlated transport read returns."""
 
     def __init__(self, levels=(0.166667, 0.513889)):
         self.levels = {1: levels[0], 2: levels[1]}
         self.writes = []
         self.reads = 0
-        self._echo = None
 
     def set_io_port(self, kind, port, **fields):
         self.writes.append((kind, port, fields))
-        # the device answers the next READ with the write itself
-        self._echo = _IO([_Port(port, fields["level"])])
         self.levels[port] = fields["level"]
 
     def read_message(self, command):
         assert command == "IOSettings"
         self.reads += 1
-        if self._echo is not None:
-            e, self._echo = self._echo, None
-            return e
         return _IO([_Port(p, v) for p, v in sorted(self.levels.items())])
 
 
@@ -73,11 +66,11 @@ class TestInputTrim(unittest.TestCase):
         self.assertEqual(set(fields), {"level"}, "a full port record is silently rejected")
         self.assertAlmostEqual(fields["level"], catalog.io_level_from_db(0, 6.0))
 
-    def test_drains_the_echo_before_verifying(self):
-        # The fake echoes the write once: a single read after the write would
-        # see the echo and call it verified. Two reads = drain + verify.
+    def test_records_prior_level_and_rejects_a_write_that_did_not_land(self):
         qc = FakeQC()
-        leveling.write_input_level(qc, 6.0)
+        qc.set_io_port = lambda *_a, **_kw: None
+        with self.assertRaisesRegex(RuntimeError, "readback"):
+            leveling.write_input_level(qc, 6.0)
         self.assertEqual(qc.reads, 2)
 
     def test_clamps_to_the_range_and_says_so(self):

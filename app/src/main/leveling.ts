@@ -176,8 +176,11 @@ export class Leveling {
     return (await this.call('scene', { index }, 8000)).scene as number
   }
 
-  async save(name = ''): Promise<{ name: string; position: number }> {
-    return (await this.call('save', { name })).saved as { name: string; position: number }
+  async save(name = '', target?: { folderKey: string; position: number }): Promise<{ name: string; position: number }> {
+    if (!target) throw new Error('No verified preset slot to save')
+    return (await this.call('save', {
+      name, folder_key: target.folderKey, position: target.position, overwrite: true
+    }, 85000)).saved as { name: string; position: number }
   }
 
   async meter(on: boolean): Promise<boolean> {
@@ -258,7 +261,7 @@ export class Leveling {
 
   /** Measure every preset given and report what each needs. Writes nothing. */
   async measureMany(
-    presets: { folder_key: string; position: number; name: string; cloud_id?: string }[],
+    presets: { folder_key: string; position: number; name: string; cloud_id?: string; is_factory?: boolean }[],
     o: { target?: number; metric?: string } = {}
   ): Promise<ReportResult> {
     return (await this.call('measure_many', {
@@ -304,7 +307,7 @@ export class Leveling {
   }
 
   async setInputLevel(db: number, port = 1): Promise<InputLevel> {
-    // a write, a settle, an echo drained and a verifying read
+    // A baseline read, field-level update and correlated readback.
     return toInputLevel(await this.call('set_input_level', { db, port }, 15000))
   }
 
@@ -325,12 +328,12 @@ export class Leveling {
 
   async applyTrim(o: {
     folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
-    row?: number; db: number
+    row?: number; db: number; absolute?: boolean
   }): Promise<ApplyResult> {
     return (await this.call('apply_trim', {
       folder_key: o.folderKey, position: o.position,
       is_factory: o.isFactory ?? false, cloud_id: o.cloudId ?? '',
-      row: o.row, db: o.db
+      row: o.row, db: o.db, absolute: o.absolute
     }, 120000)) as unknown as ApplyResult
   }
 
@@ -358,7 +361,7 @@ interface RawFolder {
 
 function toPreset(raw: unknown): PresetState {
   const p = raw as {
-    name: string; folder_key: string; position: number | null; is_factory: boolean
+    name: string; folder_key: string; position: number | null; is_factory: boolean; cloud_id?: string
     scene: number; scene_labels: string[]; lanes: RawLane[]
   }
   return {
@@ -366,6 +369,7 @@ function toPreset(raw: unknown): PresetState {
     folderKey: p.folder_key,
     position: p.position,
     isFactory: p.is_factory,
+    cloudId: p.cloud_id,
     scene: p.scene,
     sceneLabels: p.scene_labels ?? [],
     lanes: (p.lanes ?? []).map((l) => ({

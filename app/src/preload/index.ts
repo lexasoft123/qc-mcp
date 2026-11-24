@@ -71,8 +71,8 @@ const api: Api = {
     toggle: (row: number, which: 'mute' | 'solo', on: boolean) =>
       ipcRenderer.invoke('leveling:toggle', row, which, on) as Promise<boolean>,
     scene: (index: number) => ipcRenderer.invoke('leveling:scene', index) as Promise<number>,
-    save: (name?: string) =>
-      ipcRenderer.invoke('leveling:save', name) as Promise<{ name: string; position: number }>,
+    save: (name?: string, target?: { folderKey: string; position: number }) =>
+      ipcRenderer.invoke('leveling:save', name, target) as Promise<{ name: string; position: number }>,
     meter: (on: boolean) => ipcRenderer.invoke('leveling:meter', on) as Promise<boolean>,
     audio: () => ipcRenderer.invoke('leveling:audio') as Promise<AudioState>,
     sampleArm: (o?: { thresholdDbfs?: number; maxSeconds?: number }) =>
@@ -89,7 +89,7 @@ const api: Api = {
     useRiff: (name: string) => ipcRenderer.invoke('leveling:useRiff', name),
     applyTrim: (o: {
       folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
-      row?: number; db: number
+      row?: number; db: number; absolute?: boolean
     }) => ipcRenderer.invoke('leveling:applyTrim', o) as Promise<ApplyResult>,
     autolevel: (o?: { target?: number; tolerance?: number; dryRun?: boolean }) =>
       ipcRenderer.invoke('leveling:autolevel', o) as Promise<AutoResult>,

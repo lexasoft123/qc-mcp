@@ -21,10 +21,9 @@ FILE_TYPE = {0: "presets", 1: "irs", 2: "captures"}
 
 def _file_dict(f, position):
     """One catalog entry. `position` is the file's slot, taken from its place in
-    the folder's array — the whole-read indexing rule (PROTOCOL.md 5): in a READ
-    the array position IS the index and the `index` field itself is left 0. A
-    setlist is a fixed 256-slot table, empty slots included with a blank name, so
-    enumerating it gives the real recall position for every slot."""
+    the folder's array. A full setlist read is a dense 256-slot table, with blank
+    records for empty slots. The file index may be explicit or defaulted; table
+    position determines the recall slot for either encoding."""
     return {
         "index": position,
         "name": f.name,

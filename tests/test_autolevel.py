@@ -7,9 +7,11 @@ Run: .venv/bin/python tests/test_autolevel.py
 """
 import os
 import sys
+import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
+from qc_mcp import catalog, preset
 from qc_mcp import autolevel as leveling  # noqa: E402
 
 
@@ -17,6 +19,11 @@ class _Model:
     def __init__(self, hash_=0):
         self.hash = hash_
         self.params = []
+        if hash_ == leveling.GAIN_HASH:
+            model = preset.BinaryPreset().chains.add().models.add()
+            param = model.params.add()
+            param.param_values.add().float_value = catalog.to_norm(hash_, leveling.GAIN_LEVEL, 0)
+            self.params.append(param)
 
 
 class _Chain:
@@ -35,6 +42,7 @@ class FakeQC:
     """Records what the loop does to the device."""
 
     def __init__(self, in_port=1, out_port=19, gain_col=None):
+        self._io_lock = threading.RLock()
         models = [_Model(12345), _Model(0), _Model(0)]
         if gain_col is not None:
             models[gain_col] = _Model(leveling.GAIN_HASH)
@@ -45,6 +53,9 @@ class FakeQC:
         self.scenes_set = []
         self.added = []
         self.fail_scene = set()
+
+    def get_setlist_position(self):
+        return {"folder_key": "f", "position": 0}
 
     def get_current_preset(self, timeout_ms=6000):
         return _Preset([self.chain])
@@ -68,7 +79,7 @@ class FakeQC:
         self.param_writes.append((row, column, param_index, value))
         return True
 
-    def set_param_scenes(self, row, column, param_index, values):
+    def set_param_scenes(self, row, column, param_index, values, *, expected=None):
         self.scene_writes.append((row, column, param_index, list(values)))
         return True
 

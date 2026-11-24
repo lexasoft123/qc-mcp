@@ -16,6 +16,7 @@ Run: .venv/bin/python tests/test_leveling_e2e.py
 import math
 import os
 import sys
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
@@ -38,7 +39,7 @@ try:
 except ImportError:
     HAVE_SOUNDFILE = False
 
-from qc_mcp import autolevel, loudness, riffs        # noqa: E402
+from qc_mcp import autolevel, catalog, loudness, preset, riffs        # noqa: E402
 from qc_mcp import leveling as bench_mod             # noqa: E402
 
 RATE = riffs.RATE
@@ -92,22 +93,17 @@ class Amp:
 
 # ── the device, wired to the model ───────────────────────────────────────
 
-class _Param:
-    """What the device echoes back: a normalised value, not dB."""
-
-    def __init__(self, value=0.0):
-        self.value = float(value)
-
-
 class _Model:
     def __init__(self, hash_=0):
         self.hash = hash_
-        self.params = []
+        self.params = preset.BinaryPreset().chains.add().models.add().params
+        if hash_ == autolevel.GAIN_HASH:
+            self.set(0, catalog.to_norm(hash_, 0, 0))
 
     def set(self, index, value):
         while len(self.params) <= index:
-            self.params.append(_Param(0.0))
-        self.params[index].value = float(value)
+            self.params.add().param_values.add()
+        self.params[index].param_values[0].float_value = float(value)
 
 
 class _Chain:
@@ -127,6 +123,7 @@ class Device:
     sees — which is the whole point of an end-to-end test of a closed loop."""
 
     def __init__(self, amp, in_port=1, out_port=19):
+        self._io_lock = threading.RLock()
         self.amp = amp
         self.chain = _Chain(in_port, out_port)
         self.routing = []
@@ -137,6 +134,9 @@ class Device:
         self.saved = []
 
     # -- reads
+    def get_setlist_position(self):
+        return {"folder_key": "f", "position": 0}
+
     def get_current_preset(self, timeout_ms=6000):
         return _Preset([self.chain])
 
@@ -173,7 +173,7 @@ class Device:
             self.amp.trim_db = bench_mod.db_of(value)
         return True
 
-    def set_param_scenes(self, row, column, param_index, values):
+    def set_param_scenes(self, row, column, param_index, values, *, expected=None):
         self.scene_writes.append((row, column, param_index, list(values)))
         return True
 
@@ -497,6 +497,11 @@ class FakeBench:
         self.name = name
         self.lanes = {row: float(db)}
         self.opened = []
+
+    def active_target(self, folder_key, position, cloud_id="", is_factory=False):
+        if self.opened and self.opened[-1] == (folder_key, position):
+            return self.qc.get_setlist_position()
+        return None
 
     def open(self, folder_key, position, is_factory=False, cloud_id=""):
         self.opened.append((folder_key, position))

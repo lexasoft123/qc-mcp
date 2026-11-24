@@ -186,6 +186,37 @@ class SecureSessionTests(unittest.TestCase):
         client.login("test@example.com", "password-never-saved", persist=True)
         return client, http
 
+    @unittest.skipUnless(sys.platform == "win32" and os.environ.get("GITHUB_ACTIONS") == "true",
+                         "native Credential Manager smoke test runs on Windows CI")
+    def test_windows_native_credential_store_survives_process_restart(self):
+        from unittest.mock import patch
+        from uuid import uuid4
+
+        service = "qc-mcp.cortex-cloud.ci." + uuid4().hex
+        path = self.directory / "native-session.enc"
+        store = SecureSessionStore(path)
+        with patch("qc_mcp.cloud_session.SERVICE", service):
+            try:
+                with store.locked():
+                    store.save({"access_token": "fixture-token", "cookies": []})
+                result = subprocess.run(
+                    [sys.executable, "-c", """
+import sys
+from qc_mcp import cloud_session
+cloud_session.SERVICE = sys.argv[1]
+store = cloud_session.SecureSessionStore(sys.argv[2])
+with store.locked():
+    assert store.load() == {"access_token": "fixture-token", "cookies": []}
+""", service, str(path)],
+                    capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            finally:
+                with store.locked():
+                    store.clear()
+            self.assertFalse(path.exists())
+            self.assertIsNone(store._vault().get_password(service, "session-encryption-key"))
+
     def test_large_session_is_encrypted_with_only_a_small_vault_key(self):
         store = store_at(self.directory)
         session = {"access_token": "access-secret" * 1000,

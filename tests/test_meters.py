@@ -73,9 +73,9 @@ def test_headphones_have_one_shared_limiter_flag():
     assert "hp_l" in out["ports"] and "hp_r" in out["ports"], out["ports"]
 
 
-def test_levels_convert_from_linear_amplitude_to_db():
-    """IOMeter sends linear amplitude 0..1; the QC's own readout is -40..+12 dB."""
-    _with_qc([_meter(xlr_1=1.0), _meter(xlr_1=0.5), _meter(xlr_1=0.1)])
+def test_levels_are_a_db_scale():
+    """IOMeter sends 1 + dB/40: full scale is 1.0, -20 dBFS is 0.5."""
+    _with_qc([_meter(xlr_1=1.0), _meter(xlr_1=0.5)])
     out = server.output_meter()
     assert out["ports"]["xlr_1"]["peak"] == 1.0, out["ports"]["xlr_1"]
     assert out["ports"]["xlr_1"]["peak_db"] == 0.0, out["ports"]["xlr_1"]
@@ -83,9 +83,22 @@ def test_levels_convert_from_linear_amplitude_to_db():
     assert out["scale"]["db_floor"] == -40.0, out["scale"]
 
 
-def test_half_amplitude_is_minus_six_db():
-    _with_qc([_meter(xlr_1=0.5)])
-    assert abs(server.output_meter()["ports"]["xlr_1"]["peak_db"] - (-6.0)) < 0.05
+def test_measured_tone_levels():
+    """A 440 Hz tone over USB, CorOS 4.1.1: what xlr_1 read at each level."""
+    for raw, dbfs in ((0.25, -30.0), (0.50, -20.0), (0.70, -12.0), (0.85, -6.0)):
+        _with_qc([_meter(xlr_1=raw)])
+        got = server.output_meter()["ports"]["xlr_1"]["peak_db"]
+        assert abs(got - dbfs) < 0.05, (raw, got, dbfs)
+
+
+def test_over_full_scale_reads_past_zero_db():
+    """Jack and grid fields go past 1.0 over full scale: 1.386 is about +15 dB."""
+    _with_qc([_meter(xlr_1=1.386, grid_xlr_1=1.386, usb_output_1l=1.0)])
+    out = server.output_meter(detail=True)
+    assert abs(out["ports"]["xlr_1"]["peak_db"] - 15.4) < 0.05, out["ports"]["xlr_1"]
+    assert out["over_full_scale"] == ["xlr_1", "grid_xlr_1"], out["over_full_scale"]
+    _with_qc([_meter(xlr_1=0.9)])
+    assert server.output_meter()["over_full_scale"] == []
 
 
 def test_silence_clamps_to_the_meter_floor_not_minus_infinity():

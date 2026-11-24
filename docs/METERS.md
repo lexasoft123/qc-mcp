@@ -1,6 +1,6 @@
 # Output meters — `IOMeter` telemetry
 
-The QC streams its I/O meters continuously as `IOMeterMessage` (command **5**). The
+The QC streams its I/O meters as `IOMeterMessage` (command **5**) while sound moves. The
 `output_meter` tool decodes them. No audio extra needed — this is protocol only.
 
 Same shape as [CPU.md](CPU.md): a `request_id=0` broadcast, so it cannot be read with
@@ -39,22 +39,48 @@ output_meter(hold_s=1.0)               # peak-hold window, play while it runs
 output_meter(hold_s=2.0, detail=True)  # adds the grid taps and all USB channels
 ```
 
-Returns `{samples, ports: {name: {peak, last}}, limiters: {...}, any_limiting}`. The
+Returns `{samples, ports: {name: {peak, last, peak_db, last_db}}, over_full_scale, limiters: {...},
+any_limiting}`. The
 window is a peak hold: a longer `hold_s` catches transients a single sample would miss.
 
 ## Known unknowns
 
-- ~~The float scale is not calibrated.~~ **Settled: IOMeter reports LINEAR AMPLITUDE
-  0..1, not dB.** Established by the Patchbay Leveling bench, which converts with
-  `20*log10(level)` and displays on the **−40..+12 dB** scale the QC's own OUT LEVEL
-  readout uses. `output_meter` now returns both: `peak`/`last` (raw linear) and
-  `peak_db`/`last_db` (clamped at the −40 floor, `None` for true zero).
+- **The levels are a dB scale, not a linear amplitude: value = 1 + dB/40**, 0 at
+  −40 dB of full scale and below, 1.0 at full scale (measured 2026-11-19, Quad Cortex
+  mini, CorOS 4.1.1). A 440 Hz tone over USB 5/6 through an empty row to Multiple
+  Outputs, on `xlr_1`:
 
-  Why the floor matters: fed straight to a bar, the linear value buries everything below
-  −6 dBFS in the bottom tenth of the meter — which is exactly where guitar playing
-  lives.
-- **The limiter flags are trustworthy** — they are booleans, and they are what the
-  leveling loop's guard uses.
+  | Tone (dBFS) | −40 | −30 | −20 | −12 | −6 |
+  |---|---|---|---|---|---|
+  | `xlr_1` | no frame | 0.25 | 0.50 | 0.70 | 0.85 |
+
+  `xlr_2`, `out_3`, `out_4` read the same; `hp_l` / `hp_r` read 0.044 higher (1.8 dB)
+  at that headphone level. Cortex Control's own OUT LEVEL readout agrees: −10.4 dB
+  while `grid_xlr_1` read 0.735 (2026-11-22). `output_meter` returns `peak`/`last`
+  (raw) and `peak_db`/`last_db` (`None` for 0, i.e. −40 dB or below).
+  Before this was measured, the tool and the bench read the value as a linear amplitude
+  (`20*log10`): −20 dBFS showed as −6 dB, −6 dBFS as −1.4 dB.
+- **Over full scale** (2026-11-22, a sine pushed past it by EQ output gain): the jack
+  fields and their `grid_*` taps go past 1.0 — a −1 dBFS sine read 1.044 at the row's
+  output (about +1.8 dB), 12 dB more read 1.386 — while the USB fields stop at exactly
+  1.0 (0.992 at −0.2 dBFS). `output_meter` lists the ports past 1.0 as
+  `over_full_scale`. No other message comes when an output clips.
+- **The limiter fields carry no known meaning.** `xlr_1_limiter` … `out_4_limiter`
+  read 1.0 and `hp_limiter_active` true in every frame, silence included (2026-11-19
+  and 2026-11-22, CorOS 4.1.1): they are no clipping flag. `output_meter` still passes
+  them through (`limiters`, `any_limiting`), and the bench's dock lights "limiting" from
+  them.
+- **Which field is which output** (2026-11-22): Output 1/2 feeds `grid_xlr_1/2`, Output
+  3/4 `grid_out_3/4`, Send 1/2 `grid_send_1/2` (within 0.01 of `send_1/2`). Multiple
+  Outputs feeds `grid_xlr_1/2`, the four jacks' own fields (no `grid_out_3/4`) and USB
+  3/4 (`usb_output_2l/r`). `usb_output_N` is USB pair N (USB Out 5/6 is
+  `usb_output_3`). `grid_xlr_1/2` read as `xlr_1/2` whatever the Master Volume (90 %
+  tried): the meters show the signal at the output block, not after the knob.
+- **The meters sit after the lane's mute**: a row to Multiple Outputs with its lane
+  output muted sends no output field at all, `grid_*` included.
+- **Frames come only while sound moves**, about 11 a second, none in silence. After a
+  short peak (0.05 s or 0.2 s, 12 dB past full scale) the value stays over 1.0 for
+  about 0.5 s (6–7 frames).
 - **`IOMeter` is not in the handshake subscribe list** (`transport.py:96-98`), yet it is
   treated as streaming noise in the capture log tooling, so it appears to arrive
   unsolicited at least while Cortex Control is running. If a direct-mode session returns

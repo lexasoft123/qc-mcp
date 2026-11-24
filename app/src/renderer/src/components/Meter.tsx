@@ -13,12 +13,11 @@ export const FLOOR = -40
 export const CEIL = 12
 
 /**
- * IOMeter reports **linear amplitude**, 0..1 — not dB. Straight to the bar it
- * would put everything below -6 dBFS in the bottom tenth of the meter, which is
- * where guitar playing actually lives.
+ * IOMeter values are already on a **dB scale**: 1 + dB/40, 0 at -40 dBFS and
+ * below, 1.0 at full scale, past 1.0 when an output is over it (docs/METERS.md).
  */
 export const toDb = (level: number): number =>
-  level <= 0 ? FLOOR : Math.max(FLOOR, 20 * Math.log10(level))
+  level <= 0 ? FLOOR : Math.max(FLOOR, FLOOR * (1 - level))
 
 /**
  * The two channels worth showing. The mains (XLR 1/2) are the leveling

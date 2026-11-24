@@ -268,9 +268,9 @@ class Bench:
         """Collect streamed frames and emit the newest meter reading.
 
         The device broadcasts telemetry with `request_id=0`, so the newest frame
-        wins — never the first one buffered. Levels are **linear amplitude**
-        (0..1), not dB; the bench passes them through and the UI converts, so
-        this stays the one place that knows the wire format.
+        wins — never the first one buffered. Levels are already on a **dB
+        scale**, 1 + dB/40 (0 at -40 dBFS and below, past 1.0 over full scale);
+        the bench passes them through and the UI converts (Meter.tsx `toDb`).
 
         Frames are not guaranteed: one bridge-mode session produced none at all
         (see PROTOCOL.md 5). Callers should render "no reading" as a resting

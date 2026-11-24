@@ -10,8 +10,8 @@ import { t } from '../i18n.js'
  * the limiter — which is the one you need when a preset sounds wrong and you do
  * not yet know whether the fault is the preset or the output stage.
  *
- * The device sends LINEAR amplitude; `toDb` puts it on the -40..+12 scale the
- * QC's own OUT LEVEL readout uses.
+ * The device sends a dB scale (1 + dB/40); `toDb` reads it as dB on the -40..+12
+ * scale the QC's own OUT LEVEL readout uses.
  */
 
 const PORTS: [string, string][] = [

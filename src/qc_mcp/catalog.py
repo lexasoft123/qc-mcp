@@ -167,8 +167,37 @@ def _skew(block_hash, param_index):
     return sk
 
 
+# Parametric EQ band gains (MIN_EQ_DB..MAX_EQ_DB in ModelRepo) are NOT stored
+# normalized: CorOS 4.1.1 stores the raw dB float. Measured 2026-10-30 on
+# QC Tones 31 (Parametric-3 #4001, band 2 gain): -12, -7.5, 0, 0.5, 3, 6, 11.9,
+# +12 all read back exactly as written. steps="241" => 0.1 dB over -12..+12.
+# These params convert by identity, clamped to the range. Graphic-9 #4005 has
+# literal -12..12 bounds and IS stored normalized, so it is not in RAW_DB_RANGE.
+RAW_DB_RANGE = {"MIN_EQ_DB": -12.0, "MAX_EQ_DB": 12.0}
+
+
+def raw_db_range(block_hash, param_index):
+    """(lo, hi) for a param stored as raw dB (identity conversion), else None."""
+    m = lookup(block_hash)
+    if not m or param_index >= len(m["params"]):
+        return None
+    p = m["params"][param_index]
+    lo, hi = RAW_DB_RANGE.get(p.get("min")), RAW_DB_RANGE.get(p.get("max"))
+    if lo is None or hi is None:
+        return None
+    return lo, hi
+
+
+def display_range(block_hash, param_index):
+    """The display-unit (lo, hi) of a param, raw-dB EQ gains included, or None."""
+    return raw_db_range(block_hash, param_index) or _prange(block_hash, param_index)
+
+
 def to_norm(block_hash, param_index, display_value):
     """Convert a display value to the normalized 0-1 the device stores."""
+    raw = raw_db_range(block_hash, param_index)
+    if raw:
+        return max(raw[0], min(raw[1], float(display_value)))
     rng = _prange(block_hash, param_index)
     if not rng:
         return float(display_value)
@@ -184,6 +213,8 @@ def to_norm(block_hash, param_index, display_value):
 
 def to_display(block_hash, param_index, nv):
     """Convert a stored normalized 0-1 value back to its display value."""
+    if raw_db_range(block_hash, param_index):
+        return float(nv)
     rng = _prange(block_hash, param_index)
     if not rng:
         return nv

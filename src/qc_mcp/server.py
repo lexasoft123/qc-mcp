@@ -622,36 +622,39 @@ _METER_GRID = ["grid_xlr_1", "grid_xlr_2", "grid_out_3", "grid_out_4",
 _METER_USB_OUT = ["usb_output_%d%s" % (n, s) for n in (1, 2, 3, 4) for s in ("l", "r")]
 _METER_USB_IN = ["usb_input_%d%s" % (n, s) for n in (1, 2, 3, 4) for s in ("l", "r")]
 
-# IOMeter reports LINEAR AMPLITUDE 0..1, not dB — established by the Patchbay Leveling
-# bench, which converts with 20*log10 and displays on the -40..+12 dB scale the QC's own
-# OUT LEVEL readout uses. Straight to a bar the linear value buries everything below
-# -6 dBFS in the bottom tenth, which is where guitar playing actually lives.
+# IOMeter levels are already on a dB scale: value = 1 + dB/40, 0 at -40 dBFS and below,
+# 1.0 at full scale (measured with a tone over USB, CorOS 4.1.1, docs/METERS.md). Jack
+# and grid_* fields go past 1.0 when the output is over full scale; USB fields stop at 1.0.
 METER_FLOOR_DB = -40.0
 METER_CEIL_DB = 12.0
 
 
 def _meter_db(level):
-    """Linear amplitude -> dB on the device's own -40..+12 scale."""
-    import math
+    """IOMeter value -> dB of full scale (1 + dB/40). None for 0: at or below -40."""
     if level is None or level <= 0:
         return None
-    return round(max(METER_FLOOR_DB, 20.0 * math.log10(float(level))), 1)
+    return round(METER_FLOOR_DB * (1.0 - float(level)), 1)
 
 
 @mcp.tool()
 def output_meter(hold_s: float = 1.0, detail: bool = False) -> dict:
     """READ the device's live output meters (IOMeter telemetry) over a hold window.
 
-    Returns per-port {peak, last} plus the per-output LIMITER flags — the reliable way
-    to answer "is signal reaching the outputs?" and "is this preset clipping?" without
-    guessing from the grid. Ports: input_1/2, return_1/2, xlr_1/2, out_3/4, send_1/2,
-    hp_l/hp_r; detail=True adds the grid-side taps and all USB channels.
+    Returns per-port {peak, last} — the way to answer "is signal reaching the outputs?"
+    and "is this preset clipping?" without guessing from the grid. Ports: input_1/2,
+    return_1/2, xlr_1/2, out_3/4, send_1/2, hp_l/hp_r; detail=True adds the grid-side
+    taps and all USB channels.
 
-    `hold_s` is a peak-hold window: the device streams these continuously, so a longer
-    hold catches transients a single sample would miss. Play while it runs.
+    `hold_s` is a peak-hold window: frames come only while sound moves (about 11 a
+    second), so a longer hold catches transients a single frame would miss. Play while
+    it runs.
 
-    Levels come back both as the raw linear amplitude the device sends (0..1) and as dB
-    on the -40..+12 scale the QC's own OUT LEVEL readout uses. See docs/METERS.md."""
+    Levels come back as the raw value the device sends and as dB of full scale: the raw
+    value is already a dB scale, 1 + dB/40 (0 = -40 dB or below, 1.0 = full scale).
+    `over_full_scale` lists the ports whose peak went past 1.0 (jack and grid fields do;
+    USB fields stop at 1.0). The limiter fields are passed through, but they read 1.0 in
+    every frame, silence included (CorOS 4.1.1): their meaning is not known, so they are
+    no clipping flag. See docs/METERS.md."""
     qc = _conn()
     msgs = qc.latest_broadcast("IOMeter", hold_s=hold_s)
     if not msgs:
@@ -691,12 +694,15 @@ def output_meter(hold_s: float = 1.0, detail: bool = False) -> dict:
 
     out = {"samples": len(msgs), "hold_s": hold_s, "ports": ports,
            "limiters": limiters, "any_limiting": any(limiters.values()),
-           "scale": {"raw": "linear amplitude 0..1", "db_floor": METER_FLOOR_DB,
-                     "db_ceiling": METER_CEIL_DB}}
+           "scale": {"raw": "dB scale: 1 + dB/40, 0 at -40 dB and below",
+                     "db_floor": METER_FLOOR_DB, "db_ceiling": METER_CEIL_DB}}
     if detail:
         out["grid"] = {f: fold(f) for f in _METER_GRID}
         out["usb_out"] = {f: fold(f) for f in _METER_USB_OUT}
         out["usb_in"] = {f: fold(f) for f in _METER_USB_IN}
+    over = [k for k, v in ports.items() if v["peak"] > 1.0]
+    over += [k for k, v in out.get("grid", {}).items() if v["peak"] > 1.0]
+    out["over_full_scale"] = over
     return out
 
 

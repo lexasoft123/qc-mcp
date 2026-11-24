@@ -231,7 +231,9 @@ quirk or that session's device state is unresolved — so a client should treat
     User setlists live under `/media/p4/Presets/My Presets`.
   - **Downloads (cloud):** `is_downloads:true` + `key_in_downloads:<cloud_id UUID>` —
     folder+position do **not** work for Downloads.
-  - **Plugin banks:** `is_plugin:true` + `key_in_plugin_folder`.
+  - **Plugin banks:** `is_plugin:true` + `key_in_plugin_folder:"<folder>/<name>.pb"`
+    **+ `folder_key:<folder>`** — without `folder_key` the recall is silently ignored
+    (CorOS 4.1.1, 2026-09-20).
   - `transport.recall(folder_key, position, is_factory, downloads_key, plugin_key)`.
 - On recall the QC pushes the full `RecallPreset` (new preset).
 - Capacity: setlists ≤ 256 presets, up to 10 user setlists, 3072 presets total.

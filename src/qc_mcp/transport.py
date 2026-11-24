@@ -1079,7 +1079,12 @@ class QuadCortex:
           * My Presets / Factory: folder_key + position (+ is_factory).
           * Downloads (cloud):     downloads_key = the preset's cloud_id UUID
                                    (sets is_downloads + key_in_downloads).
-          * Plugin banks:          plugin_key (sets is_plugin + key_in_plugin_folder).
+          * Plugin banks:          plugin_key = the preset file's key, its path
+                                   "<folder>/<name>.pb" (sets is_plugin +
+                                   key_in_plugin_folder). The device also needs the
+                                   folder: folder_key, or the path's folder when not given.
+                                   Without folder_key the recall is silently ignored
+                                   (CorOS 4.1.1).
         """
         m = P.message_class("SetlistPosition")()
         m.action = P.ACTION["UPDATE"]
@@ -1090,6 +1095,7 @@ class QuadCortex:
         elif plugin_key:
             m.is_plugin = True
             m.key_in_plugin_folder = plugin_key
+            m.folder_key = folder_key or plugin_key.rsplit("/", 1)[0]
         else:
             m.folder_key = folder_key
             m.position = position

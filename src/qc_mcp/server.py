@@ -1062,7 +1062,8 @@ def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Pr
       * Downloads (cloud):     downloads_cloud_id = the preset's cloud_id (from
                                search_directory's 'key'/list). folder+position do NOT
                                work for Downloads.
-      * Plugin banks:          plugin_key.
+      * Plugin banks:          plugin_key = the preset's 'key' from search_directory
+                               ("<folder>/<name>.pb").
     Returns the loaded preset's signal chain (captured from the push the device sends
     on switch — works whether connected directly or bridged to Cortex Control)."""
     import time

@@ -266,7 +266,9 @@ to check nothing is unhandled. Result:
 Downloads/Plugin presets do **not** load by `folder_key`+`position` — the sweep proved
 `recall("cloud-0-1", pos)` is silently ignored. They load by:
 - Downloads: `is_downloads` + `key_in_downloads` = the preset's **`cloud_id`** (UUID).
-- Plugins: `is_plugin` + `key_in_plugin_folder`.
+- Plugins: `is_plugin` + `key_in_plugin_folder` (the file's key, `<folder>/<name>.pb`)
+  + `folder_key` (that folder). Without `folder_key` it is silently ignored too
+  (CorOS 4.1.1, 2026-09-20).
 Fixed in `transport.recall(..., downloads_key=, plugin_key=)` and MCP `switch_preset`
 (`downloads_cloud_id=`); `search_directory` now returns `downloads_cloud_id` per hit.
 Also: `get_current_preset` (a READ) returns empty in **bridge** mode — read the grid the

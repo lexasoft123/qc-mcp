@@ -14,6 +14,7 @@ import { Leveling } from './views/Leveling.js'
 import { Prefs } from './modals/Prefs.js'
 import { Shortcuts } from './modals/Shortcuts.js'
 import { matches, shortcut, typing } from './keys.js'
+import { Cloud } from './modals/Cloud.js'
 
 type View = 'home' | 'console' | 'leveling' | 'setup' | 'logs'
 
@@ -32,6 +33,7 @@ export function App(): React.JSX.Element {
   const update = useUpdate()
   const [view, setView] = useState<View>('home')
   const [prefs, setPrefs] = useState(false)
+  const [cloud, setCloud] = useState(false)
   const [keysOpen, setKeysOpen] = useState(false)
 
   /*
@@ -110,6 +112,7 @@ export function App(): React.JSX.Element {
                 onClick={() => setKeysOpen(true)}>
           <Keyboard />
         </Button>
+        <Button size="sm" title={t('cloud.account')} onClick={() => setCloud(true)}>{t('cloud.button')}</Button>
         <Button size="sm" icon title={t('prefs.open')} aria-label={t('prefs.open')} onClick={() => setPrefs(true)}>
           <Gear />
         </Button>
@@ -139,6 +142,7 @@ export function App(): React.JSX.Element {
 
       {prefs && <Prefs snap={snap} onClose={() => setPrefs(false)} />}
       {keysOpen && <Shortcuts onClose={() => setKeysOpen(false)} />}
+      {cloud && <Cloud onClose={() => setCloud(false)} />}
 
       {toast && (
         <div className={toast.bad ? 'toast bad' : 'toast'} key={toast.id}>

@@ -38,6 +38,8 @@ server itself, and still works standalone.
   catalog, lay out parallel/multiamp topologies with splitters + routing, set
   parameters, and save. (Reproduces complex multi-amp presets faithfully.)
 - **Live control** — switch presets, scenes (A–H), performance modes, master volume.
+- **Cortex Cloud** — sign in, search presets/captures and users, queue downloads,
+  follow profiles, and edit, publish or delete your own captures.
 - **Device presets** (CorOS 4.1) — list, recall and save a device's settings, so a
   dialled-in amp or drive can be reused in any rig instead of rebuilt.
 - **Footswitch assignments** — bind blocks to stomp switches A–H (latching or
@@ -114,6 +116,26 @@ command = "/absolute/path/qc-mcp/.venv/bin/qc-mcp"
 
 Patchbay writes all of these for you, Codex included; the per-client table is
 in [app/README.md](app/README.md#connecting-an-ai-client).
+
+## Cortex Cloud
+
+Cloud tools work over HTTPS without connecting the Quad Cortex. Click
+**Cloud** in Patchbay to sign in, or run `qc-mcp cloud login` in a terminal
+for a hidden password prompt. The password is discarded; the renewable session
+uses macOS Keychain or Windows Credential Manager with encrypted local storage.
+MCP clients restore and refresh the session **even with Patchbay closed**.
+Use `qc-mcp cloud status` / `qc-mcp cloud logout` to inspect or remove the sign-in.
+
+Use `cloud_search_presets`, `cloud_search_captures`, and `cloud_search_users` for
+discovery; `cloud_get_profile` and `cloud_get_product` for details.
+`cloud_queue_download` adds a product to the account's download queue. After the
+device synchronizes, refresh `search_directory` and use `switch_preset` or
+`add_capture` to load it. Queue success alone does not verify a hardware download.
+
+`cloud_my_captures`, `cloud_update_capture`, `cloud_publish_capture`, and
+`cloud_delete_capture` manage your own captures. See
+[docs/CORTEX-CLOUD.md](docs/CORTEX-CLOUD.md) for examples, authentication,
+profile following, and verification limits.
 
 ## Two ways to connect
 

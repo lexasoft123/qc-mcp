@@ -52,6 +52,15 @@ export function pythonDetail(p: PythonInfo): string {
     : t('check.python.notFound', { path: p.path })
 }
 
+/** Import-only compatibility check: never opens the credential store or USB. */
+export async function backendReady(paths: Paths): Promise<boolean> {
+  if (!exists(paths.bin) || !exists(paths.python)) return false
+  const result = await run(paths.python, [
+    '-c', 'import qc_mcp.cloud_auth, keyring; from cryptography.fernet import Fernet'
+  ], { cwd: paths.repo, timeout: 8000 })
+  return result.code === 0
+}
+
 export async function hasClang(): Promise<boolean> {
   if (!IS_MAC) return true
   const r = await run('clang', ['--version'], { timeout: 5000 })

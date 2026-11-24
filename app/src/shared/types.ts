@@ -452,6 +452,9 @@ export type UpdateState =
   | { state: 'error'; message: string }
 
 export interface Api {
+  cloudStatus(): Promise<CloudStatus>
+  cloudLogin(email: string, password: string): Promise<CloudStatus>
+  cloudLogout(): Promise<CloudStatus>
   snapshot(): Promise<Snapshot>
   onSnapshot(cb: (s: Snapshot) => void): () => void
   onProgress(cb: (p: Progress) => void): () => void
@@ -556,4 +559,11 @@ export interface Api {
     maximizeToggle(): void
     close(): void
   }
+}
+
+export interface CloudStatus {
+  authenticated: boolean
+  session_persisted: boolean
+  email?: string
+  error?: string
 }

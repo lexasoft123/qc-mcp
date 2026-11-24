@@ -272,9 +272,24 @@ to check nothing is unhandled. Result:
 Downloads/Plugin presets do **not** load by `folder_key`+`position` — the sweep proved
 `recall("cloud-0-1", pos)` is silently ignored. They load by:
 - Downloads: `is_downloads` + `key_in_downloads` = the preset's **`cloud_id`** (UUID).
-- Plugins: `is_plugin` + `key_in_plugin_folder` (the file's key, `<folder>/<name>.pb`)
+- Plugins: `is_plugin` + `key_in_plugin_folder` (the file's key, as the catalog lists it)
   + `folder_key` (that folder). Without `folder_key` it is silently ignored too
   (CorOS 4.1.1, 2026-09-20).
+  - **Take the key from the catalog; never build it from the name.** It is
+    `<folder>/<name>.pb` for 3112 plugin presets of 3113 (CorOS 4.1.1, the whole
+    catalog, 2026-11-22). The one exception: Archetype: John Mayer X, `Artists/Blues
+    Saraceno`, the preset named `Strat - Clean (Amp 2`, whose file is `Strat - Clean.pb`.
+    Recalled by its catalog key, the preset loads and carries the listed name. A key
+    built from the name (`.../Strat - Clean (Amp 2.pb`) is **not refused**: the device
+    answers with that key as its pointer and loads an **empty preset** (no name, no
+    blocks), 2026-11-24. `recall_verified` therefore also checks that a plugin recall
+    did not land on an empty preset (a stock plugin preset is never empty).
+  - **While a plugin preset is playing, SetlistPosition reads its folder and its
+    `key_in_plugin_folder`, and no position** (the pointer's `position` is `None`).
+    Folder and position do not lead back to it: `recall(folder, 0)` loads an empty
+    preset (2026-11-22 after John Mayer X's `Tele - Start`; again 2026-11-24 after
+    `Strat - Clean (Amp 2`). Go back by the key: `recall(plugin_key=...)`, or
+    `switch_preset` with the `plugin_key` that `current_preset_position` returns.
 Fixed in `transport.recall(..., downloads_key=, plugin_key=)` and MCP `switch_preset`
 (`downloads_cloud_id=`); `search_directory` now returns `downloads_cloud_id` per hit.
 The tools confirm the requested identity and then request a fresh full grid.

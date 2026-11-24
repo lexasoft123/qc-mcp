@@ -59,10 +59,14 @@ export function Cloud({ status, onStatus, onClose }: {
       {status?.authenticated ? (
         <>
           <div className="cloud-account">
-            <StatusDot tone="ok" />
-            <div><strong>{t('cloud.signedIn')}</strong><span>{status.email || t('cloud.account')}</span></div>
+            <StatusDot tone={status.error ? 'warn' : 'ok'} />
+            <div><strong>{t(status.error ? 'cloud.statusUnavailable' : 'cloud.signedIn')}</strong><span>{status.email || t('cloud.account')}</span></div>
           </div>
-          <CloudSearch disabled={busy} />
+          <CloudSearch disabled={busy} onSignInRequired={(message) => {
+            setEmail(status.email ?? '')
+            setError(message)
+            onStatus({ authenticated: false, session_persisted: false })
+          }} />
           {!busy && (error || status.error) && <p className="cloud-error" role="alert">{error || status.error}</p>}
           <ModalActions>
             <Button variant="primary" disabled={busy} onClick={onClose}>{t('cloud.done')}</Button>

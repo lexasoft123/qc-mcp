@@ -1,11 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, SegmentedControl } from '@singz/ui'
 import type { CloudCategory, CloudPresetDetails, CloudProduct } from '@shared/types'
 import { t } from '../i18n.js'
 
 const words = (label: string | undefined): string | undefined => label?.replaceAll('_', ' ')
 
-function ProductDetails({ product, category }: { product: CloudProduct; category: CloudCategory }): React.JSX.Element {
+function ProductDetails({ product, category, onSignInRequired }: {
+  product: CloudProduct
+  category: CloudCategory
+  onSignInRequired: (message: string) => void
+}): React.JSX.Element {
   const version = product.version?.replace(/^v/i, '')
   const isPreset = category === 'presets'
   const [details, setDetails] = useState<CloudPresetDetails | null>(null)
@@ -14,7 +18,9 @@ function ProductDetails({ product, category }: { product: CloudProduct; category
     if (!isPreset || loadingDetails) return
     setLoadingDetails(true)
     try {
-      setDetails(await window.patchbay.cloudPresetDetails(product.productId))
+      const result = await window.patchbay.cloudPresetDetails(product.productId)
+      if ('error' in result && result.signInRequired) onSignInRequired(result.error)
+      else setDetails(result)
     } catch {
       setDetails({ error: t('cloud.detailFailed') })
     } finally {
@@ -67,11 +73,23 @@ function ProductDetails({ product, category }: { product: CloudProduct; category
   )
 }
 
-export function CloudSearch({ disabled }: { disabled: boolean }): React.JSX.Element {
+export function CloudSearch({ disabled, onSignInRequired }: {
+  disabled: boolean
+  onSignInRequired: (message: string) => void
+}): React.JSX.Element {
   const [category, setCategory] = useState<CloudCategory>('captures')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const active = useRef(false)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false }
+  }, [])
+
+  const signInRequired = (message: string): void => {
+    if (active.current) onSignInRequired(message)
+  }
   const [results, setResults] = useState<{
     query: string
     page: number
@@ -86,7 +104,8 @@ export function CloudSearch({ disabled }: { disabled: boolean }): React.JSX.Elem
     try {
       const result = await window.patchbay.cloudSearch(category, text.trim(), page)
       if ('error' in result) {
-        setError(result.error)
+        if (result.signInRequired) signInRequired(result.error)
+        else setError(result.error)
         return
       }
       setResults({ query: text.trim(), page, ...result })
@@ -124,7 +143,8 @@ export function CloudSearch({ disabled }: { disabled: boolean }): React.JSX.Elem
         <>
           {results.products.length ? (
             <div className="cloud-capture-results" key={results.query + ':' + results.page}>
-              {results.products.map((product) => <ProductDetails key={product.productId} product={product} category={category} />)}
+              {results.products.map((product) => <ProductDetails key={product.productId} product={product}
+                category={category} onSignInRequired={signInRequired} />)}
             </div>
           ) : <p className="cloud-message" role="status">{t('cloud.searchEmpty')}</p>}
           {(results.page > 0 || results.hasNext) && (

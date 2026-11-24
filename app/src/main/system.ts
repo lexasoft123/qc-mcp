@@ -56,7 +56,12 @@ export function pythonDetail(p: PythonInfo): string {
 export async function backendReady(paths: Paths): Promise<boolean> {
   if (!exists(paths.bin) || !exists(paths.python)) return false
   const result = await run(paths.python, [
-    '-c', 'import qc_mcp.cloud_auth, keyring; from cryptography.fernet import Fernet'
+    '-c', [
+      'import inspect, keyring',
+      'from cryptography.fernet import Fernet',
+      'from qc_mcp.cloud_auth import CloudClient',
+      "assert 'verify' in inspect.signature(CloudClient.status).parameters"
+    ].join('; ')
   ], { cwd: paths.repo, timeout: 8000 })
   return result.code === 0
 }

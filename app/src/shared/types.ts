@@ -590,5 +590,6 @@ export interface CloudProduct {
   creatorVersion?: string
 }
 
-export type CloudProductPage = { products: CloudProduct[]; hasNext: boolean } | { error: string }
-export type CloudPresetDetails = { compatibility: string[]; blocks: string[]; scenes: string[] } | { error: string }
+export type CloudRequestError = { error: string; signInRequired?: boolean }
+export type CloudProductPage = { products: CloudProduct[]; hasNext: boolean } | CloudRequestError
+export type CloudPresetDetails = { compatibility: string[]; blocks: string[]; scenes: string[] } | CloudRequestError

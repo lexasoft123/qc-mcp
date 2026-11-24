@@ -31,6 +31,9 @@ daemon. Already-running MCP processes notice a later login or logout on their
 next cloud request. Sessions shared by multiple clients coordinate refreshes so
 rotating cookies are not overwritten. Signing out removes the shared saved
 session; a revoked or expired refresh session requires signing in again.
+Patchbay verifies the session when you open Cloud and shows the sign-in form
+if search or preset details detects an expired login. In a terminal, use
+`qc-mcp cloud status --verify` to check the saved session against Cortex Cloud.
 
 The renewable session is encrypted with authenticated encryption. Its encryption
 key is stored in macOS Keychain or Windows Credential Manager. The encrypted

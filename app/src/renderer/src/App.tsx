@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CloudStatus } from '@shared/types'
 import { Button, SegmentedControl, StatusDot, WindowButtons } from '@singz/ui'
 import { isMac, railText, regCount, sessionWord } from './derive.js'
@@ -36,16 +36,19 @@ export function App(): React.JSX.Element {
   const [prefs, setPrefs] = useState(false)
   const [cloud, setCloud] = useState(false)
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null)
+  const cloudStatusRevision = useRef(0)
   const [keysOpen, setKeysOpen] = useState(false)
 
   useEffect(() => {
-    let active = true
+    const revision = ++cloudStatusRevision.current
     void window.patchbay.cloudStatus().then((status) => {
-      if (active) setCloudStatus(status)
+      if (revision === cloudStatusRevision.current) setCloudStatus(status)
     }).catch(() => {
-      if (active) setCloudStatus({ authenticated: false, session_persisted: false, error: t('cloud.checkFailed') })
+      if (revision === cloudStatusRevision.current) {
+        setCloudStatus({ authenticated: false, session_persisted: false, error: t('cloud.checkFailed') })
+      }
     })
-    return () => { active = false }
+    return () => { cloudStatusRevision.current += 1 }
   }, [cloud])
 
   /*
@@ -129,7 +132,7 @@ export function App(): React.JSX.Element {
         </Button>
         <Button size="sm" title={cloudLabel} aria-label={t('cloud.buttonStatus', { status: cloudLabel })}
                 onClick={() => setCloud(true)}>
-          <StatusDot tone={!cloudStatus ? 'idle' : cloudStatus.authenticated ? 'ok' : 'warn'} className="cloud-status-dot" />
+          <StatusDot tone={!cloudStatus ? 'idle' : cloudStatus.authenticated && !cloudStatus.error ? 'ok' : 'warn'} className="cloud-status-dot" />
           {t('cloud.button')}
         </Button>
         <Button size="sm" icon title={t('prefs.open')} aria-label={t('prefs.open')} onClick={() => setPrefs(true)}>
@@ -161,7 +164,10 @@ export function App(): React.JSX.Element {
 
       {prefs && <Prefs snap={snap} onClose={() => setPrefs(false)} />}
       {keysOpen && <Shortcuts onClose={() => setKeysOpen(false)} />}
-      {cloud && <Cloud status={cloudStatus} onStatus={setCloudStatus} onClose={() => setCloud(false)} />}
+      {cloud && <Cloud status={cloudStatus} onStatus={(status) => {
+        cloudStatusRevision.current += 1
+        setCloudStatus(status)
+      }} onClose={() => setCloud(false)} />}
 
       {toast && (
         <div className={toast.bad ? 'toast bad' : 'toast'} key={toast.id}>

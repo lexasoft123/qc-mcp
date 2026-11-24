@@ -63,6 +63,34 @@ def test_status_and_logout_have_no_patchbay_dependency():
     assert code == 0 and not json.loads(output)["authenticated"]
 
 
+def test_verified_status_preserves_session_when_cloud_is_unavailable():
+    class OfflineClient:
+        def status(self, *, verify=False):
+            assert verify
+            return {"authenticated": True, "session_persisted": True, "error": "Cloud unavailable"}
+
+    code, output, _ = invoke(["status", "--json", "--verify"], factory=OfflineClient)
+    assert code == 1 and json.loads(output) == {
+        "authenticated": True, "session_persisted": True, "error": "Cloud unavailable"}
+
+
+def test_product_commands_identify_when_sign_in_is_required():
+    for status_code in (401, 403, 500, None):
+        class FailingClient:
+            def search(self, *args, **kwargs):
+                raise CloudError("Cloud request failed", status_code=status_code)
+
+            product = search
+
+        for args in (["search", "--category=captures", "--query=clean"],
+                     ["preset-details", "--product-id=preset-id"]):
+            code, output, _ = invoke([*args, "--json"], factory=FailingClient)
+            assert code == 1
+            result = json.loads(output)
+            assert result["error"] == "Cloud request failed"
+            assert result.get("signInRequired", False) == (status_code == 401)
+
+
 def test_credential_store_error_returns_actionable_json_without_traceback():
     def unavailable():
         raise CloudError("Unlock the operating system credential store and try again.")

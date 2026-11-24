@@ -2,6 +2,7 @@
 // test framework. Transpile the actual modules so no Electron process, vault,
 // cloud account, or hardware is needed.
 const assert = require('node:assert/strict')
+const { EventEmitter } = require('node:events')
 const { readFileSync } = require('node:fs')
 const { join } = require('node:path')
 const vm = require('node:vm')
@@ -14,7 +15,7 @@ function load(name, mocks) {
   }).outputText
   const module = { exports: {} }
   vm.runInNewContext(code, {
-    module, exports: module.exports, process,
+    module, exports: module.exports, process, setTimeout, clearTimeout,
     require: (id) => Object.hasOwn(mocks, id) ? mocks[id] : require(id)
   }, { filename: file })
   return module.exports
@@ -37,7 +38,7 @@ async function main() {
   assert.equal(await system.backendReady(paths), false)
   assert.equal(calls[0][0], paths.python)
   assert.equal(calls[0][1][0], '-c')
-  assert.equal(calls[0][1][1], 'import qc_mcp.cloud_auth, keyring; from cryptography.fernet import Fernet')
+  assert.match(calls[0][1][1], /'verify' in inspect.signature\(CloudClient.status\).parameters/)
   exitCode = 0
   assert.equal(await system.backendReady(paths), true)
   installed = false
@@ -83,6 +84,35 @@ async function main() {
   assert.equal(updated.status, 'ok')
   assert.equal(probes, 2, 'Re-check/setup completion must rerun the dependency probe')
   console.log('PASS backend compatibility probe and cached upgrade checks')
+
+  const replies = [
+    { authenticated: true, session_persisted: true, error: 'Cloud temporarily unavailable' },
+    { error: 'Cloud session expired', signInRequired: true },
+    { error: 'Cloud session expired', signInRequired: true },
+    { error: 'Cloud temporarily unavailable' }
+  ]
+  const cloud = load('cloud', {
+    './util.js': { exists: () => true },
+    'node:child_process': { spawn(_python, args) {
+      if (replies.length === 4) assert.ok(args.includes('--verify'))
+      const child = new EventEmitter()
+      child.stdout = new EventEmitter()
+      child.stdout.setEncoding = () => {}
+      child.stdin = new EventEmitter()
+      child.stdin.end = () => {
+        child.stdout.emit('data', JSON.stringify(replies.shift()))
+        child.emit('close', 1)
+      }
+      return child
+    } }
+  })
+  const status = await cloud.cloudAuth(paths, 'status')
+  assert.equal(status.authenticated, true, 'verification failure preserves the saved session')
+  assert.equal(status.error, 'Cloud temporarily unavailable')
+  assert.equal((await cloud.searchCloud(paths, 'captures', 'test', 0)).signInRequired, true)
+  assert.equal((await cloud.cloudPresetDetails(paths, 'preset-id')).signInRequired, true)
+  assert.equal((await cloud.searchCloud(paths, 'captures', 'test', 0)).signInRequired, undefined)
+  console.log('PASS Cloud verification and expiry responses')
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })

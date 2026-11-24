@@ -205,6 +205,29 @@ def test_malformed_refresh_does_not_retry_with_invalid_credentials():
     assert client.status()["authenticated"] is False
 
 
+def test_verified_status_refreshes_and_distinguishes_rejection_from_outage():
+    def expired():
+        return HTTPError("https://cloud-api.neuraldsp.com/api/v1/user/profile", 401,
+                         "expired", {}, io.BytesIO())
+
+    http = HTTP(expired(), {"access_token": "fresh"}, PROFILE)
+    client = CloudClient(opener=http, access_token="old")
+    assert client.status()["authenticated"] and not http.requests
+    assert client.status(verify=True)["authenticated"] and len(http.requests) == 3
+
+    http = HTTP(expired(), URLError("offline"))
+    client = CloudClient(opener=http, access_token="old")
+    status = client.status(verify=True)
+    assert status["authenticated"] and "error" in status
+    assert client.status()["authenticated"]
+
+    http = HTTP(expired(), expired())
+    client = CloudClient(opener=http, access_token="old")
+    status = client.status(verify=True)
+    assert not status["authenticated"] and "error" not in status
+    assert not client.status()["authenticated"]
+
+
 def test_follow_and_unfollow_use_observed_methods_and_validate_input():
     http = HTTP({}, {})
     client = CloudClient(opener=http, access_token="token")

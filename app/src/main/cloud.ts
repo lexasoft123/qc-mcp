@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import type { CloudCategory, CloudPresetDetails, CloudProductPage, CloudStatus, Paths } from '../shared/types.js'
+import type { CloudCategory, CloudPresetDetails, CloudProductPage, CloudRequestError, CloudStatus, Paths } from '../shared/types.js'
 import { exists } from './util.js'
 
 type Action = 'status' | 'login' | 'logout'
@@ -8,13 +8,15 @@ const failure = (error: string): CloudStatus => ({ authenticated: false, session
 /** The Python backend owns the session; credentials never enter argv or logs. */
 export async function cloudAuth(paths: Paths, action: Action, credentials?: { email: string; password: string }): Promise<CloudStatus> {
   const input = action === 'login' && credentials ? { ...credentials, remember: true } : undefined
-  const value = await runCloud(paths, [action, '--json'], input)
-  if (typeof value.error === 'string') return failure(value.error.slice(0, 500))
-  if (typeof value.authenticated !== 'boolean') return failure('Cortex Cloud returned an unexpected sign-in response.')
+  const args = action === 'status' ? [action, '--json', '--verify'] : [action, '--json']
+  const value = await runCloud(paths, args, input)
+  const error = typeof value.error === 'string' ? value.error.slice(0, 500) : undefined
+  if (typeof value.authenticated !== 'boolean') return failure(error ?? 'Cortex Cloud returned an unexpected sign-in response.')
   return {
     authenticated: value.authenticated,
     session_persisted: value.session_persisted === true,
-    ...(typeof value.email === 'string' ? { email: value.email.slice(0, 320) } : {})
+    ...(typeof value.email === 'string' ? { email: value.email.slice(0, 320) } : {}),
+    ...(error ? { error } : {})
   }
 }
 
@@ -23,7 +25,7 @@ export async function searchCloud(paths: Paths, category: CloudCategory, query: 
   if (Array.isArray(result.products) && typeof result.hasNext === 'boolean') {
     return { products: result.products, hasNext: result.hasNext }
   }
-  return { error: typeof result.error === 'string' ? result.error.slice(0, 500) : 'Cortex Cloud returned an unexpected search response.' }
+  return requestError(result, 'Cortex Cloud returned an unexpected search response.')
 }
 
 export async function cloudPresetDetails(paths: Paths, productId: string): Promise<CloudPresetDetails> {
@@ -32,7 +34,14 @@ export async function cloudPresetDetails(paths: Paths, productId: string): Promi
   if (Array.isArray(compatibility) && Array.isArray(blocks) && Array.isArray(scenes)) {
     return { compatibility, blocks, scenes }
   }
-  return { error: typeof result.error === 'string' ? result.error.slice(0, 500) : 'Cortex Cloud returned unexpected preset details.' }
+  return requestError(result, 'Cortex Cloud returned unexpected preset details.')
+}
+
+function requestError(result: Record<string, unknown>, fallback: string): CloudRequestError {
+  return {
+    error: typeof result.error === 'string' ? result.error.slice(0, 500) : fallback,
+    ...(result.signInRequired === true ? { signInRequired: true } : {})
+  }
 }
 
 function runCloud(paths: Paths, args: string[], input?: object): Promise<Record<string, unknown>> {

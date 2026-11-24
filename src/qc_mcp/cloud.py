@@ -202,12 +202,20 @@ class CloudClient:
         except OSError:
             raise CloudError("Could not remove the private cloud session file") from None
 
-    def status(self):
+    def status(self, *, verify=False):
         with self._session():
+            error = None
+            if verify and self._token:
+                try:
+                    self.profile()
+                except CloudError as exc:
+                    if self._token:
+                        error = str(exc)
             return {"authenticated": bool(self._token), "session_persisted": self._persist,
                     "email": self._email,
                     "storage": self._store.storage_name if self._managed else
-                               "legacy-file" if self._session_file and self._persist else "memory"}
+                               "legacy-file" if self._session_file and self._persist else "memory",
+                    **({"error": error} if error else {})}
 
     def _expired(self):
         self._token = ""
@@ -222,7 +230,7 @@ class CloudClient:
     def _request(self, method, path, *, params=None, data=None, auth=True, retry=True):
         with self._session():
             if auth and not self._token:
-                raise CloudError("Log in to Cortex Cloud first (cloud_login)")
+                raise CloudError("Log in to Cortex Cloud first (cloud_login)", status_code=401)
             if not path.startswith("/") or path.startswith("//"):
                 raise CloudError("Invalid Cortex Cloud API path")
             url = API_BASE + path

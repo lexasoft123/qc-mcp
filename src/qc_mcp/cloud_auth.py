@@ -79,6 +79,7 @@ def main(argv=None, *, client_factory=_client):
     parser.add_argument("action", choices=("login", "status", "logout", "search", "preset-details"))
     parser.add_argument("--json", action="store_true", dest="json_mode",
                         help="private stdin JSON input for login; JSON status output")
+    parser.add_argument("--verify", action="store_true", help="check the saved session against Cortex Cloud")
     parser.add_argument("--category", choices=("captures", "presets"))
     parser.add_argument("--product-id", default="")
     parser.add_argument("--query", default="")
@@ -86,6 +87,8 @@ def main(argv=None, *, client_factory=_client):
     args = parser.parse_args(argv)
     if args.action in {"search", "preset-details"} and not args.json_mode:
         parser.error(f"{args.action} requires --json")
+    if args.verify and args.action != "status":
+        parser.error("--verify requires status")
     try:
         if args.action == "search":
             query = args.query.strip()
@@ -125,11 +128,16 @@ def main(argv=None, *, client_factory=_client):
                 password = ""
         else:
             client = client_factory()
-            result = client.status() if args.action == "status" else client.logout()
+            if args.action == "status":
+                result = client.status(verify=True) if args.verify else client.status()
+            else:
+                result = client.logout()
     except (CloudError, EOFError, KeyboardInterrupt):
         error = sys.exc_info()[1]
         message = str(error) if isinstance(error, CloudError) else "Sign-in cancelled."
         result = {"authenticated": False, "session_persisted": False, "error": message}
+        if args.action in {"search", "preset-details"} and isinstance(error, CloudError) and error.status_code == 401:
+            result["signInRequired"] = True
 
     if args.json_mode:
         print(json.dumps(result))

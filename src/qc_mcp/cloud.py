@@ -59,6 +59,15 @@ def _segment(value):
     return urllib.parse.quote(value, safe="")
 
 
+def _identity_value(record, *keys):
+    values = [record[key] for key in keys if record.get(key) not in (None, "")]
+    if not values:
+        return None
+    if any(not isinstance(value, str) or not value.strip() or value != values[0] for value in values):
+        raise CloudError("Cortex Cloud returned invalid or conflicting authorship information")
+    return values[0]
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         # Never forward account authorization to another host (or insecure URL).
@@ -193,12 +202,20 @@ class CloudClient:
         except OSError:
             raise CloudError("Could not remove the private cloud session file") from None
 
-    def status(self):
+    def status(self, *, verify=False):
         with self._session():
+            error = None
+            if verify and self._token:
+                try:
+                    self.profile()
+                except CloudError as exc:
+                    if self._token:
+                        error = str(exc)
             return {"authenticated": bool(self._token), "session_persisted": self._persist,
                     "email": self._email,
                     "storage": self._store.storage_name if self._managed else
-                               "legacy-file" if self._session_file and self._persist else "memory"}
+                               "legacy-file" if self._session_file and self._persist else "memory",
+                    **({"error": error} if error else {})}
 
     def _expired(self):
         self._token = ""
@@ -213,7 +230,7 @@ class CloudClient:
     def _request(self, method, path, *, params=None, data=None, auth=True, retry=True):
         with self._session():
             if auth and not self._token:
-                raise CloudError("Log in to Cortex Cloud first (cloud_login)")
+                raise CloudError("Log in to Cortex Cloud first (cloud_login)", status_code=401)
             if not path.startswith("/") or path.startswith("//"):
                 raise CloudError("Invalid Cortex Cloud API path")
             url = API_BASE + path
@@ -382,9 +399,15 @@ class CloudClient:
         profile = self.profile()
         if not isinstance(profile, dict):
             raise CloudError("Cortex Cloud returned an invalid user profile")
-        author_id, user_id = product.get("authorId"), profile.get("userId")
-        author_name, username = product.get("authorUsername"), profile.get("username")
-        owned = author_id == user_id if author_id and user_id else bool(author_name and author_name == username)
+        author_id = _identity_value(product, "author_id", "authorId")
+        user_id = _identity_value(profile, "user_id", "userId")
+        if author_id is not None and user_id is not None:
+            owned = author_id == user_id
+        else:
+            # The current profile response identifies the account by username.
+            author_name = _identity_value(product, "author_username", "authorUsername")
+            username = _identity_value(profile, "username")
+            owned = author_name is not None and author_name == username
         if not owned:
             raise CloudError("Only your own authored captures can be managed")
         return product
@@ -411,11 +434,16 @@ class CloudClient:
             for key, value in (("name", name.strip() if name is not None else None), ("description", description), ("tags", tags)):
                 if value is not None:
                     data[key] = value
-            for key, value in (("instrumentType", instrument_type), ("deviceType", device_type)):
-                if value is not None:
-                    if not isinstance(data.get("metadata"), dict):
-                        data["metadata"] = {}
-                    data.setdefault("metadata", {})[key] = value
+            metadata = data.get("metadata")
+            if not isinstance(metadata, dict) and (instrument_type is not None or device_type is not None):
+                metadata = data["metadata"] = {}
+            if isinstance(metadata, dict):
+                for key, alias, value in (("instrument_type", "instrumentType", instrument_type),
+                                          ("device_type", "deviceType", device_type)):
+                    if alias in metadata:
+                        metadata.setdefault(key, metadata.pop(alias))
+                    if value is not None:
+                        metadata[key] = value
             return redact(self._request("PUT", "/api/v1/user/products/" + _segment(product_id) + "/metadata", data=data))
 
     def publish_capture(self, product_id, published=True):

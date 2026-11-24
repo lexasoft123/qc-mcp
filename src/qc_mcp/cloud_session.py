@@ -43,7 +43,11 @@ def _native_backend():
             from keyring.backends.Windows import WinVaultKeyring
             backend = WinVaultKeyring()
         else:
-            raise SessionError("Remembering Cortex Cloud sign-in requires macOS Keychain or Windows Credential Manager")
+            raise SessionError(
+                "Remembering Cortex Cloud sign-in requires macOS Keychain or Windows Credential Manager. "
+                "For a process-only MCP login, set QC_CLOUD_EMAIL and QC_CLOUD_PASSWORD in the server "
+                "environment and call cloud_login(persist=False), or set QC_CLOUD_ACCESS_TOKEN."
+            )
         if backend.priority <= 0:
             raise RuntimeError
         return backend

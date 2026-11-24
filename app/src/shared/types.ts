@@ -454,6 +454,8 @@ export type UpdateState =
   | { state: 'error'; message: string }
 
 export interface Api {
+  cloudSearch(category: CloudCategory, query: string, page: number): Promise<CloudProductPage>
+  cloudPresetDetails(productId: string): Promise<CloudPresetDetails>
   cloudStatus(): Promise<CloudStatus>
   cloudLogin(email: string, password: string): Promise<CloudStatus>
   cloudLogout(): Promise<CloudStatus>
@@ -569,3 +571,27 @@ export interface CloudStatus {
   email?: string
   error?: string
 }
+
+
+export type CloudCategory = 'captures' | 'presets'
+
+export interface CloudProduct {
+  productId: string
+  name: string
+  authorUsername?: string
+  description?: string
+  version?: string
+  instrumentType?: string
+  deviceType?: string
+  gainType?: number
+  downloads?: number
+  createdAt?: string
+  tags?: string[]
+  hash?: string
+  creatorType?: string
+  creatorVersion?: string
+}
+
+export type CloudRequestError = { error: string; signInRequired?: boolean }
+export type CloudProductPage = { products: CloudProduct[]; hasNext: boolean } | CloudRequestError
+export type CloudPresetDetails = { compatibility: string[]; blocks: string[]; scenes: string[] } | CloudRequestError

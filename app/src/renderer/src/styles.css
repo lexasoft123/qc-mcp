@@ -1245,3 +1245,20 @@ abbr[title] { text-decoration: none; border-bottom: 1px dotted var(--sz-line-str
 .xport-foot.warn { color: var(--sz-text); }
 .xport-foot.bad { color: var(--sz-danger-surface-text); }
 .xport-foot-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cloud-browser-card { width: min(610px, 100%); max-height: calc(100vh - 50px); overflow: auto; }
+.cloud-capture-search h3 { font-size: 15px; margin-bottom: 4px; }
+.cloud-search-form { grid-template-columns: minmax(0, 1fr) auto; align-items: end; margin-bottom: 10px; }
+.cloud-search-form > label { grid-column: 1 / -1; margin: 0; }
+.cloud-search-form input { min-width: 0; }
+.cloud-capture-results { max-height: min(39vh, 320px); overflow: auto; padding-right: 4px; }
+.cloud-capture { border-bottom: 1px solid var(--sz-line); padding: 8px 4px; }
+.cloud-capture summary { cursor: pointer; padding: 4px; }
+.cloud-capture summary:focus-visible { outline: 2px solid var(--sz-accent); }
+.cloud-capture-name { font-weight: 600; }
+.cloud-capture-summary { display: block; margin-left: 16px; font-size: 11px; color: var(--sz-dim); }
+.cloud-capture-description { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 4px; font-size: 12px; }
+.cloud-capture-facts { margin: 8px 4px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 14px; }
+.cloud-capture-facts dt { color: var(--sz-dim); font-size: 11px; }
+.cloud-capture-facts dd { margin: 2px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+.cloud-capture-pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--sz-dim); }

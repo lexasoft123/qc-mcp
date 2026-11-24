@@ -96,8 +96,12 @@ FX, and the settings — then map each module to the QC catalog (§3) and cross-
   - Two-Rock / Dumble Steel String Singer → **Dumbbell ODS** (Dumble-derived).
   - Fender Bassman/Bandmaster (tweed) → **US Tweed Basslad**; Twin/Deluxe → **US TWN / US DLX**.
   - Klon → **Myth Drive**; TS-808 → **Green 808**; Boss DC-2 → **Chief DC2W**.
-  State the substitution and why (don't silently swap). If a signature capture exists on
-  the device or Cortex Cloud, prefer it (search the DIRECTORY).
+  State the substitution and why. Look for a signature capture with
+  `search_directory(category="captures")` on the device or
+  `cloud_search_captures` on Cortex Cloud. Inspect a Cloud match with
+  `cloud_get_product`. To use that capture, queue it with `cloud_queue_download`,
+  wait for device sync, then refresh the device directory and use the matching
+  local capture key with `add_capture`.
 - Mono (M) cabs by default; stereo (ST) only when you need width (2× CPU).
 
 ## 4. Understand and apply the settings

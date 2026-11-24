@@ -17,7 +17,7 @@ import { Leveling } from './leveling.js'
 import { IS_MAC } from './paths.js'
 import { findPython } from './system.js'
 import { t } from '../shared/i18n/index.js'
-import { cloudAuth } from './cloud.js'
+import { cloudAuth, cloudPresetDetails, searchCloud } from './cloud.js'
 
 let win: BrowserWindow | null = null
 let ticker: NodeJS.Timeout | null = null
@@ -142,6 +142,22 @@ function handlers(): void {
     Boolean(win && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame
       && event.senderFrame?.url === rendererURL())
   const denied = { authenticated: false, session_persisted: false, error: 'This window cannot access Cortex Cloud sign-in.' }
+  ipcMain.handle('cloud:search', (event, category: unknown, query: unknown, page: unknown) => {
+    if (!trustedCloudSender(event)) return { error: denied.error }
+    if ((category !== 'presets' && category !== 'captures') ||
+        typeof query !== 'string' || !query.trim() || query.length > 120 || query.includes('\0') ||
+        typeof page !== 'number' || !Number.isInteger(page) || page < 0 || page > 1000) {
+      return { error: 'Invalid Cloud search.' }
+    }
+    return searchCloud(state.getPaths(), category, query.trim(), page)
+  })
+  ipcMain.handle('cloud:preset-details', (event, productId: unknown) => {
+    if (!trustedCloudSender(event)) return { error: denied.error }
+    if (typeof productId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(productId)) {
+      return { error: 'Invalid Cloud product ID.' }
+    }
+    return cloudPresetDetails(state.getPaths(), productId)
+  })
   ipcMain.handle('cloud:status', (event) => trustedCloudSender(event) ? cloudAuth(state.getPaths(), 'status') : denied)
   ipcMain.handle('cloud:logout', (event) => trustedCloudSender(event) ? cloudAuth(state.getPaths(), 'logout') : denied)
   ipcMain.handle('cloud:login', (event, email: unknown, password: unknown) => {

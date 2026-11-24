@@ -728,8 +728,13 @@ class QuadCortex:
         is accepted for back-compat but intentionally NOT sent (the app sends none)."""
         f = P.message_class("File")()
         f.action = P.ACTION["CREATE"]
+        # A File CREATE WITHOUT `type` is silently ignored by the device (0 = presets,
+        # 1 = IRs, 2 = captures) — the app always sends it, and omitting it made every
+        # save here look successful while writing nothing (docs/DIRECTORY.md).
+        f.type = 0
         f.request_id = self.next_request_id()
         f.folder.key = folder_key
+        f.folder.is_factory = False
         fi = f.folder.files.add()
         fi.index = int(position)
         fi.name = name

@@ -1295,20 +1295,26 @@ def add_block(row: int, column: int, device_hash: int, params: dict = None) -> s
 
 @mcp.tool()
 def add_capture(row: int, column: int, capture_key: str = "", capture_name: str = "",
-                version: str = "v1", query: str = "") -> dict:
+                version: str = "", query: str = "") -> dict:
     """WRITE: place a Neural Capture block at grid (row, column) and load a capture
     into it. Provide either capture_key (+capture_name) from search_directory, OR a
     `query` to look one up by name in the on-device captures. version 'v1'|'v2' picks
-    the V1/V2 capture block. The capture must already be on the device (factory, or
-    downloaded via Cortex Cloud)."""
+    the V1/V2 capture block; blank = the capture's own (its catalog entry says which,
+    search_directory's 'capture_version'), else 'v1'. The capture must already be on
+    the device (factory, or downloaded via Cortex Cloud)."""
     from . import directory
+    hit = None
     if query and not capture_key:
         hits = directory.search(_catalog(), query, category="captures", limit=1)
         if not hits:
             return {"error": f"no on-device capture matches {query!r}"}
-        capture_key = hits[0]["key"]; capture_name = hits[0]["name"]
+        hit = hits[0]
+        capture_key = hit["key"]; capture_name = hit["name"]
     if not capture_key:
         return {"error": "provide capture_key (from search_directory) or query"}
+    if not version:
+        hit = hit or directory.find_capture(_catalog(), capture_key)
+        version = directory.capture_version(hit) if hit else "v1"
     _conn().set_capture(row, column, capture_key, capture_name, version=version)
     return {"placed": "Neural Capture", "version": version, "row": row, "column": column,
             "capture": capture_name or capture_key[:12]}
@@ -1722,17 +1728,24 @@ def search_directory(query: str = "", category: str = "", limit: int = 30,
     'irs' (blank = all). Returns items with folder_key + position so a preset hit can
     be loaded via switch_preset(position, setlist_key=folder_key, is_factory=...).
     Capture/IR hits include their content 'key' (hash) used to reference them in a
-    block. Read-only. Examples: search_directory('SRV','presets'),
+    block; capture hits also 'capture_version' ('v1'|'v2', the block it goes in).
+    Read-only. Examples: search_directory('SRV','presets'),
     search_directory('Laney','captures')."""
     from . import directory
     cat = category or None
     hits = directory.search(_catalog(refresh), query, category=cat, limit=limit)
-    return [{"name": h["name"], "category": h["category"],
+    out = []
+    for h in hits:
+        d = {"name": h["name"], "category": h["category"],
              "folder_name": h["folder_name"], "setlist_key": h["folder_key"],
              "position": h["index"], "is_factory": h["is_factory"],
              "is_downloads": h["folder_key"].startswith("cloud-0"),
              "downloads_cloud_id": h.get("cloud_id", ""),
-             "author": h["author"], "key": h["key"]} for h in hits]
+             "author": h["author"], "key": h["key"]}
+        if h["category"] == "captures":
+            d["capture_version"] = directory.capture_version(h)
+        out.append(d)
+    return out
 
 
 @mcp.tool()

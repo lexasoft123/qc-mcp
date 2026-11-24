@@ -32,6 +32,9 @@ def _file_dict(f, position):
         "cloud_id": getattr(f, "cloud_id", "") or "",
         "author": getattr(f, "author", "") or "",
         "version": getattr(f, "coros_version", "") or "",
+        # the file's own `version` field (not coros_version): for a capture "1" or "2",
+        # i.e. which block plays it - V1 (14000) or V2 (14001). See capture_version().
+        "file_version": getattr(f, "version", "") or "",
         "instrument": getattr(f, "instrument", 0),
         "is_readonly": getattr(f, "is_readonly", False),
         "date_ms": getattr(f, "date_ms_since_epoch", 0),
@@ -65,6 +68,26 @@ def structure_directory(file_msgs):
         out[cat] = sorted(folders.values(),
                           key=lambda d: (d["is_factory"], d["name"].lower()))
     return out
+
+
+def capture_version(file_entry):
+    """'v1' or 'v2': the Neural Capture block (14000 / 14001) a capture file belongs in,
+    from the file's `version` field: "1" = V1, "2" = V2 (CorOS 4.1.1). Anything else,
+    a missing field included, reads as 'v1'."""
+    return "v2" if str(file_entry.get("file_version", "")) == "2" else "v1"
+
+
+def find_capture(catalog, key):
+    """The catalog entry of the capture with this key, or None. A capture is listed in
+    several folders, and some list only its key (My Captures does: no name, no
+    version), so the entry that has a version wins."""
+    found = None
+    for _folder, f in iter_files(catalog, "captures"):
+        if f["key"] == key:
+            if f.get("file_version"):
+                return f
+            found = found or f
+    return found
 
 
 def iter_files(catalog, category):

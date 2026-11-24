@@ -26,9 +26,14 @@ GUI when a live action is needed).
 File{ action:UPDATE, type:<0|1|2>,
       folder{ key, name, is_factory, is_downloads, is_user_default,
               files[ { key, index, name, author, author_id,
-                       coros_version, instrument, is_readonly,
+                       coros_version, instrument, is_readonly, version,
                        date_ms_since_epoch } ] } }
 ```
+
+A capture file's `version` (not `coros_version`) says which block plays it: `"1"` = Neural
+Capture V1 (14000), `"2"` = V2 (14001) (CorOS 4.1.1). `structure_directory` keeps it as
+`file_version`; `directory.capture_version()` turns it into `'v1'`/`'v2'`, and
+`add_capture` uses it when no `version` is given.
 
 `File.type` segments the three catalogs:
 

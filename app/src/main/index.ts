@@ -1,5 +1,6 @@
-import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron'
+import { BrowserWindow, Menu, app, dialog, ipcMain, screen, shell } from 'electron'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { CheckId, Mode, Prefs, Progress, Snapshot } from '../shared/types.js'
 import type { Goal } from '../shared/session.js'
 import {
@@ -16,6 +17,7 @@ import { Leveling } from './leveling.js'
 import { IS_MAC } from './paths.js'
 import { findPython } from './system.js'
 import { t } from '../shared/i18n/index.js'
+import { cloudAuth } from './cloud.js'
 
 let win: BrowserWindow | null = null
 let ticker: NodeJS.Timeout | null = null
@@ -46,6 +48,10 @@ function emit(channel: string, payload: unknown): void {
  * rem. The window grows with it so the same amount of content still fits.
  */
 const UI_SCALE = 1.1
+
+function rendererURL(): string {
+  return new URL(process.env.ELECTRON_RENDERER_URL || pathToFileURL(join(__dirname, '../renderer/index.html')).href).href
+}
 
 function create(): void {
   win = new BrowserWindow({
@@ -80,6 +86,22 @@ function create(): void {
   // when the document arrives.
   win.webContents.on('did-finish-load', () => win?.webContents.setZoomFactor(UI_SCALE))
   win.on('ready-to-show', () => win?.show())
+  win.webContents.on('context-menu', (_event, params) => {
+    if (!win || !params.isEditable || params.frame?.url !== rendererURL()) return
+    const flags = params.editFlags
+    const menu = Menu.buildFromTemplate([
+      { role: 'undo', enabled: flags.canUndo },
+      { role: 'redo', enabled: flags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', enabled: flags.canCut },
+      { role: 'copy', enabled: flags.canCopy },
+      { role: 'paste', enabled: flags.canPaste },
+      { role: 'selectAll', enabled: flags.canSelectAll }
+    ])
+    // Providing the frame enables system items such as macOS Password AutoFill.
+    menu.popup({ window: win, frame: params.frame })
+  })
+
   // `emit` guards on null, which only helps if something nulls it. On macOS
   // `window-all-closed` deliberately does not quit, so without this `win` keeps
   // pointing at a DESTROYED window and `win?.webContents` throws — optional
@@ -110,13 +132,25 @@ function create(): void {
   win.on('resize', notify)
   win.on('move', notify)
 
-  if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
-  else void win.loadFile(join(__dirname, '../renderer/index.html'))
+  void win.loadURL(rendererURL())
 }
 
 // ── IPC ─────────────────────────────────────────────────────────────────
 
 function handlers(): void {
+  const trustedCloudSender = (event: Electron.IpcMainInvokeEvent): boolean =>
+    Boolean(win && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame
+      && event.senderFrame?.url === rendererURL())
+  const denied = { authenticated: false, session_persisted: false, error: 'This window cannot access Cortex Cloud sign-in.' }
+  ipcMain.handle('cloud:status', (event) => trustedCloudSender(event) ? cloudAuth(state.getPaths(), 'status') : denied)
+  ipcMain.handle('cloud:logout', (event) => trustedCloudSender(event) ? cloudAuth(state.getPaths(), 'logout') : denied)
+  ipcMain.handle('cloud:login', (event, email: unknown, password: unknown) => {
+    if (!trustedCloudSender(event)) return denied
+    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password || email.length > 320 || password.length > 4096) {
+      return { authenticated: false, session_persisted: false, error: 'Enter your Cortex Cloud email address and password.' }
+    }
+    return cloudAuth(state.getPaths(), 'login', { email: email.trim(), password })
+  })
   ipcMain.handle('snapshot', () => state.current() ?? state.refresh())
   ipcMain.handle('checks:run', () => state.push(true))
 

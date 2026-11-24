@@ -31,6 +31,7 @@ except ImportError:                     # mcp 1.x
 from . import protocol as P
 from . import catalog
 from . import backend
+from .cloud_tools import register_cloud_tools
 from .transport import QuadCortex, QCError
 
 #: Why running alongside Cortex Control isn't on offer here. macOS shares the
@@ -71,6 +72,15 @@ mcp = _Server("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
    needs confirm=True; keep the `previous` snapshot it returns, since that is
    the only way back. get_tempo reads preset tempo + external MIDI-clock BPM.
    Ask before changing anything global; it is not undone by reloading a preset.
+10. Cortex Cloud tools work without a USB connection. cloud_login authenticates
+    this server independently. Sign in privately through Patchbay or run
+    `qc-mcp cloud login` in a terminal; the OS-protected session works with
+    Patchbay closed. cloud_search_presets/captures/users and cloud_get_profile discover
+    content. cloud_queue_download queues an item for the account; it does not
+    prove device download or load. After device sync, refresh search_directory
+    and use its local pointers with switch_preset/add_capture. cloud_my_captures
+    and cloud_update_capture/publish_capture/delete_capture manage owned cloud
+    captures. Read details before changing visibility or deleting content.
 
 Deeper knowledge (routing recipes for shared-front multi-amp rigs, CPU model,
 protocol docs, GUI verification harness) lives in the qc-mcp repo — sessions
@@ -2156,6 +2166,9 @@ def current_preset_position() -> dict:
     return _conn().get_setlist_position() or {"note": "no position reported"}
 
 
+register_cloud_tools(mcp)
+
+
 def main(argv=None):
     """Three ways to run, one binary.
 
@@ -2171,6 +2184,11 @@ def main(argv=None):
     registration keeps working exactly as before.
     """
     import argparse
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "cloud":
+        from .cloud_auth import main as cloud_main
+        return cloud_main(argv[1:])
 
     ap = argparse.ArgumentParser(prog="qc-mcp", description=__doc__)
     ap.add_argument("--daemon", action="store_true",

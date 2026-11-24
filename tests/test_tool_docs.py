@@ -67,6 +67,62 @@ def test_instructions_cover_the_safety_rules():
         assert rule in text, f"instructions never mention {rule!r}"
 
 
+def test_cloud_tools_are_registered_and_distinguish_cloud_from_device():
+    names = ("cloud_login", "cloud_logout", "cloud_status", "cloud_search_presets",
+             "cloud_search_captures", "cloud_search_users", "cloud_get_profile",
+             "cloud_get_product", "cloud_my_captures", "cloud_queue_download",
+             "cloud_update_capture", "cloud_publish_capture", "cloud_delete_capture",
+             "cloud_follow_user")
+    assert all(name in TOOLS for name in names)
+    for name in ("cloud_login", "cloud_logout", "cloud_queue_download",
+                 "cloud_update_capture", "cloud_publish_capture",
+                 "cloud_delete_capture", "cloud_follow_user"):
+        assert "WRITE" in TOOLS[name].description.upper(), name
+    assert "does not prove" in TOOLS["cloud_queue_download"].description
+    assert "confirm" in TOOLS["cloud_delete_capture"].description
+
+
+def test_cloud_delete_requires_confirmation_without_connecting():
+    from qc_mcp import cloud_tools
+    # No client (and thus no HTTP or USB access) should be needed for this guard.
+    old = cloud_tools._client
+    try:
+        cloud_tools._client = object()
+        tool = S.mcp._tool_manager.get_tool("cloud_delete_capture")
+        result = tool.fn("some-id")
+        assert "confirm=True" in result["error"]
+    finally:
+        cloud_tools._client = old
+
+
+def test_cloud_login_uses_environment_without_returning_credentials():
+    from unittest.mock import patch
+    from qc_mcp import cloud_tools
+
+    class Client:
+        def login(self, email, password, persist=False):
+            assert (email, password, persist) == ("test@example.com", "private", True)
+            return {"authenticated": True}
+
+    with patch.object(cloud_tools, "_client", Client()), patch.dict(
+            os.environ, {"QC_CLOUD_EMAIL": "test@example.com", "QC_CLOUD_PASSWORD": "private"}):
+        result = S.mcp._tool_manager.get_tool("cloud_login").fn()
+        assert result == {"authenticated": True}
+
+
+def test_cloud_login_restores_saved_session_without_requesting_password():
+    from unittest.mock import patch
+    from qc_mcp import cloud_tools
+
+    class Client:
+        def status(self):
+            return {"authenticated": True, "session_persisted": True}
+
+    with patch.object(cloud_tools, "_client", Client()), patch.dict(os.environ, {}, clear=True):
+        result = S.mcp._tool_manager.get_tool("cloud_login").fn()
+        assert result == {"authenticated": True, "session_persisted": True}
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

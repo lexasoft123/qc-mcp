@@ -7,7 +7,7 @@ import * as prefsStore from './prefs.js'
 import { Daemon } from './daemon.js'
 import { IS_MAC, PLATFORM, QC_PIDS, QC_VID, findRepo, pathsFor } from './paths.js'
 import * as lock from './lock.js'
-import { cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
+import { backendReady, cortexPid, findPython, hasClang, pythonDetail, readCortex, readDevice } from './system.js'
 import { clear as clearUpdate, version } from './updater.js'
 import { exists } from './util.js'
 
@@ -25,13 +25,14 @@ export const setBridgeGaveUp = (v: boolean): void => { bridgeGaveUp = v }
 
 /**
  * The probes that cost real subprocesses and almost never change: the Python
- * version, clang, and Cortex Control's version + codesign state. None of them
+ * version, backend dependencies, clang, and Cortex Control's version + codesign state. None of them
  * can move without an install, a rebuild or a path change, so they are read on
  * demand (startup, Re-check, after an install/rebuild/launch) and reused by the
  * poll, which only re-reads what is genuinely live.
  */
 interface Slow {
   python: Awaited<ReturnType<typeof findPython>>
+  backendReady: boolean
   clang: boolean
   cortex: Snapshot['cortex']
   device: Snapshot['device']
@@ -82,6 +83,7 @@ export const getDaemon = (): Daemon => daemon
 
 function checksFrom(
   python: Awaited<ReturnType<typeof findPython>>,
+  backend: boolean,
   clang: boolean,
   cortex: Snapshot['cortex'],
   device: Snapshot['device'],
@@ -98,8 +100,8 @@ function checksFrom(
     {
       id: 'venv',
       title: t('check.venv'),
-      detail: t('check.venv.detail'),
-      status: exists(paths.bin) ? 'ok' : 'missing',
+      detail: exists(paths.bin) && !backend ? t('check.venv.upgrade') : t('check.venv.detail'),
+      status: backend ? 'ok' : 'missing',
       fixable: true
     }
   ]
@@ -161,13 +163,14 @@ export async function refresh(deep = false): Promise<Snapshot> {
   daemon.setPaths(paths)
 
   if (deep || !slow) {
-    const [python, clang, cortex, device] = await Promise.all([
+    const [python, backend, clang, cortex, device] = await Promise.all([
       findPython(),
+      backendReady(paths),
       hasClang(),
       readCortex(paths),
       readDevice(true)
     ])
-    slow = { python, clang, cortex, device }
+    slow = { python, backendReady: backend, clang, cortex, device }
   }
 
   // the only things that can change between two polls
@@ -206,7 +209,7 @@ export async function refresh(deep = false): Promise<Snapshot> {
     // The one record that says who holds the device. Everything that used to be
     // inferred — is a daemon up, in what mode, did we start it — is read here.
     lock: lock.read(paths.socket),
-    checks: checksFrom(python, clang, cortex, device, targets),
+    checks: checksFrom(python, slow.backendReady, clang, cortex, device, targets),
     clients: targets,
     daemon: info,
     cortex,

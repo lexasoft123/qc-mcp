@@ -19,9 +19,11 @@ FIFOs, we seize the HID device ourselves, which requires Cortex Control to be qu
 (exclusive access). QC_BRIDGE=0 forces direct mode.
 """
 from __future__ import annotations
+import math
 import os
 import sys
 import threading
+from google.protobuf.json_format import MessageToDict
 
 try:                                    # mcp >= 2 renamed FastMCP -> MCPServer
     from mcp.server.mcpserver import MCPServer as _Server
@@ -49,10 +51,10 @@ mcp = _Server("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
 3. Build: find_devices for hashes -> build_preset (topology+params in one spec)
    -> ALWAYS verify with get_current_preset (routing/split_points) + cpu_load
    (<~85%; delete, don't bypass, to save CPU).
-4. Scenes A-H = per-block param/bypass snapshots. set_block_bypass(scenes=[...])
-   for drives/amps (NO-OP on delays — scene the delay MIX instead). Vary AMP
-   params per scene too (gain/master/EQ) via set_parameter_scenes. Label scenes
-   with set_preset_meta.
+4. Scenes A-H store per-block parameter and bypass values, including delays.
+   Use set_block_bypass(scenes=[...]) and set_parameter_scenes. Supply device_hash
+   with display-unit values; without it, pass wire values. Label scenes with
+   set_preset_meta and read back the scene values and bypass state.
 5. Stereo multi-amp: pan branch lanes with set_lane_output (~0.3/0.7), drop lane
    volumes ~0.5 so the parallel sum doesn't clip.
 6. Save: save_preset / save_preset_as (File CREATE; guarded against clobbering).
@@ -107,14 +109,8 @@ def _conn():
             share = os.environ.get("QC_SHARE") == "1"
             bridge = (not share and _bridge_endpoints()
                       and os.environ.get("QC_BRIDGE") != "0")
-            try:
-                _qc = QuadCortex(bridge=bridge, share=share).open(handshake=True)
-            except Exception:
-                if bridge or share:   # app not really there — fall back to seizing
-                    _qc = QuadCortex(bridge=False).open(handshake=True)
-                    bridge = share = False
-                else:
-                    raise
+            _qc = QuadCortex(bridge=bridge, share=share,
+                             require_riding=share).open(handshake=True)
             _claim(bridge, share)
         return _qc
 
@@ -239,6 +235,8 @@ def _launch_bridge(timeout_s=45):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         if _bridge_running():
+            if sys.platform == "win32":
+                return _wait_shared_handle(deadline)
             time.sleep(12)  # boot storm: the app pulls the whole catalog on start —
             # …and "the app is alive" is not the same as "the FIFO will open".
             # Returning on the process check alone hands the caller a bridge that
@@ -249,6 +247,35 @@ def _launch_bridge(timeout_s=45):
             continue
         time.sleep(1)
     return f"bridge did not come up within {timeout_s}s (device plugged in?)"
+
+
+def _wait_shared_handle(deadline):
+    import time
+    while time.time() < deadline:
+        if _shared_handle_ready():
+            return None
+        time.sleep(0.25)
+    return "Cortex Control never established a shareable HID session"
+
+
+def _shared_handle_ready():
+    hid = None
+    try:
+        hid = backend.open_hid(seize=False)
+        hid.open()
+        stream = P.Reassembler()
+        live = {P.NAME_TO_CMD[name] for name in ("GlobalTempo", "CPULoad", "IOMeter")}
+        for _report_id, data in hid.read_reports(1):
+            for raw in stream.feed(data, has_report_id=True):
+                command, _pb, _hash = P.decode_message(raw)
+                if command in live:
+                    return True
+        return False
+    except Exception:
+        return False
+    finally:
+        if hid is not None:
+            hid.close()
 
 
 def _bridge_openable(deadline, path="/tmp/qc_inject"):
@@ -275,51 +302,65 @@ def _fields(msg):
     return out
 
 
+def _summary_params(model, info):
+    cparams = info.get("params", [])
+    params, scenes, expression, indices = {}, {}, {}, {}
+    for pos, p in enumerate(model.params):
+        name = cparams[pos]["name"] if pos < len(cparams) else f"param_{pos}"
+        if name in indices:
+            name = f"{name} ({pos})"
+        indices[name] = pos
+        if p.expression:
+            expression[name] = {1: "Exp1 (CC#1)", 2: "Exp2 (CC#2)"}.get(
+                p.expression, p.expression)
+        vals = []
+        for pv in p.param_values:
+            member = pv.WhichOneof("value")
+            value = getattr(pv, member) if member else None
+            if member == "float_value" and pos < len(cparams):
+                value = round(catalog.to_display(model.hash, pos, value), 3)
+            vals.append(value)
+        if vals:
+            params[name] = vals[0]
+        if p.scene_mode or len(vals) > 1:
+            scenes[name] = vals
+    out = {"params": params, "param_indices": indices}
+    if scenes:
+        out["scene_params"] = scenes
+    if expression:
+        out["expression"] = expression
+    return out
+
+
 def _preset_summary(bp):
+    bypass = {(row, col): value for row, r in enumerate(bp.bypass)
+              for col, value in enumerate(r.colBypass)}
     chains = []
-    for ch in bp.chains:
+    for row, ch in enumerate(bp.chains):
         blocks = []
         for i, m in enumerate(ch.models):
             if m.hash == 0:
                 continue
             info = catalog.lookup(m.hash) or {}
-            cparams = info.get("params", [])
-            params = {}
-            expr = {}
-            for pos, p in enumerate(m.params):   # param index == array position
-                if pos >= len(cparams):
-                    continue
-                if p.expression:
-                    expr[cparams[pos]["name"]] = {1: "Exp1 (CC#1)",
-                                                  2: "Exp2 (CC#2)"}.get(p.expression, p.expression)
-                if not p.param_values:
-                    continue
-                nv = p.param_values[0].float_value
-                params[cparams[pos]["name"]] = round(catalog.to_display(m.hash, pos, nv), 3)
             b = {"slot": i, "model_hash": m.hash,
                  "name": info.get("name", f"unknown#{m.hash}"),
-                 "category": info.get("category"),
-                 "based_on": info.get("tm", ""),
-                 "params": params}
-            if expr:
-                b["expression"] = expr   # param name -> assigned expression pedal
+                 "category": info.get("category"), "based_on": info.get("tm", ""),
+                 **_summary_params(m, info)}
+            flags = bypass.get((row, i))
+            if flags is not None:
+                b["scene_bypass"] = [v.bypass for v in flags.sceneBypass]
+                b["bypass_scene_mode"] = flags.sceneMode
             blocks.append(b)
         def lane_ctrl(models):
             for m in models:
                 if not m.hash:
                     continue
                 info = catalog.lookup(m.hash) or {}
-                cps = info.get("params", [])
-                vals = {}
-                for pos, p in enumerate(m.params):
-                    if p.param_values and pos < len(cps):
-                        nv = p.param_values[0].float_value
-                        vals[cps[pos]["name"]] = round(catalog.to_display(m.hash, pos, nv), 3)
-                return {"name": info.get("name"), "params": vals}
+                return {"name": info.get("name"), **_summary_params(m, info)}
             return None
         split_points = [[s.split, s.mix] for s in ch.split_control_points
                         if (s.split, s.mix) != (-1, -1)]
-        chains.append({"row": ch.row, "in_port": ch.in_portid,
+        chains.append({"row": row, "in_port": ch.in_portid,
                        "out_port": ch.out_portid,
                        "split_points": split_points, "blocks": blocks,
                        "input_block": lane_ctrl(ch.input_control),
@@ -330,7 +371,7 @@ def _preset_summary(bp):
                "momentary": bool(dict(bp.stomp_is_momentary).get(a.stomp_index))}
               for a in bp.stomp_mode_assignments]
     return {"name": bp.name, "tempo": bp.tempo, "default_scene": bp.default_scene,
-            "scene_labels": [s for s in bp.scene_labels],
+            "scene_labels": list(bp.scene_labels), "scene_colors": list(bp.scene_colors),
             "stomp_assignments": stomps,
             "num_chains": len(bp.chains), "chains": chains}
 
@@ -341,8 +382,8 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
       * 'auto' (default) — if the bridge (instrumented Cortex Control) is running,
         join it. Otherwise DON'T guess: returns the available modes as a question —
         relay the choice to the user, then call connect(mode=...) with their answer.
-        Where bridge mode doesn't exist (Windows) there is nothing to ask, so
-        'auto' goes straight to direct.
+        This applies on macOS and Windows. On platforms without a shared mode,
+        'auto' opens direct HID.
       * 'bridge' — run alongside Cortex Control, both controlling the device.
         Starts the app itself if it isn't up. Verified on both platforms; the
         mechanism differs:
@@ -382,6 +423,11 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
             err = _launch_bridge()
             if err:
                 return {"error": err}
+        elif sys.platform == "win32":
+            import time
+            err = _wait_shared_handle(time.time() + 12)
+            if err:
+                return {"error": err}
         if sys.platform == "win32":
             os.environ["QC_SHARE"] = "1"    # alongside the app = a shared handle
     elif mode == "direct":
@@ -399,7 +445,6 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
         return {"error": f"unknown mode {mode!r} — use 'auto', 'bridge' or 'direct'."}
     try:
         qc = _conn()
-        qc.read_state("Version")
         name = f" [{qc.custom_name}]" if qc.custom_name else ""
         riding = qc.shared and getattr(qc, "riding", False)
         if qc.shared:
@@ -425,7 +470,7 @@ def connect(mode: str = "auto", quit_app: bool = False) -> dict:
                 "connect(mode='direct', quit_app=True). If Cortex Control quits, "
                 "its heartbeat goes with it: disconnect() then connect() again.")
         return out
-    except QCError as e:
+    except (QCError, backend.BridgeError) as e:
         return {"error": f"Connect failed: {e}"}
 
 
@@ -478,32 +523,12 @@ def recall_preset(position: int, setlist_key: str = "", is_factory: bool = False
     REQUIRES folder_key on SetlistPosition UPDATE (a folderless recall is silently
     refused: it answers with the unchanged position). Verifies the recall landed."""
     qc = _conn()
-    if not setlist_key and not is_factory:
-        cur = qc.get_setlist_position() or {}
-        setlist_key = cur.get("folder_key") or "/media/p4/Presets/My Presets"
-    cls = P.message_class("SetlistPosition")
-    m = cls(action=P.ACTION["UPDATE"], request_id=qc.next_request_id(),
-            position=position, is_factory=is_factory)
-    if setlist_key:
-        m.folder_key = setlist_key
-    qc.send("SetlistPosition", m)
-    import time
-    out = {"recalled_position": position}
-    deadline = time.time() + capture_seconds
-    while time.time() < deadline:
-        qc._collect(0.2)
-        for cmd, obj, raw, pb in list(qc._pending):
-            if cmd == P.NAME_TO_CMD["RecallPreset"] and obj is not None \
-                    and obj.HasField("preset"):
-                out["preset"] = _preset_summary(obj.preset)
-                deadline = 0
-    # the device echoes SetlistPosition with the ACTUAL position — verify it moved
-    now = qc.get_setlist_position() or {}
-    if now.get("position") is not None and now["position"] != position:
-        return {"error": f"device refused the recall (still at position "
-                         f"{now['position']}) — check setlist_key/position.",
-                "requested": position, "actual": now}
-    return out
+    try:
+        bp, _ = qc.recall_verified(setlist_key, position, is_factory,
+                                   timeout_s=capture_seconds)
+    except QCError as exc:
+        return {"error": str(exc), "requested": position}
+    return {"recalled_position": position, "preset": _preset_summary(bp)}
 
 
 @mcp.tool()
@@ -800,7 +825,7 @@ def measure_preset(perceived: bool = False, di_path: str = "",
 
     Sends the sample to host USB outputs 5/6, which land on The Grid's USB Input 5/6 —
     so the lane you want to measure must take USB 5/6 as its input (in_portid=12) and
-    send its output to USB 5/6 (out_portid=14). Use with_reamp_routing to arrange that
+    send its output to USB 5/6 (out_portid=14). Set both routes for this measurement
     and put the routing back afterwards.
 
     Host outputs 1-4 are REFUSED: they bypass The Grid and go straight to the analog
@@ -827,6 +852,13 @@ def measure_preset(perceived: bool = False, di_path: str = "",
         return _audio_err(e)
 
 
+def _batch_setlist(qc, setlist_key):
+    if setlist_key:
+        return setlist_key, setlist_key.startswith("/opt/neuraldsp/")
+    pointer = qc.require_setlist_position()
+    return pointer["folder_key"], pointer["is_factory"]
+
+
 @mcp.tool()
 def compare_presets(reference_position: int = -1, positions: list = None,
                     setlist_key: str = "", di_path: str = "", row: int = 0,
@@ -838,15 +870,17 @@ def compare_presets(reference_position: int = -1, positions: list = None,
     trimming would fix it. A tone difference is not fixable by leveling, and trying is
     how a preset ends up both wrong and quiet.
 
-    `reference_position=-1` uses the current preset as the reference. Writes nothing."""
+    `reference_position=-1` uses the current preset as the reference. Measurements
+    switch presets and temporarily change routing. They do not apply or save trims."""
     try:
         from . import autolevel as leveling, loudness as L, audio_io  # noqa: F401
     except Exception as e:
         return _audio_err(e)
     qc = _conn()
 
-    def _measure_here():
-        with leveling.reamp_routing(qc, row=row):
+    def _measure_here(expected):
+        in_row, out_row = leveling.measurement_rows(qc)
+        with leveling.reamp_routing(qc, in_row=in_row, out_row=out_row, expected=expected):
             from . import audio_io as A
             import os as _os
             path = di_path or A.DEFAULT_SAMPLE_PATH
@@ -858,15 +892,18 @@ def compare_presets(reference_position: int = -1, positions: list = None,
             return L.analyze(rec, rate, perceived=perceived, spectrum=True)
 
     try:
+        if reference_position >= 0 or positions:
+            setlist_key, factory = _batch_setlist(qc, setlist_key)
+        expected = leveling.require_active(qc)
         if reference_position >= 0:
-            qc.recall(folder_key=setlist_key, position=int(reference_position))
-        ref = _measure_here()
+            _, expected = qc.recall_verified(setlist_key, int(reference_position), factory)
+        ref = _measure_here(expected)
         if ref.get("error"):
             return {"error": ref["error"]}
         rows = []
         for pos in (positions or []):
-            qc.recall(folder_key=setlist_key, position=int(pos))
-            got = _measure_here()
+            _, expected = qc.recall_verified(setlist_key, int(pos), factory)
+            got = _measure_here(expected)
             if got.get("error"):
                 rows.append({"position": int(pos), "error": got["error"]})
                 continue
@@ -891,7 +928,7 @@ def compare_presets(reference_position: int = -1, positions: list = None,
                           "crest_db": ref.get("crest_db"),
                           "spectral_balance": ref.get("spectral_balance")},
             "presets": rows,
-            "note": "report only — nothing was written to the device"}
+            "note": "report only — no trim or save was applied"}
 
 
 @mcp.tool()
@@ -900,8 +937,8 @@ def suggest_levels(positions: list = None, target_lufs: float = -18.0,
                    di_path: str = "", row: int = 0) -> dict:
     """REPORT-ONLY: measure presets and report the correction each needs, in dB.
 
-    Writes NOTHING to the device — it recalls each preset, plays the reference riff
-    through it, measures, and puts the routing back. Use level_preset / level_setlist to
+    Recalls each preset and temporarily changes routing to play and measure the riff.
+    Restores routing after measuring. Use level_preset / level_setlist to
     apply. `metric="perceived"` levels by Zwicker loudness instead of LUFS, which suits
     a setlist mixing dense high-gain presets with cleans (slower: ~0.9x realtime).
 
@@ -919,18 +956,19 @@ def suggest_levels(positions: list = None, target_lufs: float = -18.0,
                                          dry_run=True)
             rows.append({"position": "current", **_level_row(res)})
         else:
+            setlist_key, factory = _batch_setlist(qc, setlist_key)
             for pos in positions:
-                qc.recall(folder_key=setlist_key, position=int(pos))
+                _, expected = qc.recall_verified(setlist_key, int(pos), factory)
                 res = leveling.level_current(qc, target=target_lufs, metric=metric,
                                              row=row, di_path=di_path or None,
-                                             dry_run=True)
+                                             dry_run=True, expected=expected)
                 rows.append({"position": int(pos), **_level_row(res)})
     except Exception as e:
         return {"error": str(e), "measured": rows}
     vals = [r["measured"] for r in rows if r.get("measured") is not None]
     return {"target": target_lufs, "metric": metric, "presets": rows,
             "spread": (round(max(vals) - min(vals), 2) if len(vals) > 1 else None),
-            "note": "report only — nothing was written to the device"}
+            "note": "report only — no trim or save was applied"}
 
 
 def _level_row(res):
@@ -962,15 +1000,16 @@ def level_preset(target_lufs: float = -18.0, metric: str = "lufs",
         return _audio_err(e)
     qc = _conn()
     try:
+        expected = leveling.require_active(qc)
         out = leveling.level_current(qc, target=target_lufs, metric=metric,
                                      tolerance=tolerance, max_iterations=max_iterations,
                                      row=row, di_path=di_path or None,
-                                     dry_run=not apply)
+                                     dry_run=not apply, expected=expected)
     except Exception as e:
         return {"error": str(e)}
     if save and out.get("written") and not out.get("error"):
         try:
-            out["saved"] = save_preset()
+            out["saved"] = _saved_message(qc.save_verified(overwrite=True, expected=expected))
         except Exception as e:
             out["save_error"] = str(e)
     return out
@@ -994,14 +1033,15 @@ def level_scenes(target_lufs: float = -18.0, scenes: list = None,
         return _audio_err(e)
     qc = _conn()
     try:
+        expected = leveling.require_active(qc)
         out = leveling.level_scenes(qc, scenes=scenes, target=target_lufs,
                                     metric=metric, tolerance=tolerance, row=row,
-                                    di_path=di_path or None, dry_run=dry_run)
+                                    di_path=di_path or None, dry_run=dry_run, expected=expected)
     except Exception as e:
         return {"error": str(e)}
-    if save and out.get("written"):
+    if save and out.get("written") and not out.get("error"):
         try:
-            out["saved"] = save_preset()
+            out["saved"] = _saved_message(qc.save_verified(overwrite=True, expected=expected))
         except Exception as e:
             out["save_error"] = str(e)
     return out
@@ -1025,23 +1065,27 @@ def level_setlist(positions: list, setlist_key: str = "", target_lufs: float = -
         return _audio_err(e)
     qc = _conn()
     done, failed = [], None
+    try:
+        setlist_key, factory = _batch_setlist(qc, setlist_key)
+    except QCError as exc:
+        return {"presets": [], "aborted_at": str(exc)}
     for pos in positions:
         try:
-            qc.recall(folder_key=setlist_key, position=int(pos))
+            _, expected = qc.recall_verified(setlist_key, int(pos), factory)
             if per_scene:
                 res = leveling.level_scenes(qc, target=target_lufs, metric=metric,
                                             tolerance=tolerance, row=row,
-                                            di_path=di_path or None)
+                                            di_path=di_path or None, expected=expected)
             else:
                 res = leveling.level_current(qc, target=target_lufs, metric=metric,
                                              tolerance=tolerance, row=row,
-                                             di_path=di_path or None)
+                                             di_path=di_path or None, expected=expected)
             entry = {"position": int(pos), "converged": res.get("converged"),
                      "final_delta_db": res.get("final_delta_db"),
                      "final_trim_db": res.get("final_trim_db"),
                      "limited": res.get("limited", False), "error": res.get("error")}
             if save and res.get("written") and not res.get("error"):
-                entry["saved"] = save_preset()
+                entry["saved"] = _saved_message(qc.save_verified(overwrite=True, expected=expected))
             done.append(entry)
             if res.get("error"):
                 failed = "preset %s: %s" % (pos, res["error"])
@@ -1059,7 +1103,7 @@ def level_setlist(positions: list, setlist_key: str = "", target_lufs: float = -
 def switch_scene(scene: int) -> str:
     """WRITE: switch the active scene (0–7 = A–H) within the current preset.
     Scenes store per-block parameter values and bypass states."""
-    _conn().set_scene(scene)
+    _conn().confirm_scene(scene)
     return f"Switched to scene {'ABCDEFGH'[scene] if 0 <= scene < 8 else scene}."
 
 
@@ -1074,28 +1118,14 @@ def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Pr
                                work for Downloads.
       * Plugin banks:          plugin_key = the preset's 'key' from search_directory
                                ("<folder>/<name>.pb").
-    Returns the loaded preset's signal chain (captured from the push the device sends
-    on switch — works whether connected directly or bridged to Cortex Control)."""
-    import time
+    Returns the signal chain from a fresh grid read after confirming the preset identity."""
     qc = _conn()
-    qc._pending.clear()
-    if downloads_cloud_id:
-        qc.recall(downloads_key=downloads_cloud_id)
-    elif plugin_key:
-        qc.recall(plugin_key=plugin_key)
-    else:
-        qc.recall(setlist_key, position, is_factory=is_factory)
-    want = P.NAME_TO_CMD["RecallPreset"]
-    bp = None
-    deadline = time.time() + 3.5
-    while time.time() < deadline and bp is None:
-        qc._collect(0.15)
-        for cmd, obj, raw, pb in list(qc._pending):
-            if cmd == want and obj is not None and obj.HasField("preset") \
-                    and sum(1 for ch in obj.preset.chains for m in ch.models if m.hash):
-                bp = obj.preset
-            qc._pending.remove((cmd, obj, raw, pb))
-    return {"loaded": bool(bp), "preset": _preset_summary(bp) if bp else None}
+    try:
+        bp, _ = qc.recall_verified("" if plugin_key else setlist_key, position,
+                                   is_factory, downloads_cloud_id, plugin_key)
+    except QCError as exc:
+        return {"loaded": False, "error": str(exc)}
+    return {"loaded": True, "preset": _preset_summary(bp)}
 
 
 # Performance-mode id map (Mode(14)) — FULLY captured live, ids 0-8.
@@ -1210,19 +1240,21 @@ def get_io_settings() -> dict:
     ground lift, plugged), outputs (level, mute, ground lift), headphones, USB,
     and input/output pairing.
 
-    Input `type` is one of instrument / mic / line — a 3-position control
-    (0.0 / 0.5 / 1.0). Cortex Control's own panel only offers instrument and mic,
-    so a port set to line on the unit itself can be read and restored here but
-    not through the app. Read-only; write with set_io_port."""
-    io = _conn().read_message("IOSettings")
+    Input type is 0.0=Instrument or 1.0=Mic on the full-size Quad Cortex combo
+    inputs. Other devices report the raw value when present."""
+    qc = _conn()
+    io = qc.read_message("IOSettings")
     if io is None or not io.HasField("settings"):
         return {"note": "no IO settings returned"}
     s = io.settings
     def ins(p):
+        input_type = p.input_type if p.HasField("input_type") and math.isfinite(p.input_type) else None
+        if input_type is not None and qc.device_type == "QC" and p.input_port_id in (1, 2):
+            input_type = _input_type_name(input_type)
         return {"port": p.input_port_id, "plugged": p.plugged,
                 "level": round(p.level, 3),
-                "type": _input_type_name(p.input_type),
-                "impedance": round(p.input_zmode, 3),
+                "type": input_type,
+                "impedance": round(p.input_zmode, 3) if p.HasField("input_zmode") else None,
                 "ground_lift": bool(p.ground_lift)}
     def outs(p):
         return {"port": p.output_port_id, "plugged": p.plugged,
@@ -1241,7 +1273,7 @@ def get_io_settings() -> dict:
 
 
 def _norm(model_hash, param_index, display_value):
-    """Convert a display value to the normalized 0-1 the device stores (taper-aware)."""
+    """Convert a display value to the catalog-defined wire representation."""
     return catalog.to_norm(model_hash, param_index, display_value)
 
 
@@ -1448,18 +1480,6 @@ def set_preset_meta(name: str = None, tempo: int = None, default_scene: int = No
     return out + "."
 
 
-def _slot_occupant(folder_key, index):
-    """Best-effort: the preset file already at (folder_key, index) per the DIRECTORY
-    catalog, or None if the slot looks empty / the catalog can't tell."""
-    cat = _catalog()
-    for fo in (cat or {}).get("presets", []):
-        if fo.get("key") == folder_key:
-            for f in fo.get("files", []):
-                if f.get("index") == index:
-                    return f
-    return None
-
-
 def _bank_label(position: int, device_type: str | None = None) -> str:
     """Human bank/slot label for a 0-based setlist position. The Quad Cortex Mini
     (device_type 'ATMA') banks presets in 4s (slots A-D) to match its 4 footswitches,
@@ -1493,9 +1513,7 @@ def list_empty_slots(setlist_key: str = "/media/p4/Presets/My Presets",
     for fo in (cat or {}).get("presets", []):
         if fo.get("key") == setlist_key:
             files = fo.get("files", [])
-            present = {f.get("index") for f in files}
-            free = sorted({f["index"] for f in files if not f.get("name")} |
-                          {i for i in range(256) if i not in present})
+            free = sorted(f["index"] for f in files if not (f.get("name") or f.get("key")))
             def label(i):
                 return _bank_label(i, dev_type)
             out = {"setlist": setlist_key, "source": _catalog_source}
@@ -1519,23 +1537,18 @@ def list_empty_slots(setlist_key: str = "/media/p4/Presets/My Presets",
 @mcp.tool()
 def save_preset_as(name: str, setlist_key: str = "", position: int = -1,
                    overwrite: bool = False) -> dict:
-    """WRITE: save the CURRENT working grid as preset `name` via File CREATE — the same
-    op Cortex Control's Save uses (File{action=CREATE, folder{key, files{index, name}}},
-    no payload; the device commits its live grid). Defaults target the currently loaded
-    slot. SAFETY: refuses to write into a slot that already holds a preset with a
-    different name unless overwrite=True — use list_empty_slots to pick a free target.
-    Never uses RecallPreset SAVE (which hangs on an Unsaved slot)."""
+    """WRITE: persist the working grid in a local user setlist position.
+    Defaults to the active folder and slot. For a Downloads or plugin preset,
+    pass both destination fields. A fresh directory read confirms the destination. Any occupied slot, including one with the requested name,
+    requires overwrite=True. Reports success after verifying the saved entry."""
     qc = _conn()
-    pos = qc.get_setlist_position() or {}
-    folder = setlist_key or pos.get("folder_key") or "/media/p4/Presets/My Presets"
-    idx = position if position >= 0 else int(pos.get("position", 0))
-    occ = _slot_occupant(folder, idx)
-    if occ and occ.get("name") and occ["name"] != name and not overwrite:
-        return {"error": f"slot {idx} in {folder!r} already holds {occ['name']!r} — "
-                         "pass an empty position (see list_empty_slots) or overwrite=True."}
-    qc.write_preset_file(folder, idx, name)
-    return {"saved_as": name, "setlist": folder, "position": idx,
-            "replaced": (occ or {}).get("name") or None}
+    try:
+        saved = qc.save_verified(name, setlist_key,
+                                 None if position == -1 else position, overwrite)
+    except QCError as exc:
+        return {"error": str(exc)}
+    return {"saved_as": saved["name"], "setlist": saved["folder_key"],
+            "position": saved["position"], "replaced": saved["replaced"]}
 
 
 @mcp.tool()
@@ -1548,8 +1561,10 @@ def remove_block(row: int, column: int) -> str:
 @mcp.tool()
 def set_parameter(row: int, column: int, param_index: int, display_value: float,
                   device_hash: int = 0) -> str:
-    """WRITE: set a block parameter to a DISPLAY value (converted using the device's
-    range if device_hash is given, else sent as-is 0-1)."""
+    """WRITE: set a block parameter. Supply device_hash for a display value
+    such as Hz or ms; the catalog applies the model's unit and taper mapping.
+    Without the hash, pass the wire value directly, usually normalized 0–1.
+    Some EQ gains are stored directly in dB."""
     val = _norm(device_hash, param_index, display_value) if device_hash else display_value
     _conn().set_param(row, column, param_index, val)
     return f"Set param {param_index} = {display_value} at row{row} col{column}."
@@ -1558,9 +1573,9 @@ def set_parameter(row: int, column: int, param_index: int, display_value: float,
 @mcp.tool()
 def set_parameter_scenes(row: int, column: int, param_index: int, values: list,
                          device_hash: int = 0) -> str:
-    """WRITE: set a parameter's per-scene values at once (values = up to 8 DISPLAY
-    values, one per scene A-H). Marks the param scene-varying. If device_hash is given,
-    values are converted from display units; else sent as-is (0-1)."""
+    """WRITE: set up to eight scene values A–H and mark the parameter scene-varying.
+    Pass device_hash for display units. Without the hash, send wire values directly,
+    usually normalized 0–1. Some EQ gains are stored directly in dB."""
     vals = [_norm(device_hash, param_index, v) if device_hash else v for v in values]
     _conn().set_param_scenes(row, column, param_index, vals)
     return f"Set param {param_index} across {len(vals)} scenes at row{row} col{column}."
@@ -1607,28 +1622,15 @@ def clear_grid() -> str:
 
 
 @mcp.tool()
-def save_preset(name: str = "") -> str:
-    """WRITE: persist the current working grid to the loaded slot via File CREATE (the
-    app's real Save op). Pass `name` for a new/Unsaved slot; if omitted, reuses the
-    slot's existing preset name. Does NOT use RecallPreset SAVE (that hangs an Unsaved
-    slot). To save into a DIFFERENT slot use save_preset_as."""
-    qc = _conn()
-    pos = qc.get_setlist_position() or {}
-    folder = pos.get("folder_key") or "/media/p4/Presets/My Presets"
-    idx = int(pos.get("position", 0))
-    if not name:
-        # reuse the slot's existing name: directory occupant first (authoritative),
-        # then the working preset's own name field
-        occ = _slot_occupant(folder, idx)
-        name = (occ or {}).get("name") or ""
-        if not name:
-            bp = qc.get_current_preset()
-            name = getattr(bp, "name", "") or ""
-        if not name:
-            return ("This slot is Unsaved and the working preset has no name — "
-                    "pass name= explicitly (a nameless save would create 'Untitled').")
-    qc.write_preset_file(folder, idx, name)
-    return f"Saved preset as '{name}' (pos {idx})."
+def save_preset(name: str = "", overwrite: bool = False) -> str:
+    """WRITE: persist and verify the working grid at the active local slot.
+    Pass a name for an empty slot. Saving to an occupied slot requires
+    overwrite=True, even when reusing its current name."""
+    return _saved_message(_conn().save_verified(name, overwrite=overwrite))
+
+
+def _saved_message(saved):
+    return f"Saved preset as {saved['name']!r} (pos {saved['position']})."
 
 
 @mcp.tool()
@@ -1783,13 +1785,14 @@ def list_device_presets(model: str = "", limit: int = 40) -> dict:
     drive, reverb, utility — that can be recalled into any rig. `model` is a
     block name or numeric hash (empty = summarise every model that has presets).
     Read-only; load one with load_device_preset."""
+    qc = _conn()
     gate = P.require("model_presets", "Device presets")
     if gate:
         return {"error": gate}
     model_hash = _resolve_model(model) if model else None
     if model and model_hash is None:
         return {"error": f"no device matches {model!r} — try find_devices."}
-    presets = _conn().list_model_presets(model_hash)
+    presets = qc.list_model_presets(model_hash)
     if model_hash is not None:
         info = catalog.lookup(model_hash) or {}
         return {"model": info.get("name", model), "model_hash": model_hash,
@@ -1817,10 +1820,10 @@ def load_device_preset(row: int, column: int, preset: str,
     list_device_presets; `model` defaults to whatever block currently sits there.
     Sent as a Grid UPDATE with update_type=MODEL_PRESET. Verifies by reading the
     block back."""
+    qc = _conn()
     gate = P.require("model_presets", "Device presets")
     if gate:
         return {"error": gate}
-    qc = _conn()
     block = _block_at(qc, row, column)
     if block is None:
         return {"error": f"no block at row {row}, column {column}."}
@@ -1850,10 +1853,10 @@ def list_settings_presets(target: str = "global_eq") -> dict:
     """Global EQ / I/O Settings presets (CorOS 4.1+). `target` is 'global_eq' or
     'io_settings'. These ride pseudo-models in the same device-preset index —
     Global EQ is catalog hash 4004, I/O Settings 31000. Read-only."""
+    qc = _conn()
     gate = P.require("model_presets", "Settings presets")
     if gate:
         return {"error": gate}
-    qc = _conn()
     model_hash = qc.SETTINGS_MODELS.get(target)
     if model_hash is None:
         return {"error": f"target must be 'global_eq' or 'io_settings', not {target!r}."}
@@ -1870,13 +1873,14 @@ def load_settings_preset(target: str, preset: str, confirm: bool = False) -> dic
 
     **This overwrites global device settings, not preset content** — it affects
     every preset on the unit. `target='io_settings'` in particular rewrites the
-    hardware input levels, impedance and types, so it needs `confirm=True` and
-    the previous values are returned so they can be put back with `set_io_port`.
-    Global EQ is captured and returned the same way."""
+    hardware input levels, impedance and types, so it needs `confirm=True`.
+    The previous snapshot includes the port fields that `set_io_port` can restore
+    and the remaining I/O state for reference. For Global EQ, use `set_global_eq`
+    with the returned values."""
+    qc = _conn()
     gate = P.require("model_presets", "Settings presets")
     if gate:
         return {"error": gate}
-    qc = _conn()
     if target not in qc.SETTINGS_MODELS:
         return {"error": f"target must be 'global_eq' or 'io_settings', not {target!r}."}
     choices = qc.list_model_presets(qc.SETTINGS_MODELS[target])
@@ -1886,9 +1890,6 @@ def load_settings_preset(target: str, preset: str, confirm: bool = False) -> dic
     if match is None:
         return {"error": f"no {target} preset {preset!r}.",
                 "available": [c["name"] for c in choices[:20]]}
-    if target == "io_settings" and "error" in _io_snapshot(qc):
-        return {"error": "refusing to load an I/O preset: the current settings "
-                         "could not be read, so there would be no way back."}
     if target == "io_settings" and not confirm:
         return {"error": "loading an I/O Settings preset rewrites the hardware "
                          "input levels/impedance/type for every preset. Pass "
@@ -1901,15 +1902,28 @@ def load_settings_preset(target: str, preset: str, confirm: bool = False) -> dic
         return {"global_eq": [[i, round(v, 6)] for i, v in params],
                 "bypassed": bypassed}
 
-    before = snapshot()
-    qc.load_settings_preset(target, match["id"], is_factory=match["is_factory"])
-    after = snapshot()
-    undo = ("set_global_eq(previous['global_eq'], previous['bypassed'])"
+    try:
+        before = snapshot()
+    except QCError as exc:
+        return {"error": f"could not read a valid undo snapshot: {exc}"}
+    if "error" in before:
+        return before
+    try:
+        qc.load_settings_preset(target, match["id"], is_factory=match["is_factory"])
+        after = snapshot()
+    except (QCError, backend.BridgeError) as exc:
+        after = {"error": str(exc)}
+    if "error" in after:
+        return {"error": f"could not verify the applied settings: {after['error']}",
+                "previous": before}
+    note = ("Restore with set_global_eq(previous['global_eq'], previous['bypassed'])."
             if target == "global_eq" else
-            "set_io_port for each entry in previous['in_ports']")
+            "Restore input and output port fields with set_io_port. Pairing, headphones, "
+            "USB, MIDI and expression state are included for reference; use the device "
+            "or Cortex Control to restore those settings as needed.")
     return {"loaded": match["name"], "target": target,
             "changed": before != after, "previous": before,
-            "note": f"keep `previous` — undo with {undo}."}
+            "note": note}
 
 
 @mcp.tool()
@@ -1920,7 +1934,7 @@ def set_global_eq(parameters: list, bypassed: bool = None) -> dict:
     content. `parameters` is a list of [index, value] pairs in the 0-27 layout
     load_settings_preset returns as `previous['global_eq']` (five bands of
     GAIN/FREQ/Q/TYPE/BYPASS, then OUTPUT and two EQ assignments), values
-    normalized 0-1."""
+    in the same wire units returned by load_settings_preset."""
     qc = _conn()
     try:
         pairs = [(int(i), float(v)) for i, v in parameters]
@@ -1928,28 +1942,68 @@ def set_global_eq(parameters: list, bypassed: bool = None) -> dict:
         return {"error": "parameters must be a list of [index, value] pairs."}
     if not pairs:
         return {"error": "nothing to set — pass at least one [index, value] pair."}
-    qc.write_global_eq(pairs, bypassed)
-    now, now_bypassed = qc.read_global_eq()
+    if any(not 0 <= i < 28 or not math.isfinite(v) for i, v in pairs):
+        return {"error": "Global EQ indexes must be 0–27 and values must be finite."}
+    before, before_bypassed = qc.read_global_eq()
+    previous = {"global_eq": before, "bypassed": before_bypassed}
+    try:
+        qc.write_global_eq(pairs, bypassed)
+        now, now_bypassed = qc.read_global_eq()
+    except (QCError, backend.BridgeError) as exc:
+        return {"error": f"could not verify Global EQ: {exc}", "previous": previous}
     applied = dict(now)
-    return {"set": len(pairs), "bypassed": now_bypassed,
-            "matches_request": all(abs(applied.get(i, 0) - v) < 1e-4 for i, v in pairs),
+    return {"set": len(pairs), "bypassed": now_bypassed, "previous": previous,
+            "matches_request": (all(i in applied and abs(applied[i] - v) < 1e-4
+                                    for i, v in pairs)
+                                and (bypassed is None or now_bypassed == bypassed)),
             "global_eq": [[i, round(v, 6)] for i, v in now]}
 
 
 def _io_snapshot(qc):
-    """The input-port fields an I/O preset overwrites, or an explicit failure.
-
-    This is the only record of what to restore after an irreversible I/O load, so
-    an empty read has to be visible rather than silently becoming `{}`.
-    """
+    """Validate a complete Quad Cortex or Mini I/O read before a global change."""
     io = qc.read_message("IOSettings")
     if io is None or not io.HasField("settings"):
-        return {"error": "could not read I/O settings — nothing captured to undo with"}
-    return {"in_ports": [{"port": p.input_port_id, "level": round(p.level, 6),
-                          "impedance": round(p.input_zmode, 6),
-                          "type": round(p.input_type, 6),
-                          "ground_lift": round(p.ground_lift, 6)}
-                         for p in io.settings.in_port],
+        return {"error": "could not read a full I/O snapshot for undo"}
+    settings = io.settings
+
+    def has_values(message, fields):
+        return all(message.HasField(field) and math.isfinite(getattr(message, field))
+                   for field in fields)
+
+    def ports(entries, id_field, required, aliases):
+        if len(entries) != len(required) or {getattr(p, id_field) for p in entries} != required.keys():
+            return None
+        if any(not has_values(p, required[getattr(p, id_field)])
+               or any(p.HasField(field) and not math.isfinite(getattr(p, field)) for field in aliases)
+               for p in entries):
+            return None
+        return [{"port": getattr(p, id_field),
+                 **{key: getattr(p, field) for field, key in aliases.items()
+                    if p.HasField(field)}} for p in entries]
+
+    combo = ("level", "ground_lift", "input_type", "input_zmode")
+    returns = ("level", "ground_lift")
+    inputs = ports(settings.in_port, "input_port_id", {1: combo, 2: combo, 4: returns, 5: returns},
+                   {"level": "level", "ground_lift": "ground_lift",
+                    "input_type": "type", "input_zmode": "impedance"})
+    outputs = ports(settings.out_port, "output_port_id", {
+        1: ("level", "ground_lift", "mute"), 2: ("level", "mute"),
+        4: ("level", "ground_lift", "mute"), 5: ("level", "ground_lift", "mute"),
+        6: ("level", "mute"), 7: ("level", "mute"), 8: ("level",), 9: ("level",),
+    }, {"level": "level", "ground_lift": "ground_lift", "mute": "mute"})
+    if (inputs is None or outputs is None
+            or not has_values(io, ("xlr1_2_linked", "out3_4_linked"))
+            or not has_values(settings.hp_port, ("level",))
+            or not settings.hp_port.hp_feed
+            or any(not feed.output_port_id or not math.isfinite(feed.level) for feed in settings.hp_port.hp_feed)
+            or not has_values(settings.usb_port, ("level", "hp_select", "dry_wet"))
+            or not has_values(settings.midi_port, ("midi_thru",))
+            or len(settings.exp_port) != 2 or {p.exp_port_id for p in settings.exp_port} != {1, 2}
+            or any(not has_values(p, ("level", "calibrating")) for p in settings.exp_port)):
+        return {"error": "incomplete or invalid I/O snapshot for undo"}
+    return {"in_ports": inputs, "out_ports": outputs,
+            "headphones": MessageToDict(settings.hp_port), "usb": MessageToDict(settings.usb_port),
+            "midi": MessageToDict(settings.midi_port), "exp_ports": [MessageToDict(p) for p in settings.exp_port],
             "xlr1_2_linked": io.xlr1_2_linked, "out3_4_linked": io.out3_4_linked}
 
 
@@ -1960,23 +2014,44 @@ def set_io_port(kind: str, port: int, level: float = None, impedance: float = No
     """WRITE: set hardware I/O port fields (`kind` 'in' or 'out'), normalized 0-1.
 
     Only the arguments you pass are sent — and that matters: the device
-    **silently rejects a write carrying a full port record**, so this is also the
-    way to undo a `load_settings_preset('io_settings', …)` from its `previous`
-    snapshot. `input_type` is 0=Instrument, 1.0=Mic — measured against the app
-    on both combo inputs. It reads as 3-position in the protobuf, but 0.5 has
-    never been seen on a device and no Line setting is exposed."""
-    qc = _conn()
+    silently rejects a full port record. An I/O preset's `previous` snapshot can
+    restore input level, impedance, type and ground lift, or output level, ground
+    lift and mute, on ports reporting those fields. `input_type` is 0=Instrument
+    and 1.0=Mic on the verified full-size combo inputs."""
+    if kind not in ("in", "out"):
+        return {"error": "kind must be 'in' or 'out'"}
     fields = {k: v for k, v in (("level", level), ("input_zmode", impedance),
                                 ("input_type", input_type),
                                 ("ground_lift", ground_lift), ("mute", mute))
               if v is not None}
-    if not fields:
-        return {"error": "nothing to set — pass at least one field."}
+    if not fields or any(not math.isfinite(v) for v in fields.values()):
+        return {"error": "pass at least one finite field value"}
+    qc = _conn()
+    before = _io_snapshot(qc)
+    if "error" in before:
+        return before
+    aliases = {"input_zmode": "impedance", "input_type": "type"}
+    group = f"{kind}_ports"
+
+    def lookup(snapshot):
+        return next((p for p in snapshot[group] if p["port"] == port), {})
+
+    prior_port = lookup(before)
+    if any(aliases.get(k, k) not in prior_port
+           or not math.isfinite(prior_port[aliases.get(k, k)]) for k in fields):
+        return {"error": f"could not capture an undo value for every field on {kind} port {port}"}
     try:
         qc.set_io_port(kind, port, **fields)
-    except (QCError, AttributeError) as e:
-        return {"error": str(e)}
-    return {"set": fields, "kind": kind, "port": port, "now": _io_snapshot(qc)}
+        after = _io_snapshot(qc)
+    except (QCError, backend.BridgeError, AttributeError) as exc:
+        return {"error": str(exc), "previous": before}
+    if "error" in after:
+        return {**after, "previous": before}
+    entry = lookup(after)
+    verified = all(aliases.get(k, k) in entry
+                   and abs(entry[aliases.get(k, k)] - v) < 1e-4 for k, v in fields.items())
+    return {"set": fields, "kind": kind, "port": port, "now": after,
+            "previous": before, "matches_request": verified}
 
 
 @mcp.tool()
@@ -2015,10 +2090,10 @@ def save_device_preset(row: int, column: int, name: str,
     The device REFUSES a save whose parameters already match an existing preset
     for that model ("Preset Conflict" in the app) — change something first, or
     just load the existing preset instead."""
+    qc = _conn()
     gate = P.require("model_presets", "Device presets")
     if gate:
         return {"error": gate}
-    qc = _conn()
     block = _block_at(qc, row, column)
     if block is None:
         return {"error": f"no block at row {row}, column {column}."}
@@ -2043,13 +2118,13 @@ def save_device_preset(row: int, column: int, name: str,
 def delete_device_preset(preset: str, model: str) -> dict:
     """WRITE (CorOS 4.1+): delete one of YOUR device presets. Factory presets
     cannot be removed. `preset` is an id or name from list_device_presets."""
+    qc = _conn()
     gate = P.require("model_presets", "Device presets")
     if gate:
         return {"error": gate}
     model_hash = _resolve_model(model)
     if model_hash is None:
         return {"error": f"no device matches {model!r}."}
-    qc = _conn()
     choices = qc.list_model_presets(model_hash)
     match = next((p for p in choices if not p["is_factory"]
                   and (p["id"] == str(preset)
@@ -2081,9 +2156,9 @@ def assign_stomp(row: int, column: int, footswitch: str,
     index = _stomp_index(footswitch)
     if index is None:
         return {"error": f"footswitch must be A-H or 0-7, not {footswitch!r}."}
+    qc = _conn()
     if kind == "secondary" and not P.supports("dual_footswitch"):
         return {"error": P.require("dual_footswitch", "Secondary footswitch assignments")}
-    qc = _conn()
     if _block_at(qc, row, column) is None:
         return {"error": f"no block at row {row}, column {column}."}
     qc.assign_stomp(row, column, index, kind=kind, momentary=momentary)
@@ -2163,7 +2238,15 @@ def _block_at(qc, row, column):
 def current_preset_position() -> dict:
     """The currently loaded preset's pointer: {folder_key, position, is_factory}.
     Read-only (SetlistPosition READ)."""
-    return _conn().get_setlist_position() or {"note": "no position reported"}
+    pointer = _conn().get_setlist_position()
+    if pointer is None:
+        return {"note": "no position reported"}
+    if pointer.get("is_downloads"):
+        return {"is_downloads": True, "downloads_key": pointer["downloads_key"]}
+    if pointer.get("is_plugin"):
+        return {"is_plugin": True, "folder_key": pointer["folder_key"],
+                "plugin_key": pointer["plugin_key"]}
+    return {field: pointer[field] for field in ("folder_key", "position", "is_factory")}
 
 
 register_cloud_tools(mcp)

@@ -22,6 +22,7 @@ model 12013, the device reports 22.
 """
 import os
 import sys
+import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -52,6 +53,7 @@ class _Recorder:
 
 def _qc(by_column=None):
     qc = QuadCortex.__new__(QuadCortex)          # no device, no handshake
+    qc._io_lock = threading.RLock()
     rec = _Recorder(by_column or {0: 7})
     qc._request_id = 0
     qc.next_request_id = lambda: 1

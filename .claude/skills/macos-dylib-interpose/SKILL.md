@@ -29,7 +29,10 @@ interposers[] __attribute__((section("__DATA,__interpose"))) = {
 };
 ```
 To capture device→host, interpose the *callback registration* and substitute a
-trampoline that logs then calls the app's callback (save it in a global).
+trampoline that preserves each registration's original callback and context. Keep
+the context alive through in-flight delivery and pass NULL registrations through.
+Snapshot report bytes before calling the original callback, then mirror or log
+the copy after host delivery.
 
 ## 2. Make injection possible (hardened runtime blocks DYLD_INSERT_LIBRARIES)
 Re-sign a **copy** of the app ad-hoc **without** the runtime flag, adding entitlements
@@ -56,7 +59,12 @@ gotchas learned the hard way:**
 - **Never send injected frames from a background thread** — they interleave the app's
   own multi-chunk messages and corrupt framing. Instead *queue* them and flush from
   inside the app's own send function, only at a message boundary (after the LAST/
-  SINGLE chunk). All device I/O then happens on one thread, between complete messages.
+  SINGLE chunk). Stage an injected message until its own LAST has arrived. Drop an
+  overflowed message in full. Injection happens between complete messages.
+- **Keep session identity local.** Observe the app's startup Version reply,
+  remove session material and publish the private owner cache. Bridge and
+  attached clients use the cache for schema negotiation. Start with the rebuilt
+  interposer if the cache is unavailable.
 
 ## Reference
 Full working implementation: `interceptor/interpose.c`, `build.sh`, `run-bridge.sh`,

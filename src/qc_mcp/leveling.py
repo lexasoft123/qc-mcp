@@ -67,7 +67,7 @@ OUT_PORTS = {
 #: into another row. Levelling a preset means moving what feeds the jacks, so the
 #: bench's master knob skips these — moving a merge bus as well would apply the
 #: same trim twice to any signal that passes through it.
-INTERNAL_OUTS = {0, 16}
+INTERNAL_OUTS = {0, 16, 17, 18}
 
 #: The IOMeter fields the bench shows, in the order it shows them.
 METER_FIELDS = ("xlr_1", "xlr_2", "out_3", "out_4", "hp_l", "hp_r")
@@ -145,29 +145,14 @@ class Bench:
     # -- device reads ------------------------------------------------------
 
     def preset_state(self):
-        """Everything one bench column shows about the loaded preset.
-
-        A whole-preset read can come back empty when the session is busy (two
-        clients reading at once will do it), so retry through a reconnect once
-        and then say so plainly — an `AttributeError` on `None.chains` tells the
-        user nothing.
-        """
+        """Read the working grid and verify the active preset identity around it."""
+        pointer = self.qc.get_setlist_position()
         bp = self.qc.get_current_preset()
-        if bp is None:
-            try:
-                self.qc.reconnect()
-            except Exception:
-                pass
-            bp = self.qc.get_current_preset()
-        if bp is None:
-            raise RuntimeError(
-                "the device did not answer a preset read; it may be busy - try again")
-        pos_info = self.qc.get_setlist_position() or {}
-        return self._state(bp, folder_key=pos_info.get("folder_key", ""),
-                           position=pos_info.get("position"),
-                           is_factory=pos_info.get("is_factory", False))
+        if bp is None or not pointer or pointer != self.qc.get_setlist_position():
+            raise RuntimeError("could not verify the active preset and grid")
+        return self._state(bp, pointer)
 
-    def _state(self, bp, folder_key, position, is_factory):
+    def _state(self, bp, pointer):
         """One bench column's view of a preset. `bp` is a BinaryPreset, however
         it was obtained — a read, or the device's own recall broadcast."""
         scene = self.current_scene()
@@ -178,9 +163,10 @@ class Bench:
                 lanes.append(lane)
         return {
             "name": getattr(bp, "name", "") or "",
-            "folder_key": folder_key or "",
-            "position": position,
-            "is_factory": bool(is_factory),
+            "folder_key": pointer.get("folder_key", ""),
+            "position": pointer.get("position"),
+            "is_factory": pointer.get("is_factory", False),
+            "cloud_id": pointer.get("downloads_key", ""),
             "scene": scene,
             "scene_labels": [s for s in getattr(bp, "scene_labels", [])],
             "lanes": lanes,
@@ -194,10 +180,12 @@ class Bench:
         never fails the whole read the way an uncaught `QCError` would.
         """
         try:
-            scene = self.qc.read_state("Scene", timeout_ms=1500)
+            scene = self.qc.read_state("Scene", timeout_ms=1500, strict=True)
         except Exception:
             return default
-        return int(getattr(scene, "selected_scene", default)) if scene else default
+        if scene is None or not scene.HasField("selected_scene"):
+            return default
+        return int(scene.selected_scene)
 
     def folders(self, refresh=False):
         """Preset folders and their occupied slots, for the bench's picker.
@@ -238,69 +226,21 @@ class Bench:
     # -- device writes -----------------------------------------------------
 
     def open(self, folder_key, position, is_factory=False, cloud_id="", settle=6.0):
-        """Recall a preset, and build its state from the device's own answer.
+        """Recall and read the target only after the device confirms its identity."""
+        bp, pointer = self.qc.recall_verified(folder_key, position, is_factory,
+                                               downloads_key=cloud_id, timeout_s=settle)
+        return self._state(bp, pointer)
 
-        A recall makes the QC push the whole preset back — `RecallPreset` with a
-        payload — so the bench LISTENS for that rather than asking. Waiting by
-        polling the setlist pointer every 150ms and then re-reading the grid cost
-        roughly thirty round trips for one preset change, every one of them
-        landing on a device that was in the middle of loading; it was slow, and
-        it made the device behave oddly while it worked.
-
-        Falls back to a plain read if the broadcast never comes.
-
-        The broadcast we take has to be THIS recall's. A File CREATE (a save)
-        makes the device broadcast a RecallPreset payload too, and it sits in
-        the buffer until somebody reads it: taking the first payload in the
-        queue then shifted every later open by one — measured on hardware
-        2026-09-09, after Save-all `open(B)` returned A's grid and `open(A)`
-        returned B's, for the rest of the session. So: drain what is already
-        buffered before asking, and confirm the pointer before believing a
-        payload.
-        """
-        want = P.NAME_TO_CMD["RecallPreset"]
-        self._drain(want)
+    def active_target(self, folder_key, position, cloud_id="", is_factory=False):
+        current = self.qc.get_setlist_position()
+        if current is None:
+            return None
         if cloud_id:
-            self.qc.recall(downloads_key=cloud_id)
-        else:
-            self.qc.recall(folder_key=folder_key, position=int(position),
-                           is_factory=bool(is_factory))
-
-        bp = None
-        deadline = time.time() + settle
-        while bp is None and time.time() < deadline:
-            try:
-                self.qc._collect(0.1)
-            except Exception:
-                break
-            batch, self.qc._pending = self.qc._pending, []
-            for cmd, obj, _raw, _pb in batch:
-                if cmd == want and obj is not None and obj.HasField("preset"):
-                    bp = obj.preset
-            if bp is not None and not cloud_id and not self._landed(folder_key, position):
-                bp = None            # a stale payload: keep listening
-
-        if bp is None:
-            return self.preset_state()
-        return self._state(bp, folder_key=folder_key,
-                           position=None if cloud_id else int(position),
-                           is_factory=bool(is_factory))
-
-    def _drain(self, cmd):
-        """Throw away buffered frames of one kind, so a later wait cannot mistake
-        an old one for the answer."""
-        try:
-            self.qc._collect(0.05)
-        except Exception:
-            pass
-        self.qc._pending = [x for x in self.qc._pending if x[0] != cmd]
-
-    def _landed(self, folder_key, position):
-        """Is the device's pointer where the recall asked? One cheap read."""
-        pos = self.qc.get_setlist_position() or {}
-        if pos.get("position") != int(position):
-            return False
-        return not folder_key or pos.get("folder_key") == folder_key
+            return current if current.get("downloads_key") == cloud_id else None
+        if (current.get("folder_key"), current.get("position"), current.get("is_factory")) \
+                == (folder_key, position, is_factory) and not current.get("is_plugin"):
+            return current
+        return None
 
     def set_db(self, row, db):
         lo, hi = db_range()
@@ -314,25 +254,13 @@ class Bench:
         return bool(on)
 
     def set_scene(self, index):
-        self.qc.set_scene(int(index))
-        # A scene switch must be *confirmed* before anything is written against
-        # it; the bench's next level write would otherwise land on the old scene.
-        self.qc._await_scene(int(index), timeout_s=2.0)
-        return int(index)
+        return self.qc.confirm_scene(int(index))
 
-    def save(self, name=""):
-        pos = self.qc.get_setlist_position() or {}
-        folder = pos.get("folder_key") or "/media/p4/Presets/My Presets"
-        idx = int(pos.get("position", 0))
-        if not name:
-            bp = self.qc.get_current_preset()
-            name = getattr(bp, "name", "") or ""
-        if not name:
-            raise ValueError("this slot has no preset name; pass one to save it")
-        # File CREATE, never RecallPreset SAVE: the latter hangs the device on an
-        # empty slot and needs a reboot.
-        self.qc.write_preset_file(folder, idx, name)
-        return {"name": name, "position": idx, "folder_key": folder}
+    def save(self, name="", *, folder_key, position, overwrite=False):
+        expected = self.active_target(folder_key, position)
+        if expected is None:
+            raise ValueError("the intended setlist and slot are no longer active")
+        return self.qc.save_verified(name, overwrite=overwrite, expected=expected)
 
     # -- streamed telemetry -------------------------------------------------
 
@@ -421,16 +349,6 @@ def measure_ops(bench, emit):
                 "sample": (audio_io.DEFAULT_SAMPLE_PATH
                            if os.path.exists(audio_io.DEFAULT_SAMPLE_PATH) else None)}
 
-    # Set by `cancel`, read between presets. A run is one call that loops over
-    # a whole bench, so without this the Stop button sets a flag nobody reads:
-    # it said "stopping after this preset" and then measured every one of them.
-    cancelled = {"at": False}
-
-    def do_cancel(m):
-        """Ask the current run to stop after the preset it is on."""
-        cancelled["at"] = True
-        return {"cancelling": True}
-
     def guard(fn):
         def run(m):
             try:
@@ -448,13 +366,14 @@ def measure_ops(bench, emit):
         """
         import threading
         stim, rate = audio_io.load_wav(m.get("path") or audio_io.DEFAULT_SAMPLE_PATH)
+        expected = autolevel.require_active(bench.qc)
         in_row, out_row = autolevel.measurement_rows(bench.qc)
         seconds = round(stim.shape[0] / float(rate), 2)
 
         def run():
             try:
                 with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row,
-                                             tap=False):
+                                             tap=False, expected=expected):
                     audio_io.play(stim, rate=rate, blocking=True)
             except Exception as exc:                          # noqa: BLE001
                 emit({"event": "play", "error": str(exc)})
@@ -479,18 +398,23 @@ def measure_ops(bench, emit):
         metric = m.get("metric", "lufs")
         perceived = metric == "perceived" or bool(m.get("perceived"))
         rows = []
-        cancelled["at"] = False
+        cancelled = m.get("_cancel", threading.Event())
         presets = m.get("presets") or []
         for i, p in enumerate(presets):
-            if cancelled["at"]:
+            if cancelled.is_set():
                 break
             emit({"event": "measuring", "index": i, "name": p.get("name"),
                   "total": len(presets)})
             try:
-                bench.open(p["folder_key"], int(p["position"]),
-                           bool(p.get("is_factory")), p.get("cloud_id", ""))
+                folder, slot, cloud = p["folder_key"], int(p["position"]), p.get("cloud_id", "")
+                factory = bool(p.get("is_factory"))
+                bench.open(folder, slot, factory, cloud)
+                expected = bench.active_target(folder, slot, cloud, factory)
+                if expected is None:
+                    raise RuntimeError("could not confirm the preset to measure")
                 in_row, out_row = autolevel.measurement_rows(bench.qc)
-                with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row):
+                with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row,
+                                             expected=expected):
                     res = autolevel.measure(di_path=m.get("di_path") or None,
                                             perceived=perceived)
                 row = {"position": int(p["position"]), "name": p.get("name"),
@@ -510,37 +434,50 @@ def measure_ops(bench, emit):
                        "error": "%s: %s" % (type(exc).__name__, exc)}
             rows.append(row)
             emit({"event": "measured", "row": row})
+            if getattr(bench.qc, "_reamp_incomplete", False):
+                break
         vals = [r["measured"] for r in rows if r.get("measured") is not None]
-        if cancelled["at"]:
+        if cancelled.is_set():
             emit({"event": "cancelled", "done": len(rows), "total": len(presets)})
         return {"target": target, "metric": metric, "rows": rows,
-                "cancelled": cancelled["at"],
+                "cancelled": cancelled.is_set(),
                 "spread": (round(max(vals) - min(vals), 2) if len(vals) > 1 else None)}
 
     def do_measure_scenes(m):
-        """Measure each scene of the loaded preset. Reports; writes nothing.
-
-        A scene with no data of its own is reported as undefined and skipped — the
-        device answers for it, but the answer is whatever scene A holds, and
-        trimming that would be trimming a scene the player never uses.
-        """
+        """Measure confirmed scenes with temporary reamp routing, without trimming."""
         target = float(m.get("target", autolevel.DEFAULT_TARGET_LUFS))
-        want = m.get("scenes") or list(range(autolevel.MAX_SCENES))
-        state = bench.preset_state() or {}
+        want = m.get("scenes")
+        want = list(range(autolevel.MAX_SCENES)) if want is None else want
+        if any(not isinstance(scene, int) or not 0 <= scene < autolevel.MAX_SCENES
+               for scene in want):
+            return {"error": "scenes must be numbered 0–7"}
+        if not want:
+            return {"target": target, "rows": []}
+        expected = autolevel.require_active(bench.qc)
+        state = bench.preset_state()
         labels = state.get("scene_labels") or []
-        before = bench.current_scene()
+        cancel = m.get("_cancel", threading.Event())
+        before = bench.current_scene(default=None)
+        if before is None:
+            return {"error": "could not read the active scene before measurement"}
         rows = []
         in_row, out_row = autolevel.measurement_rows(bench.qc)
         try:
-            with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row):
+            with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row,
+                                         expected=expected):
                 for sc in want:
+                    if cancel.is_set():
+                        break
                     label = labels[sc] if sc < len(labels) else ""
                     emit({"event": "scene_measuring", "scene": sc})
                     row = {"scene": sc, "name": label or None}
-                    if not bench.qc.set_scene(sc) or not bench.qc._await_scene(sc):
+                    autolevel.require_active(bench.qc, expected)
+                    bench.qc.set_scene(sc)
+                    if not bench.qc._await_scene(sc):
                         row["error"] = "scene switch not confirmed"
-                        rows.append(row); emit({"event": "scene_measured", "row": row})
-                        continue
+                        rows.append(row)
+                        emit({"event": "scene_measured", "row": row})
+                        break
                     res = autolevel.measure(di_path=m.get("di_path") or None)
                     if res.get("error"):
                         row["error"] = res["error"]
@@ -557,8 +494,8 @@ def measure_ops(bench, emit):
                     rows.append(row)
                     emit({"event": "scene_measured", "row": row})
         finally:
-            bench.qc.set_scene(before)
-            bench.qc._await_scene(before)
+            autolevel.require_active(bench.qc, expected)
+            bench.set_scene(before)
         return {"target": target, "rows": rows}
 
     def do_level_scenes(m):
@@ -571,22 +508,27 @@ def measure_ops(bench, emit):
     def do_measure(m):
         # The signal enters on one lane and leaves on another; feeding and tapping
         # the same row would cut the chain and measure a dead end.
+        expected = autolevel.require_active(bench.qc)
         in_row, out_row = autolevel.measurement_rows(bench.qc)
-        with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row):
+        with autolevel.reamp_routing(bench.qc, in_row=in_row, out_row=out_row,
+                                     expected=expected):
             return {"measurement": autolevel.measure(
                 di_path=m.get("di_path") or None,
                 perceived=bool(m.get("perceived")))}
 
     #: What each lane read before a trim was applied, so it can be put back. Keyed by
-    #: (preset name, row) — a trim only means anything for the preset it was measured on.
+    #: (preset identity, row), since different slots can use the same name.
     applied = {}
+
+    def _state_id(state):
+        return (state.get("folder_key"), state.get("position"), state.get("cloud_id"))
 
     def do_revert(m):
         """Put every fader this session moved back where it was."""
-        name = (bench.preset_state() or {}).get("name")
+        identity = _state_id(bench.preset_state())
         back = []
         for (preset, row), db in list(applied.items()):
-            if name is not None and preset != name:
+            if preset != identity:
                 continue
             bench.set_db(row, db)
             back.append({"row": row, "db": db})
@@ -683,19 +625,31 @@ def measure_ops(bench, emit):
         returned so the caller can show where the fader ended up, and the value
         it started from goes into the same undo store `revert_levels` reads.
         """
+        expected = None
         if m.get("folder_key") is not None:
-            bench.open(m["folder_key"], int(m["position"]),
-                       bool(m.get("is_factory")), m.get("cloud_id", ""))
+            folder, slot, cloud = m["folder_key"], int(m["position"]), m.get("cloud_id", "")
+            factory = bool(m.get("is_factory"))
+            expected = bench.active_target(folder, slot, cloud, factory)
+            if expected is None:
+                bench.open(folder, slot, factory, cloud)
+                expected = bench.active_target(folder, slot, cloud, factory)
+                if expected is None:
+                    return {"error": "could not confirm the preset to trim"}
         state = bench.preset_state() or {}
         row = int(m["row"]) if m.get("row") is not None else autolevel.measurement_rows(bench.qc)[1]
         before = next((l["db"] for l in state.get("lanes", []) if l.get("row") == row), None)
         if before is None:
             return {"error": "row %d has no output control to trim" % row}
         lo, hi = db_range()
-        want = float(m["db"]) + before
+        want = float(m["db"]) if m.get("absolute") else float(m["db"]) + before
         landed = max(lo, min(hi, want))
-        applied.setdefault((state.get("name"), row), before)
+        if expected is not None and bench.qc.get_setlist_position() != expected:
+            return {"error": "the active preset changed before applying the trim"}
+        applied.setdefault((_state_id(state), row), before)
         bench.set_db(row, landed)
+        actual = next((l["db"] for l in bench.preset_state()["lanes"] if l["row"] == row), None)
+        if actual is None or abs(actual - landed) > 0.02:
+            return {"error": "could not verify the applied trim"}
         out = {"row": row, "from_db": round(before, 2), "db": round(landed, 2),
                "applied_db": round(landed - before, 2),
                "preset": state.get("name"), "position": m.get("position")}
@@ -728,7 +682,7 @@ def measure_ops(bench, emit):
             before = next((l["db"] for l in state.get("lanes", [])
                            if l.get("row") == row), None)
             if before is not None:
-                applied.setdefault((state.get("name"), row), before)
+                applied.setdefault((_state_id(state), row), before)
         return autolevel.level_current(
             bench.qc,
             target=float(m.get("target", autolevel.DEFAULT_TARGET_LUFS)),
@@ -765,7 +719,6 @@ def measure_ops(bench, emit):
         "level_scenes": guard(do_level_scenes),
         "autolevel": guard(do_autolevel),
         "apply_trim": guard(do_apply_trim),
-        "cancel": do_cancel,
         "riffs": guard(do_riffs),
         "use_riff": guard(do_use_riff),
         "revert_levels": guard(do_revert),
@@ -801,9 +754,26 @@ def _save_snapshot(cat):
 
 # ──────────────────────────────────────────────────────────────── the loop ────
 
-def _stdin_reader(q):
+def _stdin_reader(q, emit):
+    # Stop changes only the batch's Event, so it can bypass the serialized
+    # device queue. Give each queued batch its own Event to retain early Stops.
+    cancel = None
     for line in sys.stdin:
-        q.put(line)
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(message, dict):
+            continue
+        op = message.get("op")
+        if op == "cancel":
+            if cancel is not None:
+                cancel.set()
+            emit({"id": message.get("id"), "ok": True, "cancelling": cancel is not None})
+            continue
+        if op in ("measure_many", "measure_scenes"):
+            cancel = message["_cancel"] = threading.Event()
+        q.put(message)
     q.put(None)
 
 
@@ -842,17 +812,20 @@ def read_input_level(qc, port=1):
 def write_input_level(qc, db, port=1):
     """Set the port's trim to `db` (clamped to the range) and read back what landed.
 
-    Sends ONLY the level field — a full port record is silently rejected. And a
-    read taken straight after an I/O write returns the device's ECHO of that
-    write, not its state, so one read is drained before the value is verified.
+    Sends only the level field. A new correlated READ verifies the actual port.
     """
     idx = _in_level_param(port)
     lo, hi = catalog.io_level_range(idx)
     want = max(lo, min(hi, float(db)))
-    qc.set_io_port("in", int(port), level=catalog.io_level_from_db(idx, want))
-    qc.read_message("IOSettings")                       # the echo
-    got = read_input_level(qc, port)
-    got.update({"asked_db": float(db), "clamped": want != float(db)})
+    before = read_input_level(qc, port)
+    try:
+        qc.set_io_port("in", int(port), level=catalog.io_level_from_db(idx, want))
+        got = read_input_level(qc, port)
+        if abs(got["db"] - want) > 0.05:
+            raise RuntimeError("the I/O level readback did not match the requested trim")
+    except Exception as exc:
+        raise RuntimeError(f"{exc}; previous input level was {before['db']} dB") from exc
+    got.update({"asked_db": float(db), "clamped": want != float(db), "previous": before})
     return got
 
 
@@ -885,7 +858,7 @@ def serve(socket_path):
 
     bench = Bench(qc)
     q: queue.Queue = queue.Queue()
-    threading.Thread(target=_stdin_reader, args=(q,), daemon=True).start()
+    threading.Thread(target=_stdin_reader, args=(q, emit), daemon=True).start()
 
     ops = {
         "hello": lambda m: {"firmware": qc.firmware, "mixer_db": list(db_range())},
@@ -897,7 +870,9 @@ def serve(socket_path):
         "level": lambda m: {"db": bench.set_db(m["row"], m["db"])},
         "switch": lambda m: {"on": bench.set_switch(m["row"], m["which"], m["on"])},
         "scene": lambda m: {"scene": bench.set_scene(m["index"])},
-        "save": lambda m: {"saved": bench.save(m.get("name", ""))},
+        "save": lambda m: {"saved": bench.save(m.get("name", ""),
+                                                folder_key=m["folder_key"], position=m["position"],
+                                                overwrite=bool(m.get("overwrite")))},
         "meter": lambda m: {"metering": _set_metering(bench, qc, m.get("on", True))},
     }
     ops.update(measure_ops(bench, emit))
@@ -910,19 +885,12 @@ def serve(socket_path):
         # without its own sleep — the loop then spins as fast as it can and
         # hammers the daemon socket with reads.
         try:
-            line = q.get(timeout=PUMP)
+            msg = q.get(timeout=PUMP)
         except queue.Empty:
             bench.pump(emit)
             continue
-        if line is None:
+        if msg is None:
             break
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            continue
         rid = msg.get("id")
         op = msg.get("op")
         try:

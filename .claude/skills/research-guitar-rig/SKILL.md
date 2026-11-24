@@ -102,10 +102,10 @@ FX, and the settings — then map each module to the QC catalog (§3) and cross-
 
 ## 4. Understand and apply the settings
 - **Amp knobs** — map the artist's described settings to the QC amp's params (in DISPLAY
-  units via `set_parameter`). Names/ranges differ per model: gain/drive, bass/mid/treble,
-  presence, master/output; some amps expose channel, bright, cut, sag. Read the model's
-  params first (`get_current_preset` or `find_devices` returns the param list) so you set
-  the right index.
+  units via `set_parameter(..., device_hash=hash)`). Names and ranges differ per
+  model: gain/drive, bass/mid/treble, presence, master/output, and sometimes
+  channel, bright, cut, and sag. Get the hash from `find_devices` and the
+  placed block's `param_indices` from `get_current_preset`.
 - **Pedal settings** — gain/drive, tone, level (a Klon is usually low-gain/high-output as
   an always-on boost; a comp set for sustain, not squash).
 - **Gain staging** — respect how hard the amps run (headroom vs breakup) and don't let a
@@ -116,7 +116,8 @@ FX, and the settings — then map each module to the QC catalog (§3) and cross-
 ## 5. Apply, then verify
 - Build the topology with `build_preset` / the build-preset-routing skill.
 - **Read back** `get_current_preset` and confirm the models resolved and params landed in
-  the expected display values; screenshot the grid for the wiring.
+  the expected display values. Check chain routing and split points in the same readback.
+  On macOS a Cortex Control screenshot can also show the visible wiring.
 - Sanity-check against the source: right number of amps, right chain order, always-on
   pedals present, tone character plausible.
 
@@ -144,8 +145,9 @@ there's a high-gain part. That list becomes the scene map.
 - A parameter must be **assigned to scenes** first (in the app: right-click → *Assign to
   Scenes*; on the wire: `params{index, scene_mode:true}` with no value), then each scene
   gets its own value. The MCP `set_parameter_scenes` does the assign + per-scene write.
-- **Per-scene bypass** (turn a drive/block on for just the lead scene) is the same mechanism
-  on the block's **bypass param (index 4)**; `set_block_bypass(..., scenes=[...])`.
+- **Per-scene bypass** uses `set_block_bypass(..., scenes=[...])`. The tool
+  reads the bypass assignment index from the block's parameter count and writes the
+  corresponding bypass map for each confirmed scene. This also works for delays.
 - **Per-scene volume** for a lead bump: assign the amp's level or the lane output VOLUME to
   scenes and raise it on the lead scene.
 - **Don't stop at bypass toggles — scene the AMP and FX params themselves.** Bypass alone
@@ -157,10 +159,9 @@ there's a high-gain part. That list becomes the scene map.
   | amp GAIN/VOLUME | 3 | 4.5 | 5–6 | breakup ladder from one amp |
   | amp MASTER / lane VOLUME | ref | ref | +1–2 dB | the solo cuts through |
   | amp TREBLE/PRESENCE | ref | ref | −0.5–1 | tame fizz as gain rises |
-  | delay/reverb MIX | low/0 | low | up (15–25%) | wetter leads (also the delay
-  on/off mechanism — see below) |
-- **Delay blocks: per-scene BYPASS is a silent no-op** (trails-capable blocks) — scene the
-  delay's **MIX** instead (0 = off; nicer too: trails ring out across the switch).
+  | delay/reverb MIX | low/0 | low | up (15–25%) | wetter leads |
+- Delay bypass and MIX can both vary by scene. Verify the stored bypass state and audition
+  transitions when delay trails matter.
 - Name/color scenes for the tones; `switch_scene(0–7)` = A–H. Verify by switching scenes and
   reading back the per-scene values.
 

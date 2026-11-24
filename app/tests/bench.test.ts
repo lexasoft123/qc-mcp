@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  appliedIds, attribute, focusIndex, forget, forgetApplied, isDirty, leave, markSaved, nextStep, note,
-  savePlan, slotId, unsavedIds
+  activeSlot, appliedIds, attribute, focusIndex, forget, forgetApplied, isDirty, leave, markSaved, nextStep, note, noteApply,
+  savePlan, saveTrim, slotId, unsavedIds
 } from '../src/renderer/src/bench.ts'
-import type { BenchSlot, ReportRow } from '../src/shared/types.ts'
+import type { BenchSlot, PresetState, ReportRow } from '../src/shared/types.ts'
 
 const slot = (p: Partial<BenchSlot> & { name: string }): BenchSlot =>
   ({ folderKey: 'f1', position: 0, cloudId: '', scene: null, ...p })
@@ -153,4 +153,40 @@ test('by-ear and scene edits are only saved while loaded', () => {
 test('saved records and slots off the bench are left alone', () => {
   const w = markSaved(note(note({}, 'a', 1, 'apply'), 'gone', 2, 'apply'), 'a')
   assert.deepEqual(savePlan(w, 'a', ['a']), [])
+})
+
+test('the last actually applied slot is saved first even when focus was elsewhere', () => {
+  const earlier = noteApply({}, slotId(s3), 0, -3, 0)
+  const written = noteApply(earlier, slotId(s7), 2, -2, 3)
+  const live: PresetState = {
+    folderKey: s7.folderKey, position: s7.position, name: s7.name, isFactory: false,
+    scene: 0, sceneLabels: [], lanes: []
+  }
+  assert.deepEqual(savePlan(written, activeSlot(live), [slotId(s3), slotId(s7)]), [
+    { id: slotId(s7), how: 'save' },
+    { id: slotId(s3), how: 'reapply', db: 3 }
+  ])
+})
+
+test('a repeated apply retains the first absolute baseline for undo after a recall', () => {
+  const id = slotId(s3)
+  const applied = noteApply({}, id, 2, -3, 1)
+  const repeated = noteApply(applied, id, 2, 1, 4.5)
+  assert.deepEqual(repeated[id].baseline, { row: 2, db: -3, appliedDb: 4.5 })
+})
+
+test('an apply after saving uses the saved level as its undo baseline', () => {
+  const id = slotId(s3)
+  const saved = markSaved(noteApply({}, id, 0, -3, 0.4), id)
+  const next = noteApply(saved, id, 0, 0.4, 1.2)
+  assert.deepEqual(next[id].baseline, { row: 0, db: 0.4, appliedDb: 1.2 })
+  assert.equal(isDirty(next, id), true)
+})
+
+test('saving a reopened Apply uses the absolute target and live edits keep their grid', () => {
+  const id = slotId(s3)
+  const staged = noteApply({}, id, 2, -3, 0.4)
+  assert.deepEqual(saveTrim(staged[id]), { row: 2, db: 0.4 })
+  for (const source of ['ear', 'auto', 'scenes'] as const)
+    assert.equal(saveTrim(note(staged, id, null, source)[id]), undefined)
 })

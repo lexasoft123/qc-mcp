@@ -8,6 +8,7 @@ backend returns 0 there. Nothing upstream inspects the value either way.
 """
 from __future__ import annotations
 import functools
+import math
 import threading
 import time
 
@@ -37,7 +38,7 @@ def _serialized(method):
 
 class QuadCortex:
     def __init__(self, session_id="claudemcp0000000000000000000000", bridge=False,
-                 share=False, io=None):
+                 share=False, io=None, require_riding=False):
         # Three ways in, all behind the same backend API:
         #   bridge=True  share Cortex Control's session through the interposer
         #                (macOS: the app seizes the device, so this is the only way)
@@ -49,6 +50,7 @@ class QuadCortex:
         #                daemon), so the handshake and heartbeat are theirs
         self.bridge = bridge
         self.shared = share
+        self.require_riding = require_riding
         #: A shared handle that found Cortex Control's session live and rides it
         #: (no handshake/heartbeat of our own) - set by open().
         self.riding = False
@@ -73,6 +75,7 @@ class QuadCortex:
         self._hb_stop = None
         self._hb_thread = None
         # Filled in by detect_version() once the device answers a Version READ.
+        self._version_info = b""
         self.firmware = None          # CorOS version, e.g. "4.1.0"
         self.device_type = None       # "QC" | "ATMA" (Quad Cortex mini)
         self.custom_name = ""         # user label, for multi-device setups (4.1+)
@@ -85,38 +88,33 @@ class QuadCortex:
 
     # -- lifecycle --
     def open(self, handshake=True):
-        self.io.open()
-        # In bridge mode Cortex Control already owns the handshake + heartbeat.
-        # A shared handle (Windows) may or may not have the app beside it:
-        #   * app up   -> RIDE its session, exactly like the bridge. Our own
-        #                 handshake here is what kicks the app off: the device
-        #                 treats ResetCommsBuffers{session_id} as a new client,
-        #                 drops the app's subscriptions, and Cortex Control shows
-        #                 "Device connection lost" a few seconds after we join.
-        #                 Reads and writes work fine on the app's heartbeat.
-        #   * app shut -> the session is ours to make: handshake + heartbeat.
-        # "Is a session live" is read off the wire, not off the process list:
-        # the device only streams (GlobalTempo ~3/s, CPULoad) while someone
-        # heartbeats it, and is silent otherwise.
-        self.riding = False
-        if handshake and not self.bridge and not self.attached:
-            if self.shared and self._session_live():
-                self.riding = True
-            else:
-                self._start_heartbeat()   # keep session "online" (required for reads)
+        try:
+            self.io.open()
+            self.riding = bool(handshake and self.shared and self._session_live())
+            if self.require_riding and not self.riding:
+                raise QCError("Cortex Control has not established a shareable device session")
+            if handshake and not (self.bridge or self.attached or self.riding):
+                self._start_heartbeat()
                 self._handshake()
-        # Bridge mode skips the handshake (the app owns it) but still needs the
-        # firmware to pick a schema, so ask here either way.
-        self.detect_version()
-        if self.riding and self.firmware is None:
-            # We joined a session that was already dying (the app quit a moment
-            # ago: its session lingers ~10 s). Nobody is keeping the device
-            # online, so make it our own after all.
-            self.riding = False
-            self._start_heartbeat()
-            self._handshake()
-            self.detect_version()
-        return self
+            try:
+                self.detect_version()
+            except QCError:
+                if not self.riding or self.require_riding:
+                    raise
+            if self.riding and self.firmware is None and not self.require_riding:
+                # A recently stopped application may still have a fading session.
+                self.riding = False
+                self._start_heartbeat()
+                self._handshake()
+                self.detect_version()
+            return self
+        except Exception:
+            # Do not leave a report reader behind when negotiation fails.
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise
 
     def _session_live(self, seconds=1.5):
         """Is some other client already keeping this device online? True when
@@ -168,52 +166,37 @@ class QuadCortex:
         for something else, and adds ModelPreset/RemoteControl), so every
         connection re-negotiates rather than assuming the newest generation.
         """
+        self.protocol_version_verified = False
         v = None
-        # In BRIDGE mode, listen before asking.
-        #
-        # Cortex Control is handed every device->host report, including the
-        # replies to requests WE injected. It has no idea what they are: a
-        # Version READ we send comes back as a three-report message the app
-        # never asked for, and its reassembler dies on it —
-        #
-        #   CORTEX USB PROTOBUF MESSAGE PARSING ERROR {binaryToMessage:…,107}
-        #   Aborting due to signal: Segmentation fault: 11
-        #
-        # (measured: inject at 583730050, the reply 711ms later, the crash on
-        # the next report). The app announces its own Version on boot and again
-        # when it reconnects, so in bridge mode we take it off the wire instead
-        # of asking for one, and an idle bridge daemon stays silent.
-        if self.bridge:
-            v = self._overheard_version(seconds=2.5)
-        for attempt in range(3):
-            if v is not None:
-                break
-            try:
-                v = self.read_state("Version", timeout_ms=3000)
-                break
-            except Exception:
-                time.sleep(0.5)
-        if v is None:
-            # Unknown firmware: keep the newest schema (the common case) but say
-            # so — on a 4.0 device it would mis-encode GlobalEQ field 5, and the
-            # 4.1-only gates would all pass.
+        if self.bridge or self.attached:
+            self._version_info = b""
             self.firmware = None
-            self.protocol_version_verified = False
-            # Report whatever is actually encoding messages: a previous
-            # connection may have left the process-global gate elsewhere, and
-            # claiming this connection's default would misreport the schema.
-            self.protocol_version = P.active_version()
-            return self.protocol_version
-        # Confusingly, the human CorOS version ("4.1.0") lives in zenos_git_hash;
-        # app_fw_version holds an actual build hash ("d14e"). Prefer the former,
-        # and only accept something that parses as a version number.
-        for field in ("zenos_git_hash", "app_fw_version"):
-            value = getattr(v, field, "") or ""
-            if P.parse_version(value):
-                self.firmware = value
-                break
+            v = self._cached_version()
         else:
-            self.firmware = None
+            if self.riding:
+                v = self._overheard_version()
+            for _ in range(3):
+                if v is not None:
+                    break
+                try:
+                    v = self.read_state("Version", timeout_ms=3000)
+                except QCError:
+                    time.sleep(0.5)
+
+        self.firmware = None
+        if v is not None:
+            for field in ("zenos_git_hash", "app_fw_version"):
+                value = getattr(v, field, "")
+                if len(P.parse_version(value)) >= 2:
+                    self.firmware = value
+                    break
+        if self.firmware is None:
+            self.protocol_version_verified = False
+            raise QCError("could not negotiate a valid CorOS version")
+        identity = type(v)()
+        identity.CopyFrom(v)
+        identity.ClearField("comms_version")
+        self._version_info = identity.SerializeToString()
         self.custom_name = getattr(v, "custom_name", "") or ""
         try:
             dt = v.DESCRIPTOR.fields_by_name["device_type"].enum_type
@@ -223,6 +206,21 @@ class QuadCortex:
         self.protocol_version = P.set_version(self.firmware)
         self.protocol_version_verified = self.firmware is not None
         return self.protocol_version
+
+    def _cached_version(self):
+        if getattr(self, "_version_info", b""):
+            payload = self._version_info
+        else:
+            try:
+                payload = self.io.cached_version()
+            except Exception as exc:
+                raise QCError(f"could not read session owner's identity: {exc}") from exc
+        try:
+            v = P.message_class("Version").FromString(payload)
+        except Exception as exc:
+            raise QCError("invalid cached session identity") from exc
+        v.ClearField("comms_version")
+        return v
 
     def close(self):
         # Idempotent. The daemon closes twice on every SIGTERM — the handler
@@ -302,7 +300,7 @@ class QuadCortex:
             if cmd == P.NAME_TO_CMD["Version"] and obj is not None:
                 for field in ("zenos_git_hash", "app_fw_version"):
                     value = getattr(obj, field, "") or ""
-                    if P.parse_version(value):
+                    if len(P.parse_version(value)) >= 2:
                         return value
         return None
 
@@ -365,6 +363,9 @@ class QuadCortex:
 
     # -- io --
     def send(self, command, proto_message=None, proto_bytes=None):
+        if (self.bridge or self.attached) and command in ("Version", P.NAME_TO_CMD["Version"]):
+            raise QCError("Version is owned by the bridge or daemon session")
+
         if proto_bytes is None:
             proto_bytes = proto_message.SerializeToString() if proto_message else b""
         full = P.encode_message(command, proto_bytes)
@@ -427,7 +428,7 @@ class QuadCortex:
 
     @_serialized
     def request(self, command, proto_message=None, proto_bytes=None,
-                expect=None, timeout_ms=2000):
+                expect=None, timeout_ms=2000, strict=False):
         want = command if isinstance(command, int) else P.NAME_TO_CMD[command]
         if expect is not None:
             want = expect if isinstance(expect, int) else P.NAME_TO_CMD[expect]
@@ -459,7 +460,7 @@ class QuadCortex:
                 else:
                     keep.append((cmd, obj, raw, pb))
             self._pending = keep
-        if best:
+        if best and not strict:
             return best
         raise QCError(f"no response to {command} within {timeout_ms}ms")
 
@@ -530,7 +531,7 @@ class QuadCortex:
                 # match our request_id so a buffered/older push or the app's own
                 # recall echo can't be mistaken for the response to THIS read.
                 if cmd == want and obj is not None and obj.HasField("preset") \
-                        and len(obj.preset.chains) \
+                        and len(obj.preset.chains) == 4 \
                         and (rid is None or int(getattr(obj, "request_id", 0) or 0) == rid):
                     self._pending.remove((cmd, obj, raw, pb))
                     return obj.preset
@@ -545,13 +546,16 @@ class QuadCortex:
             reopen()
             self._rx = P.Reassembler()   # drop any half-decoded frame from before
             self._pending = []
+            if self.bridge:
+                self.detect_version()
 
+    @_serialized
     def clear_grid(self):
         """Delete every block in the current grid (rows = chain index, columns =
         models-array index in the full-preset read)."""
         bp = self.get_current_preset()
-        if not bp:
-            return 0
+        if bp is None or len(bp.chains) != 4:
+            raise QCError("could not read all four rows before clearing the grid")
         n = 0
         for ridx, ch in enumerate(bp.chains):
             for cidx, m in enumerate(ch.models):
@@ -565,6 +569,14 @@ class QuadCortex:
         self.set_routing(0, in_portid=1, out_portid=19); time.sleep(0.05)
         for r in (1, 2, 3):
             self.set_routing(r, in_portid=0, out_portid=0); time.sleep(0.05)
+        bp = self.get_current_preset()
+        if (bp is None or len(bp.chains) != 4
+                or any(m.hash for ch in bp.chains for m in ch.models)
+                or any((sp.split, sp.mix) != (-1, -1)
+                       for ch in bp.chains for sp in ch.split_control_points)
+                or [(ch.in_portid, ch.out_portid) for ch in bp.chains]
+                != [(1, 19), (0, 0), (0, 0), (0, 0)]):
+            raise QCError("could not verify the cleared grid")
         return n
 
     def apply_spec(self, spec, per_scene=False, pace=0.06):
@@ -752,10 +764,13 @@ class QuadCortex:
         fi.index = int(position)
         fi.name = name
         self.send("File", f)
+        return f.request_id
 
     @_serialized
-    def read_message(self, command, timeout_ms=4000):
+    def read_message(self, command, timeout_ms=4000, strict=None):
         """Send a READ and return the decoded reply message (or None)."""
+        if command == "Version" and (self.bridge or self.attached):
+            return self._cached_version()
         cls = P.message_class(command)
         m = cls()
         if "action" in [f.name for f in cls.DESCRIPTOR.fields]:
@@ -764,11 +779,14 @@ class QuadCortex:
             m.request_id = self.next_request_id()
         self.send(command, m)
         want = P.NAME_TO_CMD[command]
+        strict = command == "IOSettings" if strict is None else strict
+        rid = getattr(m, "request_id", 0)
         deadline = time.time() + timeout_ms / 1000.0
         while time.time() < deadline:
             self._collect(0.15)
             for cmd, obj, raw, pb in list(self._pending):
-                if cmd == want and obj is not None and len(pb) > 2:
+                if (cmd == want and obj is not None and len(pb) > 2
+                        and (not strict or (rid and obj.request_id == rid))):
                     self._pending.remove((cmd, obj, raw, pb))
                     return obj
         return None
@@ -932,30 +950,57 @@ class QuadCortex:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             try:
-                st = self.read_state("Scene", timeout_ms=800)
+                st = self.read_state("Scene", timeout_ms=800, strict=True)
             except QCError:
                 st = None
-            if st is not None and int(getattr(st, "selected_scene", -1)) == int(scene):
+            if (st is not None and st.HasField("selected_scene")
+                    and st.selected_scene == int(scene)):
                 return True
             time.sleep(0.05)
         return False
 
-    def set_param_scenes(self, row, column, param_index, values):
-        """Set a param's per-scene values (up to 8, scenes A-H). Verified sequence
-        (reversed from Cortex Control): assign the param to scenes, then for each scene
-        make it active and write its value (the device routes a plain write to the
-        active scene). Each switch is CONFIRMED via Scene READ before writing — a fixed
-        sleep raced the device and dropped values. Restores scene A afterward."""
+    def confirm_scene(self, scene):
+        if not 0 <= int(scene) < 8:
+            raise QCError(f"invalid scene: {scene}")
+        self.set_scene(scene)
+        if not self._await_scene(scene):
+            raise QCError(f"could not confirm scene {scene + 1}")
+        return int(scene)
+
+    @_serialized
+    def set_param_scenes(self, row, column, param_index, values, *, expected=None):
+        """Assign a parameter to scenes and set up to eight scene values."""
         vals = list(values)[:8]
+        if not vals:
+            return
+        self._check_scene_target(expected)
+        self.confirm_scene(0)
+        self._check_scene_target(expected)
         self.assign_param_to_scenes(row, column, param_index)
         time.sleep(0.05)
-        for scene, v in enumerate(vals):
-            self.set_scene(scene)
-            self._await_scene(scene)
-            self._write_active_scene_param(row, column, param_index, v)
+        self._write_scene_values(row, column, param_index, enumerate(vals), expected,
+                                 active=0)
+
+    @_serialized
+    def set_assigned_param_scenes(self, row, column, param_index, changes, *, expected=None):
+        """Update only named scenes of a parameter already assigned to scenes."""
+        self._write_scene_values(row, column, param_index, changes.items(), expected)
+
+    def _write_scene_values(self, row, column, param_index, values, expected, active=None):
+        for scene, value in values:
+            self._check_scene_target(expected)
+            if active != scene:
+                self.confirm_scene(scene)
+            self._check_scene_target(expected)
+            self._write_active_scene_param(row, column, param_index, value)
+            active = scene
             time.sleep(0.04)
-        self.set_scene(0)
-        self._await_scene(0)
+        self._check_scene_target(expected)
+        self.confirm_scene(0)
+
+    def _check_scene_target(self, expected):
+        if expected is not None and self.get_setlist_position() != expected:
+            raise QCError("the active preset changed during the scene edit")
 
     # Neural Capture block model ids (Neural Capture catalog category).
     CAPTURE_V1 = 14000
@@ -1030,6 +1075,7 @@ class QuadCortex:
             raise QCError(f"no block at row{row} col{column} to bypass")
         return len(model.params)
 
+    @_serialized
     def set_block_bypass(self, row, column, bypassed=True, scenes=None,
                          bypass_param=None):
         """Bypass or re-enable the block at (row, column).
@@ -1047,20 +1093,22 @@ class QuadCortex:
             self._write_bypass(row, column, bool(bypassed))
             return
         flags = [bool(s) for s in list(scenes)[:8]]
+        if not flags:
+            return
         idx = self.bypass_param_index(row, column) if bypass_param is None else bypass_param
         # 1. assign the bypass param to scenes. Without this the device keeps ONE
         #    bypass value for the block and every per-scene write overwrites it.
+        self.confirm_scene(0)
         self.assign_param_to_scenes(row, column, idx)
         time.sleep(0.05)
         # 2. per scene: make it active (confirmed — a fixed sleep drops values),
         #    then write the plain bypass map entry the app sends.
         for scene, want in enumerate(flags):
-            self.set_scene(scene)
-            self._await_scene(scene)
+            if scene:
+                self.confirm_scene(scene)
             self._write_bypass(row, column, want)
             time.sleep(0.04)
-        self.set_scene(0)
-        self._await_scene(0)
+        self.confirm_scene(0)
 
     def _write_bypass(self, row, column, bypassed):
         g = P.message_class("Grid")()
@@ -1101,6 +1149,7 @@ class QuadCortex:
             m.position = position
             m.is_factory = is_factory
         self.send("SetlistPosition", m)
+        return m.request_id
 
     @_serialized
     def list_directory(self, timeout_ms=30000, quiet_ms=1500):
@@ -1133,13 +1182,162 @@ class QuadCortex:
                 break
         return _dir.structure_directory(folders)
 
+    def _read_save_folder(self, folder_key, timeout_s=25):
+        from .directory import _file_dict
+        m = P.message_class("File")(action=P.ACTION["READ"],
+                                   request_id=self.next_request_id())
+        if "omit_factory_content" in m.DESCRIPTOR.fields_by_name:
+            m.omit_factory_content = True
+        self.send("File", m)
+        want = P.NAME_TO_CMD["File"]
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            self._collect(0.15)
+            for frame in self._pending:
+                cmd, obj, _raw, _pb = frame
+                if (cmd != want or obj is None or obj.request_id != m.request_id
+                        or obj.action != P.ACTION["UPDATE"]
+                        or not obj.HasField("type") or obj.type != 0
+                        or not obj.HasField("folder") or obj.folder.key != folder_key):
+                    continue
+                self._pending.remove(frame)
+                folder = obj.folder
+                if (folder.is_factory or folder.is_downloads or folder.is_plugin
+                        or folder.is_cloud or folder.is_favorites or len(folder.files) != 256
+                        or ([f.index for f in folder.files] not in
+                            [[0] * 256, list(range(256))])):
+                    raise QCError(f"cannot verify a complete writable setlist {folder_key!r}")
+                return [_file_dict(f, i) for i, f in enumerate(folder.files)]
+        raise QCError(f"no complete live directory readback for {folder_key!r}")
+
+    @_serialized
+    def save_verified(self, name="", folder_key="", position=None, overwrite=False,
+                      expected=None):
+        """Commit the live grid only with a known pointer and live slot record."""
+        if getattr(self, "_reamp_incomplete", False):
+            raise QCError("cannot save while temporary reamp routing may remain")
+        active = self.get_setlist_position()
+        if not self._is_local_pointer(active):
+            downloads = active and active.get("is_downloads") and active.get("downloads_key")
+            plugin = (active and active.get("is_plugin") and active.get("plugin_key")
+                      and active.get("folder_key"))
+            if not ((downloads or plugin) and folder_key and position is not None):
+                raise QCError("could not verify an active local setlist and slot; a verified "
+                              "Downloads or plugin source requires an explicit destination folder and slot")
+        if expected is not None and active != expected:
+            raise QCError("the active preset changed before saving")
+        folder = folder_key or active["folder_key"]
+        index = active["position"] if position is None else int(position)
+        if not 0 <= index < 256:
+            raise QCError(f"invalid destination slot {index}")
+        before = self._read_save_folder(folder)[index]
+        occupied = bool(before["name"] or before["key"])
+        if before["is_readonly"]:
+            raise QCError(f"slot {index} in {folder!r} is read-only")
+        if occupied and not overwrite:
+            raise QCError(f"slot {index} in {folder!r} is occupied; use overwrite=True")
+        name = name or before["name"]
+        if not name or not name.strip():
+            raise QCError("pass a preset name to save to an empty slot")
+        if self.get_current_preset() is None or self.get_setlist_position() != active:
+            raise QCError("could not verify the working preset before saving")
+        rid = self.write_preset_file(folder, index, name)
+        committed = self._save_confirmation(rid, folder, index, name)
+        after = self._read_save_folder(folder)[index]
+        if (after["name"] != name or after["key"] != committed.key
+                or committed.date_ms_since_epoch != after["date_ms"]):
+            raise QCError(f"save to slot {index} in {folder!r} could not be verified")
+        return {"name": name, "position": index, "folder_key": folder,
+                "replaced": before["name"] or None}
+
+    def _save_confirmation(self, rid, folder, index, name, timeout_s=6):
+        want = P.NAME_TO_CMD["File"]
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            self._collect(0.15)
+            for frame in self._pending:
+                cmd, obj, _raw, _pb = frame
+                if (cmd != want or obj is None or obj.request_id != rid
+                        or obj.action != P.ACTION["CREATE"]
+                        or not obj.HasField("type") or obj.type != 0
+                        or not obj.HasField("folder") or obj.folder.key != folder):
+                    continue
+                self._pending.remove(frame)
+                for f in obj.folder.files:
+                    if (f.HasField("index") and f.index == index and f.name == name
+                            and f.key and f.date_ms_since_epoch):
+                        return f
+        raise QCError(f"device did not confirm saving slot {index} in {folder!r}")
+
     def get_setlist_position(self):
-        """Current loaded-preset pointer: {folder_key, position, is_factory}."""
-        obj = self.read_state("SetlistPosition")
-        if obj is None:
-            return None
-        return {"folder_key": obj.folder_key, "position": obj.position,
-                "is_factory": obj.is_factory}
+        """Read the active pointer using only our own reply."""
+        obj = self.read_message("SetlistPosition", strict=True)
+        return self._pointer(obj) if obj is not None else None
+
+    @staticmethod
+    def _pointer(obj):
+        return {"folder_key": obj.folder_key,
+                "position": obj.position if obj.HasField("position") else None,
+                "is_factory": obj.is_factory, "is_downloads": obj.is_downloads,
+                "downloads_key": obj.key_in_downloads, "is_plugin": obj.is_plugin,
+                "plugin_key": obj.key_in_plugin_folder}
+
+    @staticmethod
+    def _is_local_pointer(pointer):
+        return (pointer and pointer.get("folder_key")
+                and isinstance(pointer.get("position"), int)
+                and 0 <= pointer["position"] < 256
+                and not pointer.get("is_downloads") and not pointer.get("is_plugin"))
+
+    def require_setlist_position(self):
+        pointer = self.get_setlist_position()
+        if not self._is_local_pointer(pointer):
+            raise QCError("could not verify an active local setlist and slot")
+        return pointer
+
+    @_serialized
+    def recall_verified(self, folder_key="", position=0, is_factory=False,
+                        downloads_key="", plugin_key="", timeout_s=6):
+        """Confirm the requested identity on both sides of a fresh grid read."""
+        position = int(position)
+        if downloads_key:
+            matches = lambda p: p.get("is_downloads") and p.get("downloads_key") == downloads_key
+        elif plugin_key:
+            folder_key = folder_key or plugin_key.rsplit("/", 1)[0]
+            matches = lambda p: (p.get("is_plugin") and p.get("plugin_key") == plugin_key
+                                 and p.get("folder_key") == folder_key)
+        else:
+            if not 0 <= position < 256:
+                raise QCError(f"invalid setlist slot {position}")
+            if not folder_key:
+                current = self.require_setlist_position()
+                folder_key = current["folder_key"]
+                is_factory = current["is_factory"]
+            matches = lambda p: (p.get("folder_key") == folder_key
+                                 and p.get("position") == position
+                                 and p.get("is_factory") == is_factory
+                                 and not p.get("is_downloads") and not p.get("is_plugin"))
+        rid = self.recall(folder_key, position, is_factory, downloads_key, plugin_key)
+        reply = self._read_pointer_reply(rid, timeout_s)
+        if reply is None or not matches(reply):
+            raise QCError(f"device did not confirm recall of {downloads_key or plugin_key or (folder_key, position)!r}")
+        bp = self.get_current_preset()
+        current = self.get_setlist_position()
+        if bp is None or not matches(current or {}):
+            raise QCError("could not verify the recalled preset with a fresh grid read")
+        return bp, current
+
+    def _read_pointer_reply(self, rid, timeout_s):
+        want = P.NAME_TO_CMD["SetlistPosition"]
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            self._collect(0.1)
+            for frame in self._pending:
+                cmd, obj, _raw, _pb = frame
+                if cmd == want and obj is not None and obj.request_id == rid:
+                    self._pending.remove(frame)
+                    return self._pointer(obj)
+        return None
 
     FAVORITE_KINDS = {"preset": 0, "ir": 1, "capture": 2}
 
@@ -1269,9 +1467,13 @@ class QuadCortex:
 
     def read_global_eq(self):
         """[(parameter_index, value)] plus the bypass flag."""
-        g = self.read_state("GlobalEQ")
-        return ([(p.parameter_index, p.value) for p in g.parameters],
-                bool(g.bypassed))
+        g = self.read_state("GlobalEQ", strict=True)
+        pairs = [(p.parameter_index, p.value) for p in g.parameters]
+        if (not g.HasField("bypassed") or len(pairs) != 28
+                or {i for i, _ in pairs} != set(range(28))
+                or any(not math.isfinite(value) for _, value in pairs)):
+            raise QCError("incomplete Global EQ snapshot")
+        return pairs, bool(g.bypassed)
 
     def write_global_eq(self, params, bypassed=None, settle_s=1.5):
         """Write Global EQ parameters back — the restore path for a preset load."""
@@ -1410,12 +1612,15 @@ class QuadCortex:
         self.send("Grid", g)
         time.sleep(settle_s)
 
-    def read_state(self, command, timeout_ms=2500):
+    def read_state(self, command, timeout_ms=2500, strict=False):
+        if command in ("Version", P.NAME_TO_CMD["Version"]):
+            if getattr(self, "_version_info", b"") or self.bridge or self.attached:
+                return self._cached_version()
         cls = P.message_class(command)
         msg = cls()
         if "action" in [f.name for f in cls.DESCRIPTOR.fields]:
             msg.action = P.ACTION["READ"]
         if "request_id" in [f.name for f in cls.DESCRIPTOR.fields]:
             msg.request_id = self.next_request_id()
-        _c, obj, _r = self.request(command, msg, timeout_ms=timeout_ms)
+        _c, obj, _r = self.request(command, msg, timeout_ms=timeout_ms, strict=strict)
         return obj

@@ -16,16 +16,18 @@ severity with concrete fixes.
 - `get_io_settings` — physical in/out config.
 - `output_meter(hold_s=2)` — per-port peak-hold + **limiter flags**, straight from the
   device. Levels are relative (uncalibrated), the flags are not: use them for clipping.
-- **Screenshot the grid** (`tools/gui/gui.py home && shot`) — the only reliable way to see
-  the actual wiring (orphaned lanes, merges). Read-vs-delta: in a full read, row = chain
-  index, column = models-array index.
-- If scenes matter, `switch_scene(0..7)` and re-read to inspect per-scene values.
+- Inspect the grid through protocol readback on any supported platform. In a full
+  read the chain and model array positions give the row and column. On macOS the
+  Cortex Control screenshot harness can supplement verification of the visible wiring.
+- Inspect `scene_params`, `scene_bypass`, scene labels and colors in the readback.
+  Audition individual scenes for audible behavior. Typed parameters include capture
+  bindings; confirm the capture actually plays when verifying the sound.
 
 ## The checklist (each item = a potential finding)
 
 ### 1. Signal integrity & routing  — *critical*
 - Every block reachable: no **orphaned lanes** (in=0 with no split feeding them) — they
-  draw CPU but make no sound. Confirm on the screenshot.
+  draw CPU but make no sound. Confirm using the routing and split points.
 - Splits/merges correct: shared blocks are **before** the split; each parallel amp is fed
   and merges back; no signal loops or a lane feeding another lane's input.
 - Post-merge FX (reverb/delay meant to be shared) sit **after** `mix_col`, not on one lane.
@@ -79,10 +81,10 @@ severity with concrete fixes.
 - Preset **named**, tempo set if tempo-synced FX are used, scene labels filled.
 - Saved to the intended slot (and not silently overwriting another preset) — target
   an **empty slot** (`list_empty_slots`), never the user's named presets.
-- **Save actually committed**: a save-tool success string is not proof. Verify the app
-  header shows the preset name **without the `*` dirty marker** (screenshot), and/or the
-  slot occupant via the directory. Saves go through File CREATE (see PROTOCOL.md §6);
-  RecallPreset SAVE hangs on an Unsaved slot.
+- A verified save requires the device's matching File CREATE response and a fresh
+  directory read of the destination. Use `current_preset_position` to verify the
+  active folder and slot. An authorized overwrite must pass `overwrite=True`.
+  See PROTOCOL.md §6.
 
 ### 9. Faithfulness to intent  — *major*
 - Matches the brief / researched rig (right number of amps, chain order, always-on pedals,
@@ -95,7 +97,7 @@ value. Lead with what's right, then the fixes ranked. End with a one-line verdic
 single must-fix. Re-run the relevant checks after fixes to confirm.
 
 ## Common real problems (seen in practice)
-- Orphaned amp lane (split is 1→2; the 3rd amp never got fed) — screenshot catches it.
+- Orphaned amp lane (split is 1→2; the 3rd amp never got fed) — inspect the live routing and split points.
 - A shared block placed **after** the split, so branches miss it (e.g. the TS only hit one amp).
 - All amps centered → mono; or all at unity → the sum clips.
 - Duplicated pedals across lanes wasting 15-25% CPU; one core maxed while the other idles.

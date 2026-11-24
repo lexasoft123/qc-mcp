@@ -77,7 +77,7 @@ def test_await_scene_retries_a_slow_read_instead_of_raising():
     qc = _qc()
     calls = []
 
-    def read_state(cmd, timeout_ms=600):
+    def read_state(cmd, timeout_ms=600, strict=False):
         calls.append(cmd)
         if len(calls) < 3:
             raise T.QCError("no response to Scene within %dms" % timeout_ms)
@@ -90,7 +90,7 @@ def test_await_scene_retries_a_slow_read_instead_of_raising():
 def test_await_scene_gives_up_with_false_not_an_exception():
     qc = _qc()
 
-    def read_state(cmd, timeout_ms=600):
+    def read_state(cmd, timeout_ms=600, strict=False):
         raise T.QCError("no response")
     qc.read_state = read_state
     assert qc._await_scene(1, timeout_s=0.3) is False

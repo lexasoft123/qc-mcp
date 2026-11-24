@@ -329,7 +329,7 @@ function handlers(): void {
   ipcMain.handle('leveling:toggle', (_e, row: number, which: 'mute' | 'solo', on: boolean) =>
     bench().toggle(row, which, on))
   ipcMain.handle('leveling:scene', (_e, index: number) => bench().scene(index))
-  ipcMain.handle('leveling:save', (_e, name?: string) => bench().save(name))
+  ipcMain.handle('leveling:save', (_e, name, target) => bench().save(name, target))
   ipcMain.handle('leveling:meter', (_e, on: boolean) => bench().meter(on))
   ipcMain.handle('leveling:audio', () => bench().audio())
   ipcMain.handle('leveling:sampleArm', (_e, o) => bench().sampleArm(o ?? {}))

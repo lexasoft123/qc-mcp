@@ -222,7 +222,7 @@ def test_windows_auto_shares_even_with_cortex_control_shut():
     opened = {}
 
     class FakeQC:
-        def __init__(self, bridge=False, share=False):
+        def __init__(self, bridge=False, share=False, require_riding=False):
             opened.update(bridge=bridge, share=share)
         def open(self, handshake=True):
             raise RuntimeError("stop here - we only care about the mode choice")
@@ -308,6 +308,7 @@ def test_refused_writes_are_counted_not_swallowed():
             return 31                      # ERROR_GEN_FAILURE
 
     qc = T.QuadCortex.__new__(T.QuadCortex)
+    qc.bridge = qc.attached = False
     qc.io = Refusing()
     qc._send_lock = threading.Lock()
     qc.write_errors = 0

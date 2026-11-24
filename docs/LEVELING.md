@@ -19,7 +19,7 @@ clear "install the audio extra" error.
 ## The workflow
 
 1. **Record a reference riff, once.** `sample_arm()` → play → it stops on its own.
-2. **See what needs changing.** `suggest_levels(...)` — report only, writes nothing.
+2. **See what needs changing.** `suggest_levels(...)` reports the needed trims. It temporarily changes reamp routing and verifies restoration after measuring.
 3. **Apply.** `level_preset()`, `level_scenes()`, or `level_setlist([...])`.
 4. **Save** when you're happy (`save=True`, or `save_preset()` separately).
 

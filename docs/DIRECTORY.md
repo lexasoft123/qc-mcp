@@ -210,13 +210,12 @@ scene-varying in two steps, both plain `Grid` UPDATEs:
 scenes with the A|B|C|D scene badge. `apply_spec` routes scene-varying params here, so
 the device round-trip now reproduces per-scene values too.
 
-**Per-scene bypass — also SOLVED.** Right-clicking a block's **bypass/power button** (not
-the block body) shows "Assign to Scenes", which emits `params{index:4, scene_mode:true}`
-— i.e. a block's **bypass is param index 4**, and per-scene bypass is just the per-scene
-param mechanism on it (**1.0 = bypassed, 0.0 = active**). `set_block_bypass(..., scenes=
-[...], bypass_param=4)` routes through `set_param_scenes`. Verified visually: Klon off in
-scene A, on in B. Test: `tools/gui/test_fender_scenes.py` (Fender Deluxe clean/crunch/lead
-+ per-scene Klon bypass + Klon lead-gain) — reliable read-back needs `QC_BRIDGE=0`.
+**Per-scene bypass.** Right-clicking the power button in Cortex Control and
+selecting **Assign to Scenes** emits a `scene_mode:true` parameter assignment.
+The bypass index is the number of parameter slots in the block's full grid read
+(e.g. 7 for the tested amp and capture, 23 for the tested delay). The next step
+sends a single `sceneBypass` flag for each confirmed active scene.
+`set_block_bypass(..., scenes=[...])` reads the index and performs both steps.
 
 ## Block editing — captures, IRs, cabinet mics, bypass (verified live)
 
@@ -243,7 +242,9 @@ Params repeat for **Mic A** (positions 0–7) and **Mic B** (8–15), then share
 `bypass, ir selector (mic/IR, string), LEVEL, PAN|BALANCE, DISTANCE, POSITION, phi
 (angle), GRID MODE` ×2, then `HPF, LPF, OUTPUT VOLUME`. So mic **position** (idx 5/13),
 **distance** (4/12), **angle/phi** (6/14) and **type** (`ir selector` 1/9) are set with
-`set_parameter(row,col,idx,value)` (0–1 normalized). IR-loader block (29xxx) params:
+`set_parameter(row, column, param_index, display_value, device_hash=hash)`
+for display units, or omit the hash when supplying a wire value. Set the mic
+type using its typed string binding. IR-loader block (29xxx) params:
 `MUTE, INVERT, IR PATH, LEVEL, HI PASS, LOW PASS, PAN, DELAY` ×2, then `ROOM MIX, PRE
 DELAY, REV HI/LOW PASS, SIZE, GLOBAL OUTPUT`.
 
@@ -276,8 +277,8 @@ Downloads/Plugin presets do **not** load by `folder_key`+`position` — the swee
   (CorOS 4.1.1, 2026-09-20).
 Fixed in `transport.recall(..., downloads_key=, plugin_key=)` and MCP `switch_preset`
 (`downloads_cloud_id=`); `search_directory` now returns `downloads_cloud_id` per hit.
-Also: `get_current_preset` (a READ) returns empty in **bridge** mode — read the grid the
-device **pushes** on recall instead (what `switch_preset`/the sweep now do).
+The tools confirm the requested identity and then request a fresh full grid.
+A missing or uncorrelated readback fails the recall verification.
 
 ### Still-open (present in preset data, not yet exposed by MCP)
 These fields appear in Downloads presets and decode fine, but no MCP tool reads/edits

@@ -12,10 +12,10 @@ mis-wired presets — every failure below was hit for real.
 
 ## 0. Always verify — never trust the write
 `build_preset`'s own trailing read is unreliable (it fires amid the edit-echo storm).
-After any build/edit, **read back with `get_current_preset`** (now includes
-`split_points` per chain) AND, for topology, **screenshot the grid**:
-`tools/gui/gui.py home && tools/gui/gui.py shot out.png` then look at the wiring.
-Cross-check with `cpu_load` (its block list reveals duplicates / orphaned blocks).
+After a build or edit, read back `get_current_preset` for blocks, routing,
+`split_points`, and scene data. Cross-check with `cpu_load` and the output meter.
+On macOS, `tools/gui/gui.py home` and `tools/gui/gui.py shot out.png` can also
+verify the visible grid. Protocol readback works on all supported platforms.
 
 ## 1. Routing model
 - **Lane ports** — `in_port` / `out_port` per chain (row). Full `out_port` map (verified by
@@ -71,8 +71,9 @@ Cross-check with `cpu_load` (its block list reveals duplicates / orphaned blocks
   4. **Row 4 (amp 3):** `in_port=7`, fed by row 3's `scp` split; amp 3 → cab → merges back
      into row 3 at col M.
   So one `comp→Klon→TS` feeds all three: amp 1 on row 1, amps 2+3 via jumper→row 3→split.
-  Put reverb per amp-group (row 1's amp; the row 3+4 merge) so every amp is wet. Verify by
-  screenshot: each amp row reads "Prev. row"/In → "Multi Out"; none should be **series**
+  Put reverb per amp-group (row 1's amp; the row 3+4 merge) so every amp is wet. Verify
+  the routing on the device readback: each amp row goes from "Prev. row"/In to "Multi Out".
+  Check for branches wired in **series**
   ("Prev. row" pointing at another amp's output) or **orphaned** (output on `+`).
   (`out=17`="Row 4", `out=18`="Row 3/4" also route to rows but the split-the-lane method
   above is the confirmed-correct one. Simpler alternative that does NOT share the front: the
@@ -169,8 +170,8 @@ was made robust this way (`bridge.py`, `transport.py`):
   runs a *copy* of Cortex Control, so an updated app leaves the old binary talking to
   new firmware. Then refresh the schema and catalog — see CLAUDE.md.
 
-Bottom line: **build → read back split_points + routing → screenshot → cpu_load**. Only
-then is a preset "done."
+After building, read back split points and routing, then check CPU load.
+Use a screenshot for an additional visual check on macOS.
 
 ## 6. Device presets — don't dial from scratch (CorOS 4.1+)
 Every device carries saved settings: ~2750 factory ones across 602 models, plus up to 32
@@ -206,16 +207,20 @@ The bridge is reliable now, so **do everything through MCP tools** — never fal
 ad-hoc scripts for device control. The full toolbox:
 - **Blocks:** `build_preset` (whole topology), `add_block` / `remove_block`, `clear_grid`,
   `add_capture`, `add_ir`.
-- **Params (display units):** `set_parameter(row, col, index, value)`. Read a model's param
-  names/order from `get_current_preset` or `find_devices` before setting indices.
+- **Params:** `set_parameter(row, column, param_index, display_value, device_hash=hash)`
+  converts display units using the model catalog. Without `device_hash` the value
+  is sent as supplied, usually normalized 0–1. Some EQ gains use raw dB on the wire.
+  Use `find_devices` for the hash and `get_current_preset` for the placed block's
+  `param_indices`. `build_preset` block parameters use display units.
 - **Routing / stereo:** `set_lane_routing(row, in_portid, out_portid)`,
   `set_lane_output(row, pan, volume, mute, solo)`, `add_split` (splits are also set via
   `build_preset`'s `splitter`).
-- **Scenes:** `set_parameter_scenes(row, col, index, values[8])` (assign-to-scenes + write;
-  the tool confirms each scene switch via Scene READ — racing drops values). Scene the AMP
-  params too (gain ladder, lead master bump, EQ trims), not just drive bypass.
-  `set_block_bypass(row, col, bypassed, scenes=[…])` (per-scene bypass — works on drives/
-  amps, silent NO-OP on delays: scene the delay MIX instead), `switch_scene(0-7)`,
+- **Scenes:** `set_parameter_scenes(row, column, param_index, values, device_hash=hash)`
+  uses display units with the hash and wire values without it. It confirms each
+  scene switch before writing. `set_block_bypass(row, column, bypassed, scenes=[…])`
+  works for delays as well as drives and amps. Its bypass index comes from the
+  live block. Verify the result in `get_current_preset` and use `switch_scene(0–7)`
+  to audition it.
   `set_preset_meta(scene_labels=[…], scene_colors=[…])` — labels/colors go over dedicated
   SceneLabel/SceneColor ops (verified); scenes with data but no label show "Undefined".
   Preset `name` is NOT settable live — it's set by the save op (pass it to save_preset/_as).
@@ -226,9 +231,10 @@ ad-hoc scripts for device control. The full toolbox:
   files{index=<position>, name}}}`, **no preset_payload**; the device commits its live
   working grid). Decoded from Cortex Control's own Save. **Never** save via *RecallPreset
   UPDATE reason=SAVE* — it **hangs the device** on an empty/Unsaved slot (had to reboot).
-  The tool's success string is not proof of commit: verify with `current_preset_position`
-  + the app header showing the name **without a `*`** (dirty marker). See the
-  `save-empty-slot-hangs` memory.
+  Both verify the active local pointer and live destination table, then check the
+  correlated CREATE reply against a fresh directory read. An occupied slot
+  requires explicit `overwrite=True`, including an existing preset with the same
+  name. `current_preset_position` confirms the active folder and slot.
 - **Device presets (CorOS 4.1+):** `list_device_presets(model)` /
   `load_device_preset(row, column, preset)` — a whole knob set on one block (§6) —
   plus `save_device_preset` / `delete_device_preset`.
@@ -239,8 +245,8 @@ ad-hoc scripts for device control. The full toolbox:
   **`output_meter(hold_s, detail)`** (per-port peak-hold in dB + limiter flags — the
   fastest check for "is signal reaching the outputs / is it clipping"). With the
   `.[audio]` extra: `measure_loudness()` and `suggest_levels()` compare presets by
-  measured loudness without writing anything (docs/LEVELING.md). The only non-MCP helper is `tools/gui/gui.py shot` for a
-  *visual* wiring screenshot — verification, not control.
+  measured loudness without applying trims or saving. Reamp measurements temporarily
+  change routing and verify restoration (docs/LEVELING.md).
 
 If an operation has no tool yet, **add the MCP tool** rather than scripting it — keep the
 MCP the single functional interface. When a write seems to succeed but doesn't take

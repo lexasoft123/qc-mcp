@@ -24,6 +24,7 @@ restarts across multiple sessions):
 """
 from __future__ import annotations
 import os
+import stat
 import threading
 import time
 
@@ -56,6 +57,36 @@ class FifoBridge:
         self._fd_lock = threading.Lock()   # guards (re)opening fds
         self._stop = None
         self._thread = None
+
+    def cached_version(self, timeout=2.5):
+        """Sanitized Version observed during Cortex Control's own handshake.
+
+        A Version READ rotates comms_version: sending another behind the app's
+        back breaks its encrypted cloud channel. Identity comes from the local
+        interposer cache instead. Never fall back to a device Version request.
+        """
+        deadline = time.monotonic() + timeout
+        path = os.fspath(self.out_path) + ".identity"
+        while True:
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+                with os.fdopen(fd, "rb") as cache:
+                    info = os.fstat(cache.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+                        raise ValueError("identity cache is not owner-private")
+                    data = cache.read(8193)
+                header, payload = data.split(b"\n", 1)
+                magic, pid_text = header.split()
+                pid = int(pid_text)
+                if magic != b"QC_IDENTITY_V1" or pid <= 0 or not payload or len(data) > 8192:
+                    raise ValueError("invalid identity cache")
+                os.kill(pid, 0)  # reject stale metadata left after the app exits
+                return payload
+            except (OSError, ValueError):
+                if time.monotonic() >= deadline:
+                    raise BridgeError("bridge identity unavailable; rebuild the interposer and wait "
+                                      "for Cortex Control to finish connecting") from None
+                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
 
     # -- fd (re)open helpers ------------------------------------------------
     def _open_out(self):
@@ -181,6 +212,13 @@ class FifoBridge:
         if len(buf) < 129:
             buf = buf + b"\x00" * (129 - len(buf))
         buf = buf[:129]
+        # Defense in depth for old/attached clients bypassing cached read_state.
+        length = buf[1]
+        if buf[2] == 0xc0 and 8 <= length <= 126:
+            command = int.from_bytes(buf[3 + length - 8:3 + length - 6], "little")
+            if command == 10:
+                raise BridgeError("Version requests rekey Cortex Control's cloud session; "
+                                  "use cached_version() in bridge mode")
         for attempt in (0, 1):            # reopen + retry once if the pipe went stale
             if self._inject_fd < 0 and not self._reopen_inject_briefly():
                 continue

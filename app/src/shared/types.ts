@@ -209,6 +209,7 @@ export interface PresetState {
   folderKey: string
   position: number | null
   isFactory: boolean
+  cloudId?: string
   /** 0-7 = scenes A-H */
   scene: number
   sceneLabels: string[]
@@ -220,6 +221,7 @@ export interface BenchSlot {
   folderKey: string
   position: number
   name: string
+  isFactory?: boolean
   /** Downloads are recalled by cloud id, not folder+position. "" for the rest. */
   cloudId: string
   /** The scene this preset was last left on, so returning to it restores it.
@@ -511,7 +513,7 @@ export interface Api {
     level(row: number, db: number): Promise<number>
     toggle(row: number, which: 'mute' | 'solo', on: boolean): Promise<boolean>
     scene(index: number): Promise<number>
-    save(name?: string): Promise<{ name: string; position: number }>
+    save(name?: string, target?: { folderKey: string; position: number }): Promise<{ name: string; position: number }>
     meter(on: boolean): Promise<boolean>
     onEvent(cb: (e: LevelEvent) => void): () => void
 
@@ -534,13 +536,13 @@ export interface Api {
     useRiff(name: string): Promise<SampleState & { loaded?: string; why?: string }>
     applyTrim(o: {
       folderKey?: string; position?: number; isFactory?: boolean; cloudId?: string
-      row?: number; db: number
+      row?: number; db: number; absolute?: boolean
     }): Promise<ApplyResult>
     samplePlay(): Promise<{ playing: boolean; seconds: number }>
     sampleStopPlay(): Promise<void>
     revertLevels(): Promise<{ reverted: { row: number; db: number }[] }>
     measureMany(
-      presets: { folder_key: string; position: number; name: string; cloud_id?: string }[],
+      presets: { folder_key: string; position: number; name: string; cloud_id?: string; is_factory?: boolean }[],
       o?: { target?: number; metric?: string; }
     ): Promise<ReportResult>
     measureScenes(o?: { target?: number; scenes?: number[] }): Promise<{ rows: SceneRow[] }>

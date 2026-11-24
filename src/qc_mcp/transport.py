@@ -442,14 +442,18 @@ class QuadCortex:
         while time.time() < deadline:
             self._collect(0.1)
             keep = []
-            for cmd, obj, raw, pb in self._pending:
+            for n, (cmd, obj, raw, pb) in enumerate(self._pending):
                 if cmd == want:
                     rid = int(getattr(obj, "request_id", 0) or 0) if obj is not None else 0
-                    if exp_rid and rid == exp_rid and obj is not None and len(pb) > 2:
-                        self._pending = keep + [t for t in self._pending
-                                                if t is not (cmd, obj, raw, pb)]
-                        return cmd, obj, raw
-                    if not exp_rid and obj is not None and len(pb) > 2:
+                    if (exp_rid and rid == exp_rid or not exp_rid) \
+                            and obj is not None and len(pb) > 2:
+                        # Drop the reply, keep everything not yet looked at. This
+                        # used to be `keep + [t for t in _pending if t is not (…)]`:
+                        # a fresh tuple is never `is` an element, so it re-appended
+                        # the WHOLE buffer after `keep` and the buffer doubled on
+                        # every reply — scene-by-scene writes slowed to a halt
+                        # (1.4 s, 12 s, then >5 min) on a QC Mini, CorOS 4.1.1.
+                        self._pending = keep + self._pending[n + 1:]
                         return cmd, obj, raw
                     best = best or (cmd, obj, raw)   # fallback: right command, id absent/mismatched
                 else:
@@ -910,13 +914,18 @@ class QuadCortex:
         p.param_values.add().float_value = float(value)
         self.send("Grid", g)
 
-    def _await_scene(self, scene, timeout_s=2.0):
+    def _await_scene(self, scene, timeout_s=4.0):
         """Block until the device reports `scene` active (Scene READ). Racing a plain
         param write against an un-settled scene switch lands the value on the WRONG
-        scene — found live when a batch scene write dropped a value."""
+        scene — found live when a batch scene write dropped a value.
+        A slow reply raises QCError from read_state; that is a retry, not a failure
+        (seen on a QC Mini mid-build, CorOS 4.1.1)."""
         deadline = time.time() + timeout_s
         while time.time() < deadline:
-            st = self.read_state("Scene", timeout_ms=600)
+            try:
+                st = self.read_state("Scene", timeout_ms=800)
+            except QCError:
+                st = None
             if st is not None and int(getattr(st, "selected_scene", -1)) == int(scene):
                 return True
             time.sleep(0.05)

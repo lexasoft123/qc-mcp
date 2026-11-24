@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Button, Modal, ModalActions, StatusDot } from '@singz/ui'
 import { t } from '../i18n.js'
+import { CloudSearch } from './CloudSearch.js'
 import type { CloudStatus } from '@shared/types'
 
 export function Cloud({ status, onStatus, onClose }: {
@@ -48,7 +49,7 @@ export function Cloud({ status, onStatus, onClose }: {
   }
 
   return (
-    <Modal onClose={() => { if (!busy) onClose() }} cardClassName="cloud-card" aria-label={t('cloud.account')}>
+    <Modal onClose={() => { if (!busy) onClose() }} cardClassName={status?.authenticated ? 'cloud-card cloud-browser-card' : 'cloud-card'} aria-label={t('cloud.account')}>
       <span className="eyebrow">{t('cloud.yourAccount')}</span>
       <h2>Cortex Cloud</h2>
       <p className="fine">{t('cloud.intro')}</p>
@@ -61,7 +62,7 @@ export function Cloud({ status, onStatus, onClose }: {
             <StatusDot tone="ok" />
             <div><strong>{t('cloud.signedIn')}</strong><span>{status.email || t('cloud.account')}</span></div>
           </div>
-          <p className="fine">{t('cloud.closed')}</p>
+          <CloudSearch disabled={busy} />
           {!busy && (error || status.error) && <p className="cloud-error" role="alert">{error || status.error}</p>}
           <ModalActions>
             <Button variant="primary" disabled={busy} onClick={onClose}>{t('cloud.done')}</Button>

@@ -11,7 +11,7 @@ In Patchbay, click **Cloud**, enter your email and password, and click
 is discarded after authentication. The account screen shows the signed-in email
 and provides **Sign out**.
 
-If Patchbay is closed or you use qc-mcp without the launcher, open a terminal:
+On macOS and Windows, you can also sign in from a terminal with Patchbay closed:
 
 ```bash
 qc-mcp cloud login
@@ -22,7 +22,7 @@ qc-mcp cloud logout
 The login command prompts for your email and a hidden password; never put a
 password in command arguments or chat. Run the command from the qc-mcp virtual
 environment if `qc-mcp` is not on PATH (`.venv/bin/qc-mcp` on macOS,
-`.venv\\Scripts\\qc-mcp.exe` on Windows).
+`.venv\Scripts\qc-mcp.exe` on Windows).
 
 Patchbay, terminal login, and MCP share one session under the current OS user.
 **Patchbay does not need to be open:** a standalone MCP process restores the
@@ -35,7 +35,7 @@ session; a revoked or expired refresh session requires signing in again.
 The renewable session is encrypted with authenticated encryption. Its encryption
 key is stored in macOS Keychain or Windows Credential Manager. The encrypted
 file is under `~/Library/Application Support/qc-mcp/cloud-session.enc` on macOS,
-or `%LOCALAPPDATA%\\qc-mcp\\cloud-session.enc` on Windows. No password is saved.
+or `%LOCALAPPDATA%\qc-mcp\cloud-session.enc` on Windows. No password is saved.
 There is no plaintext fallback when the OS credential store is unavailable;
 unlock it and retry. The OS may ask permission for the qc-mcp Python interpreter
 to access the credential store.
@@ -44,9 +44,21 @@ to access the credential store.
 to sign in privately. `cloud_status()` reports account status without credentials.
 `cloud_logout()` signs out and removes the shared saved sign-in.
 
+### Linux
+
+The terminal's remembered sign-in uses the macOS or Windows credential store.
+On Linux, supply `QC_CLOUD_EMAIL` and `QC_CLOUD_PASSWORD` to the MCP server
+through your client's private environment configuration, then call
+`cloud_login(persist=False)`. Sign in again after restarting the server. If you
+already have an access token, supply `QC_CLOUD_ACCESS_TOKEN` to the MCP server
+and call `cloud_status()`.
+
+### Automation
+
 For automation, existing `QC_CLOUD_EMAIL`, `QC_CLOUD_PASSWORD` and
-`QC_CLOUD_ACCESS_TOKEN` support remains. Environment-based MCP login saves
-securely by default. `persist=False` keeps a login in that server process only.
+`QC_CLOUD_ACCESS_TOKEN` support remains. On macOS and Windows, environment-based
+MCP login saves securely by default. `persist=False` keeps a login in that server
+process only.
 The old explicitly configured `QC_CLOUD_SESSION_FILE` format remains compatible
 and stores unencrypted session data with restricted file permissions. Prefer the
 new sign-in flow, which ignores that legacy setting and uses OS-protected storage.
@@ -56,7 +68,13 @@ terminal command.
 
 ## Discover and use content
 
-Search pages start at **0**. The default page size is 20.
+In Patchbay, open **Cloud** after signing in. Choose **Neural Captures** or **Presets**, then search by name, gear, or keyword.
+Expand a result to view its metadata. Preset details include compatibility, blocks,
+and named scenes when Cortex Cloud provides them. Search works without
+opening Cortex Control or connecting a Quad Cortex.
+
+Patchbay displays 10 results per page. MCP search pages start at **0** and
+default to 20 results.
 
 ```python
 cloud_search_presets(query="clean", page=0, size=20)
@@ -87,8 +105,10 @@ To use a preset or capture on the Quad Cortex:
 
 Queue success proves the cloud accepted the request. It does not prove that the
 hardware downloaded the content or loaded it into the current preset. Recall
-changes the active preset; placing a capture changes the current grid. Verify the
-result with `get_current_preset()`.
+changes the active preset; placing a capture changes the current grid. Use
+`get_current_preset()` to inspect the recalled preset or confirm the Neural
+Capture block's placement. To confirm the selected capture itself, inspect the
+block in Cortex Control or on the device.
 
 ## Manage your captures
 
@@ -106,8 +126,9 @@ cloud_publish_capture(product_id="<owned capture id>", published=False)
 cloud_delete_capture(product_id="<owned capture id>", confirm=True)
 ```
 
-Updates change only supplied metadata fields. Instrument types are `guitar`,
-`bass`, `synth`, `vocal`, and `other`. Device types are `amp_head`, `amp_and_cab`,
+Updates change only supplied metadata fields. Management requires the capture's
+author account. Instrument types are `guitar`, `bass`, `synth`, `vocal`, `other`,
+and `instrument_not_set`. Device types are `amp_head`, `amp_and_cab`,
 `amp_combo`, `cab`, `pedal`, `default`, `fuzz`, `compressor`, and `overdrive`.
 Publishing makes a capture public; unpublishing removes its public visibility.
 Deletion requires `confirm=True` and removes the cloud capture. These tools do
@@ -117,8 +138,8 @@ not upload a new capture payload or remove a downloaded copy from the hardware.
 
 The integration follows requests and schemas shipped by the official
 [Cortex Cloud website](https://cloud.neuraldsp.com/), specifically its
-[production JavaScript bundle](https://cloud.neuraldsp.com/assets/index-BoI-2KYa.js)
-observed on 2026-11-01, backed by `https://cloud-api.neuraldsp.com`. These
+[production JavaScript bundle](https://cloud.neuraldsp.com/assets/index-MV_rnE6C.js)
+observed on 2026-11-24, backed by `https://cloud-api.neuraldsp.com`. These
 are observed website contracts, not a separately documented public API. The
 observed routes include:
 
@@ -135,9 +156,10 @@ observed routes include:
 
 The installed Cortex Control application independently contains the sign-in,
 refresh, profile, product metadata and publish route fragments. Offline tests
-check request construction, independent-process session restoration/refresh,
-concurrent refresh and logout propagation with mocked credentials and HTTP.
-Account-dependent sign-in and
-mutations require a real account and were not exercised against a live account
-during implementation. This is an unofficial integration with the website's API;
-its contracts may change independently of CorOS.
+check request construction, capture ownership and metadata, independent-process
+session restoration and refresh, concurrent refresh, and logout propagation.
+Live verification covered sign-in, search, reading product details with
+Patchbay closed, and downloading and placing a capture. Capture metadata edits,
+publishing, and deletion were tested with offline HTTP fixtures. This is an
+unofficial integration with the website's API, whose contracts may change
+independently of CorOS.

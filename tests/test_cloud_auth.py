@@ -79,6 +79,59 @@ def test_main_cli_routes_cloud_before_opening_device_or_mcp_stdio():
         helper.assert_called_once_with(["status", "--json"])
 
 
+def test_capture_search_returns_requested_page_and_display_metadata():
+    class SearchClient:
+        def search(self, category, query, page, size):
+            assert (category, query, page, size) == ("captures", "-AC30", 1, 10)
+            return {"numberOfPages": 3, "data": [{
+                "productId": "capture-id", "name": "AC30", "authorUsername": "author",
+                "description": "Recorded with an e609", "tags": ["clean"],
+                "downloads": 0, "metadata": {"version": 2, "deviceType": "amp_combo", "gainType": 4},
+                "unlistedField": "not for the UI",
+            }, {"productId": "incomplete"}]}
+
+    code, output, errors = invoke(["search", "--json", "--category=captures", "--query=-AC30", "--page=1"],
+                                  factory=SearchClient)
+    assert code == 0 and not errors
+    assert json.loads(output) == {"hasNext": True, "products": [{
+        "productId": "capture-id", "name": "AC30", "authorUsername": "author",
+        "description": "Recorded with an e609", "tags": ["clean"], "downloads": 0,
+        "version": "2", "deviceType": "amp_combo", "gainType": 4,
+    }]}
+
+
+def test_invalid_capture_query_does_not_call_the_cloud_client():
+    def unexpected():
+        raise AssertionError("must not construct client for an invalid search")
+    for args in (["--query= "], ["--query=clean", "--page=-1"]):
+        code, output, _ = invoke(["search", "--json", "--category=captures", *args], factory=unexpected)
+        assert code == 1 and json.loads(output)["error"]
+
+
+def test_preset_search_and_details_show_compatibility_blocks_and_named_scenes():
+    class PresetClient:
+        def search(self, category, query, page, size):
+            assert (category, query, page, size) == ("presets", "AC30", 0, 10)
+            return {"numberOfPages": 1, "data": [{"productId": "preset-id", "name": "AC30",
+                                                  "creatorType": "quad", "creatorVersion": "3.1.0"}]}
+
+        def product(self, product_id):
+            assert product_id == "preset-id"
+            return {"type": "preset", "compatibility": ["quad", "native"],
+                    "details": {"blocks": [{"name": "UK C30 TopBoost"}],
+                                "scenes": [{"name": "Clean"}, {"label": "B"}]}}
+
+    code, output, _ = invoke(["search", "--json", "--category=presets", "--query=AC30"],
+                             factory=PresetClient)
+    assert code == 0
+    assert json.loads(output)["products"][0]["creatorVersion"] == "3.1.0"
+    code, output, _ = invoke(["preset-details", "--json", "--product-id=preset-id"],
+                             factory=PresetClient)
+    assert code == 0 and json.loads(output) == {
+        "compatibility": ["quad", "native"], "blocks": ["UK C30 TopBoost"], "scenes": ["Clean"],
+    }
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

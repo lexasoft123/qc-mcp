@@ -49,11 +49,12 @@ class HTTP:
         return request.method, url.path, parse_qs(url.query), body
 
 
-PROFILE = {"userId": "owner", "username": "ownername"}
-CAPTURE = {"id": "capture-id", "type": "neural_capture", "authorId": "owner",
-           "authorUsername": "ownername", "name": "Original", "description": "Keep",
-           "tags": ["clean"], "metadata": {"deviceType": "amp_head",
-           "instrumentType": "guitar", "version": 2, "unknownField": "preserve"}}
+PROFILE = {"username": "ownername"}
+CAPTURE = {"id": "capture-id", "type": "neural_capture", "author_id": "author-id",
+           "author_username": "ownername", "owner_username": "ownername",
+           "name": "Original", "description": "Keep", "tags": ["clean"],
+           "metadata": {"device_type": "amp_head", "instrument_type": "guitar", "version": 2,
+                        "unknown_field": {"nested_key": "preserve"}}}
 
 
 def expect_error(fn, text=None):
@@ -223,23 +224,54 @@ def test_metadata_update_preserves_unedited_values_and_nested_fields():
     assert (method, path) == ("PUT", "/api/v1/user/products/capture-id/metadata")
     assert body["name"] == "New name"
     assert body["description"] == "Keep" and body["tags"] == ["clean"]
-    assert body["metadata"] == {**CAPTURE["metadata"], "instrumentType": "bass"}
-    assert CAPTURE["metadata"]["instrumentType"] == "guitar"
+    assert body["metadata"] == {**CAPTURE["metadata"], "instrument_type": "bass"}
+    assert CAPTURE["metadata"]["instrument_type"] == "guitar"
+
+
+def test_legacy_metadata_update_uses_wire_keys_without_aliases():
+    legacy = {
+        **{key: value for key, value in CAPTURE.items() if key not in {"author_id", "author_username"}},
+        "authorId": "author-id",
+        "authorUsername": "ownername",
+        "metadata": {
+            "deviceType": "amp_combo", "device_type": "amp_head", "instrumentType": "guitar",
+            "version": 2, "unknownField": {"nestedKey": "preserve"},
+        },
+    }
+    http = HTTP(legacy, {"userId": "author-id", "username": "ownername"}, {"updated": True},
+                legacy, PROFILE, {"updated": True})
+    client = CloudClient(opener=http, access_token="token")
+    client.update_capture("capture-id", description="Updated")
+    assert http.last()[3]["metadata"] == {
+        "device_type": "amp_head", "instrument_type": "guitar", "version": 2,
+        "unknownField": {"nestedKey": "preserve"},
+    }
+    client.update_capture("capture-id", device_type="cab")
+    assert http.last()[3]["metadata"]["device_type"] == "cab"
+    assert "deviceType" not in http.last()[3]["metadata"]
 
 
 def test_capture_writes_reject_foreign_or_missing_ownership():
-    for product in ({**CAPTURE, "authorId": "someone-else"},
-                    {k: v for k, v in CAPTURE.items() if k not in {"authorId", "authorUsername"}}):
-        for operation in ("update", "publish", "delete"):
-            http = HTTP(product, PROFILE)
+    owned_by_profile = {**PROFILE, "user_id": "different-author-id"}
+    cases = (
+        ({**CAPTURE, "author_username": "foreign-author"}, PROFILE, "own"),
+        ({**CAPTURE, "author_id": None, "author_username": None}, PROFILE, "own"),
+        (CAPTURE, owned_by_profile, "own"),
+        (CAPTURE, {**PROFILE, "userId": "different-author-id"}, "own"),
+        ({**CAPTURE, "authorId": "different-author-id"}, PROFILE, "conflicting"),
+        ({**CAPTURE, "authorUsername": "foreign-author"}, PROFILE, "conflicting"),
+    )
+    for product, profile, error in cases:
+        for operation in ("update", "publish", "unpublish", "delete"):
+            http = HTTP(product, profile)
             client = CloudClient(opener=http, access_token="token")
             if operation == "update":
                 call = lambda: client.update_capture("capture-id", description="Changed")
-            elif operation == "publish":
-                call = lambda: client.publish_capture("capture-id", True)
-            else:
+            elif operation == "delete":
                 call = lambda: client.delete_capture("capture-id")
-            expect_error(call, "own")
+            else:
+                call = lambda: client.publish_capture("capture-id", operation == "publish")
+            expect_error(call, error)
             assert len(http.requests) == 2
             assert all(r.method == "GET" for r in http.requests)
 

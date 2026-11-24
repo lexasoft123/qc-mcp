@@ -72,12 +72,14 @@ mcp = _Server("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
    needs confirm=True; keep the `previous` snapshot it returns, since that is
    the only way back. get_tempo reads preset tempo + external MIDI-clock BPM.
    Ask before changing anything global; it is not undone by reloading a preset.
-10. Cortex Cloud tools work without a USB connection. cloud_login authenticates
-    this server independently. Sign in privately through Patchbay or run
-    `qc-mcp cloud login` in a terminal; the OS-protected session works with
-    Patchbay closed. cloud_search_presets/captures/users and cloud_get_profile discover
-    content. cloud_queue_download queues an item for the account; it does not
-    prove device download or load. After device sync, refresh search_directory
+10. Cortex Cloud tools work without a USB connection. On macOS and Windows, sign
+    in privately through Patchbay or run `qc-mcp cloud login` in a terminal.
+    Standalone MCP can reuse that session with Patchbay closed. On Linux, use
+    cloud_login(persist=False) with credentials supplied privately to the server
+    or configure a Cortex Cloud access token. Use cloud_search_presets/captures/users
+    to discover content, cloud_get_product for product metadata, and
+    cloud_get_profile for profiles. cloud_queue_download queues an item for the
+    account; it does not prove device download or load. After sync, refresh search_directory
     and use its local pointers with switch_preset/add_capture. cloud_my_captures
     and cloud_update_capture/publish_capture/delete_capture manage owned cloud
     captures. Read details before changing visibility or deleting content.

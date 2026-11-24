@@ -34,19 +34,20 @@ def register_cloud_tools(mcp):
     @mcp.tool()
     def cloud_login(persist: bool = True) -> dict:
         """WRITE: Sign in to Cortex Cloud independently of the Quad Cortex USB
-        session. Sign in privately through Patchbay's Cortex Cloud screen or
-        run `qc-mcp cloud login` in a terminal; passwords should not enter chat.
-        For automation, reads credentials from the server environment. Otherwise
-        it restores the OS-protected saved session, even with Patchbay closed. Environment-based
-        login securely persists by default. Use persist=False for a process-only login."""
+        session. On macOS and Windows, sign in privately through Patchbay or
+        `qc-mcp cloud login` to create a saved session that works with Patchbay
+        closed. For a process-only login, set QC_CLOUD_EMAIL and QC_CLOUD_PASSWORD
+        in the server environment and call cloud_login(persist=False). You can
+        also set QC_CLOUD_ACCESS_TOKEN in the server environment."""
         email = os.environ.get("QC_CLOUD_EMAIL", "")
         password = os.environ.get("QC_CLOUD_PASSWORD", "")
         if not email and not password:
             result = _call("status")
             if result.get("authenticated") or result.get("error"):
                 return result
-            return {"error": "Sign in through Patchbay's Cortex Cloud screen or run "
-                             "`qc-mcp cloud login` in a terminal. Patchbay can stay closed."}
+            return {"error": "On macOS or Windows, sign in through Patchbay or run `qc-mcp cloud login`. "
+                             "For a process-only login, set QC_CLOUD_EMAIL and QC_CLOUD_PASSWORD in the "
+                             "MCP server environment and call cloud_login(persist=False), or set QC_CLOUD_ACCESS_TOKEN."}
         return _call("login", email, password, persist=persist)
 
     @mcp.tool()

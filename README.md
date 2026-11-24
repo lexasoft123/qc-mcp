@@ -127,12 +127,12 @@ in [app/README.md](app/README.md#connecting-an-ai-client).
 
 ## Cortex Cloud
 
-Cloud tools work over HTTPS without connecting the Quad Cortex. Click
-**Cloud** in Patchbay to sign in, or run `qc-mcp cloud login` in a terminal
-for a hidden password prompt. The password is discarded; the renewable session
-uses macOS Keychain or Windows Credential Manager with encrypted local storage.
-MCP clients restore and refresh the session **even with Patchbay closed**.
-Use `qc-mcp cloud status` / `qc-mcp cloud logout` to inspect or remove the sign-in.
+Cloud tools work over HTTPS without connecting the Quad Cortex. On macOS and
+Windows, click **Cloud** in Patchbay or run `qc-mcp cloud login` for a hidden
+password prompt. The password is discarded, and the encrypted session is
+available to MCP clients **even with Patchbay closed**. Use `qc-mcp cloud status`
+and `qc-mcp cloud logout` to inspect or remove it. On Linux, use
+`cloud_login(persist=False)` with the server's private environment configuration.
 
 Use `cloud_search_presets`, `cloud_search_captures`, and `cloud_search_users` for
 discovery; `cloud_get_profile` and `cloud_get_product` for details.

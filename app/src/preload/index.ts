@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  Api, ApplyResult, AudioState, AutoResult, CheckId, CloudStatus, LevelEvent, LogLine, Measurement, Mode,
+  Api, ApplyResult, AudioState, AutoResult, CheckId, CloudPresetDetails, CloudProductPage, CloudStatus, LevelEvent, LogLine, Measurement, Mode,
   Prefs, PresetFolder, PresetState, Progress, ReportResult, RiffList, SampleState, SceneRow,
   Snapshot, UpdateState, InputLevel
 } from '../shared/types.js'
@@ -13,6 +13,8 @@ function on<T>(channel: string, cb: (v: T) => void): () => void {
 }
 
 const api: Api = {
+  cloudSearch: (category, query, page) => ipcRenderer.invoke('cloud:search', category, query, page) as Promise<CloudProductPage>,
+  cloudPresetDetails: (productId) => ipcRenderer.invoke('cloud:preset-details', productId) as Promise<CloudPresetDetails>,
   cloudStatus: () => ipcRenderer.invoke('cloud:status') as Promise<CloudStatus>,
   cloudLogin: (email, password) => ipcRenderer.invoke('cloud:login', email, password) as Promise<CloudStatus>,
   cloudLogout: () => ipcRenderer.invoke('cloud:logout') as Promise<CloudStatus>,

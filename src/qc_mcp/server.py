@@ -1119,7 +1119,9 @@ def switch_preset(position: int = 0, setlist_key: str = "/media/p4/Presets/My Pr
                                search_directory's 'key'/list). folder+position do NOT
                                work for Downloads.
       * Plugin banks:          plugin_key = the preset's 'key' from search_directory
-                               ("<folder>/<name>.pb").
+                               or current_preset_position, as given (usually
+                               "<folder>/<name>.pb", not always: never build it
+                               from the name).
     Returns the signal chain from a fresh grid read after confirming the preset identity."""
     qc = _conn()
     try:
@@ -2239,6 +2241,9 @@ def _block_at(qc, row, column):
 @mcp.tool()
 def current_preset_position() -> dict:
     """The currently loaded preset's pointer: {folder_key, position, is_factory}.
+    A plugin preset gives {is_plugin, folder_key, plugin_key}: to load it again, pass
+    that plugin_key to switch_preset (it has no position; its folder at position 0 is
+    an empty preset).
     Read-only (SetlistPosition READ)."""
     pointer = _conn().get_setlist_position()
     if pointer is None:

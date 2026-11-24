@@ -45,6 +45,43 @@ def test_setlist_recall_unchanged():
     assert (m.folder_key, m.position, m.is_plugin) == ("/media/p4/Presets/My Presets", 5, False)
 
 
+def _verifying_qc(loaded_name, blocks):
+    """recall_verified against a device that echoes the key and loads `loaded_name`."""
+    from qc_mcp import protocol as P
+    from qc_mcp import transport as T
+    qc, sent = _qc()
+    qc._io_lock = __import__("threading").RLock()
+    pointer = {"folder_key": FOLDER, "position": None, "is_factory": False,
+               "is_downloads": False, "downloads_key": "", "is_plugin": True,
+               "plugin_key": KEY}
+    qc._read_pointer_reply = lambda rid, timeout_s: dict(pointer)
+    qc.get_setlist_position = lambda: dict(pointer)
+    bp = P.message_class("Grid")().preset
+    bp.name = loaded_name
+    ch = bp.chains.add()
+    for _ in range(blocks):
+        ch.models.add().hash = 14000
+    qc.get_current_preset = lambda: bp
+    return qc, T.QCError
+
+
+def test_plugin_recall_that_loads_an_empty_preset_is_refused():
+    """A key that is no file in the folder: the device echoes it, loads an empty preset."""
+    qc, err = _verifying_qc("", 0)
+    try:
+        qc.recall_verified(plugin_key=KEY)
+    except err as e:
+        assert "empty preset" in str(e), e
+    else:
+        raise AssertionError("an empty preset was taken as the recalled plugin preset")
+
+
+def test_plugin_recall_of_a_real_preset_passes():
+    qc, _err = _verifying_qc("GiO Clean Bernard", 3)
+    bp, pointer = qc.recall_verified(plugin_key=KEY)
+    assert bp.name == "GiO Clean Bernard" and pointer["plugin_key"] == KEY
+
+
 if __name__ == "__main__":
     passed = 0
     for name, fn in sorted(globals().items()):

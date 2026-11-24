@@ -1127,9 +1127,14 @@ class QuadCortex:
           * My Presets / Factory: folder_key + position (+ is_factory).
           * Downloads (cloud):     downloads_key = the preset's cloud_id UUID
                                    (sets is_downloads + key_in_downloads).
-          * Plugin banks:          plugin_key = the preset file's key, its path
-                                   "<folder>/<name>.pb" (sets is_plugin +
-                                   key_in_plugin_folder). The device also needs the
+          * Plugin banks:          plugin_key = the preset file's key as the catalog
+                                   lists it (sets is_plugin + key_in_plugin_folder).
+                                   Usually "<folder>/<name>.pb", not always: never
+                                   build it from the name (a built key that misses
+                                   loads an empty preset; docs/DIRECTORY.md). It is
+                                   also the way back to a plugin preset that was
+                                   playing: its pointer has no position, and recalling
+                                   the folder at 0 loads an empty preset. The device also needs the
                                    folder: folder_key, or the path's folder when not given.
                                    Without folder_key the recall is silently ignored
                                    (CorOS 4.1.1).
@@ -1325,6 +1330,11 @@ class QuadCortex:
         current = self.get_setlist_position()
         if bp is None or not matches(current or {}):
             raise QCError("could not verify the recalled preset with a fresh grid read")
+        if plugin_key and not bp.name and not any(m.hash for ch in bp.chains for m in ch.models):
+            # A plugin key that is not a file in its folder is not refused: the device
+            # answers with that key and loads an empty preset (CorOS 4.1.1).
+            raise QCError(f"the device loaded an empty preset for {plugin_key!r}: not a "
+                          "preset file in that folder (take the key from the catalog)")
         return bp, current
 
     def _read_pointer_reply(self, rid, timeout_s):

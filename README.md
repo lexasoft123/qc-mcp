@@ -53,8 +53,10 @@ Settings presets, and 100 new devices: see **[docs/COROS-4.1.md](docs/COROS-4.1.
 
 ## Requirements
 
-- **macOS** (IOKit HID via ctypes) or **Windows** (setupapi + hid.dll via ctypes)
-- A Quad Cortex on USB, and **Cortex Control** installed (CorOS 4.0 or 4.1)
+- **macOS** (IOKit HID via ctypes), **Windows** (setupapi + hid.dll via ctypes) or
+  **Linux** (hidraw, direct mode only)
+- A Quad Cortex on USB, and **Cortex Control** installed (CorOS 4.0 or 4.1; not
+  needed on Linux, where it doesn't exist)
 - Python 3.10+ — *unless* you use the Patchbay launcher, which brings its own
   (see [docs/PACKAGING.md](docs/PACKAGING.md))
 
@@ -66,6 +68,12 @@ Windows 10 22H2 x64 against a QC on CorOS 4.1.0: preset building and saving, the
 full 8336‑capture directory stream, and concurrent operation with the app. See
 **[docs/WINDOWS.md](docs/WINDOWS.md)** — including the one caveat, that two
 independent writers can interleave multi‑report messages.
+
+Linux runs **direct mode** over hidraw: every device tool works, but there is no
+Cortex Control to run alongside. It needs one udev rule so the logged‑in user can
+open the device. Tested on a Quad Cortex Mini (CorOS 4.1.0, Arch Linux): reading
+state and the full directory, recalling presets, saving presets, switching modes.
+See **[docs/LINUX.md](docs/LINUX.md)**.
 
 ## Install
 
@@ -217,7 +225,8 @@ Cortex Control talks to the QC over USB‑HID using protobuf messages wrapped in
 chunked 128‑byte reports. This project:
 
 - speaks the HID framing directly — IOKit on macOS (`src/qc_mcp/iohid.py`),
-  setupapi/hid.dll on Windows (`src/qc_mcp/winhid.py`), picked by
+  setupapi/hid.dll on Windows (`src/qc_mcp/winhid.py`), hidraw on Linux
+  (`src/qc_mcp/linuxhid.py`), picked by
   `src/qc_mcp/backend.py`,
 - encodes/decodes the message layer incl. gzip, and negotiates the wire schema
   against the device's CorOS version (`src/qc_mcp/protocol.py`),
@@ -242,6 +251,7 @@ driving the QC's own screen.
 src/qc_mcp/   protocol.py transport.py catalog.py preset.py server.py
               backend.py    picks the HID backend for the OS
               iohid.py      macOS  (IOKit)      winhid.py  Windows (hid.dll)
+              linuxhid.py   Linux  (hidraw)
               bridge.py     share Cortex Control's session (macOS)
               descriptors/  one protobuf schema per CorOS generation
 proto/        recovered Preset.proto, ProductionAutomation.proto, ModelRepo.xml
@@ -249,7 +259,8 @@ tools/        reverse-engineering utilities; win_hid_check.py diagnoses Windows
 interceptor/     DYLD interposer: capture + bridge mode  (macOS)
 interceptor-win/ IAT-hooking DLL + injector: capture     (Windows)
 PROTOCOL.md   full protocol writeup   PLAN.md   preset-building plan
-docs/         COROS-4.1.md  DIRECTORY.md  CPU.md  WINDOWS.md
+docs/         COROS-4.1.md  DIRECTORY.md  CPU.md  WINDOWS.md  LINUX.md
+udev/         70-quad-cortex.rules  (Linux device access)
 ```
 
 ## DISCLAIMER

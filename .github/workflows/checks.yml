@@ -30,15 +30,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # macOS and Windows only, matching the platforms the package declares in
-  # pyproject.toml. There is no Linux backend: bridge mode rides a DYLD
-  # interposer and direct mode is IOKit or hid.dll.
+  # Every platform the package declares in pyproject.toml. Linux has a direct
+  # backend (hidraw) but no bridge mode, which test_platform pins.
   python:
     name: Tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     permissions:

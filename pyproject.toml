@@ -9,6 +9,7 @@ keywords = ["quad-cortex", "neural-dsp", "mcp", "guitar", "usb-hid", "reverse-en
 classifiers = [
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
     "mcp>=1.2",

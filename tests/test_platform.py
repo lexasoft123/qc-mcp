@@ -25,7 +25,8 @@ def _backends():
     iohid dlopens IOKit and bridge needs POSIX fcntl, so each is gated to where it
     runs — which means the cross-backend checks below are strongest on macOS."""
     from qc_mcp.winhid import WinHIDTransport
-    out = [WinHIDTransport]
+    from qc_mcp.linuxhid import LinuxHIDTransport
+    out = [WinHIDTransport, LinuxHIDTransport]
     if sys.platform == "darwin":
         from qc_mcp.iohid import IOHIDTransport
         out.append(IOHIDTransport)
@@ -57,7 +58,7 @@ def test_backend_signatures_match():
 
 def test_platform_support_matrix():
     assert B.direct_supported("darwin") and B.direct_supported("win32")
-    assert not B.direct_supported("linux")
+    assert B.direct_supported("linux")
     # Both can run alongside the app, by different means (interposer / shared
     # handle); neither mechanism exists elsewhere.
     assert B.bridge_supported("darwin") and B.bridge_supported("win32")
@@ -573,6 +574,16 @@ def test_closing_twice_is_safe_on_both_backends():
     """close() is called twice on every daemon SIGTERM; it must not care."""
     for t in _closed_backends():
         t.close()
+
+
+def test_linux_reads_the_report_lengths_from_the_descriptor():
+    """The QC Mini's protocol interface (MI_05) as Linux reports it: report 1 in,
+    report 2 out, 128 bytes each. hidraw prefixes the id, so both are 129."""
+    from qc_mcp.linuxhid import parse_report_sizes
+    mini = bytes.fromhex("05010900a10115002 6ff00 850175089580 09008182"
+                         " 850275089580 09009182 c0".replace(" ", ""))
+    assert parse_report_sizes(mini) == (129, 129)
+    assert parse_report_sizes(b"") == (0, 0)
 
 
 if __name__ == "__main__":

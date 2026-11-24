@@ -46,6 +46,17 @@ Done. $([ -n "${REGISTERED:-}" ] \
   || echo "Package installed; run the registration line above once the claude CLI is present.")
 Note: the repo's skills + CLAUDE.md knowledge still load only for sessions
 opened INSIDE this repo; from other folders you get device control alone.
+EOF
+if [ "$(uname -s)" = Linux ]; then
+  cat <<EOF
+Next: give your user the device (once), then replug the Quad Cortex:
+  sudo install -m 644 udev/70-quad-cortex.rules /etc/udev/rules.d/
+  sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
+Then ask Claude to connect (direct mode; see docs/LINUX.md).
+EOF
+else
+  cat <<EOF
 Next: ./interceptor/build.sh (once, needs Cortex Control installed), then just
 ask Claude to connect — it offers bridge/direct and launches the bridge itself.
 EOF
+fi

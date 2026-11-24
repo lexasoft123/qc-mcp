@@ -2,7 +2,7 @@
   "name": "patchbay",
   "version": "0.2.0",
   "private": true,
-  "description": "Launcher for qc-mcp — installs the MCP, runs the daemon, opens Cortex Control",
+  "description": "Launcher for qc-mcp \u2014 installs the MCP, runs the daemon, opens Cortex Control",
   "author": "lexasoft <lexasoft@gmail.com>",
   "license": "MIT",
   "main": "./out/main/index.js",
@@ -29,7 +29,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.0",
+    "electron": "^36.9.5",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "playwright-core": "^1.62.1",
@@ -39,7 +39,7 @@
     "vite": "^5.4.11"
   },
   "allowScripts": {
-    "electron@33.4.11": true,
+    "electron@36.9.5": true,
     "esbuild@0.21.5": true,
     "fsevents@2.3.3": true
   }

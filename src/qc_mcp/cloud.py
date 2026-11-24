@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 from contextlib import contextmanager
 import http.cookiejar
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,10 @@ from .cloud_session import SecureSessionStore, SessionError
 _DEFAULT_STORE = object()
 
 API_BASE = "https://cloud-api.neuraldsp.com"
+try:
+    USER_AGENT = "qc-mcp/" + version("qc-mcp")
+except PackageNotFoundError:
+    USER_AGENT = "qc-mcp"
 _SECRET_KEYS = {"password", "token", "access_token", "refresh_token", "id_token",
                 "authorization", "cookie", "set-cookie"}
 
@@ -218,6 +223,7 @@ class CloudClient:
                            for k, v in params.items() if v is not None}
                 url += "?" + urllib.parse.urlencode(encoded)
             headers = {"Content-Type": "application/json", "Accept": "application/json",
+                       "User-Agent": USER_AGENT,
                        "X-Cloud-Api-Client-Type": "web-cloud",
                        "X-Cloud-Api-Client-Version": "1.0.0"}
             if auth:

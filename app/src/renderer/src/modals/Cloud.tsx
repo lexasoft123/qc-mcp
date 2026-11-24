@@ -1,29 +1,18 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Button, Modal, ModalActions, StatusDot } from '@singz/ui'
 import { t } from '../i18n.js'
 import type { CloudStatus } from '@shared/types'
 
-export function Cloud({ onClose }: { onClose: () => void }): React.JSX.Element {
-  const [status, setStatus] = useState<CloudStatus | null>(null)
+export function Cloud({ status, onStatus, onClose }: {
+  status: CloudStatus | null
+  onStatus: (status: CloudStatus) => void
+  onClose: () => void
+}): React.JSX.Element {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [visible, setVisible] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    let active = true
-    void window.patchbay.cloudStatus().then((result) => {
-      if (!active) return
-      setStatus(result)
-      setError(result.error ?? '')
-    }).catch(() => {
-      if (!active) return
-      setStatus({ authenticated: false, session_persisted: false })
-      setError(t('cloud.checkFailed'))
-    })
-    return () => { active = false }
-  }, [])
 
   async function login(event: FormEvent): Promise<void> {
     event.preventDefault()
@@ -35,7 +24,7 @@ export function Cloud({ onClose }: { onClose: () => void }): React.JSX.Element {
     setVisible(false)
     try {
       const result = await request
-      setStatus(result)
+      onStatus(result)
       setError(result.error ?? '')
     } catch {
       setError(t('cloud.loginFailed'))
@@ -49,7 +38,7 @@ export function Cloud({ onClose }: { onClose: () => void }): React.JSX.Element {
     setError('')
     try {
       const result = await window.patchbay.cloudLogout()
-      setStatus(result)
+      onStatus(result)
       setError(result.error ?? '')
     } catch {
       setError(t('cloud.logoutFailed'))
@@ -73,7 +62,7 @@ export function Cloud({ onClose }: { onClose: () => void }): React.JSX.Element {
             <div><strong>{t('cloud.signedIn')}</strong><span>{status.email || t('cloud.account')}</span></div>
           </div>
           <p className="fine">{t('cloud.closed')}</p>
-          {error && <p className="cloud-error" role="alert">{error}</p>}
+          {!busy && (error || status.error) && <p className="cloud-error" role="alert">{error || status.error}</p>}
           <ModalActions>
             <Button variant="primary" disabled={busy} onClick={onClose}>{t('cloud.done')}</Button>
             <span className="grow" />
@@ -96,7 +85,7 @@ export function Cloud({ onClose }: { onClose: () => void }): React.JSX.Element {
             <strong>{t('cloud.remember')}</strong>
             <p>{t('cloud.storage')}</p>
           </div>
-          {error && <p className="cloud-error" role="alert">{error}</p>}
+          {!busy && (error || status.error) && <p className="cloud-error" role="alert">{error || status.error}</p>}
           {busy && <p className="cloud-message" role="status">{t('cloud.working')}</p>}
           <ModalActions>
             <Button type="submit" variant="primary" disabled={busy || !email.trim() || !password}>{busy ? t('cloud.signingIn') : t('cloud.signIn')}</Button>

@@ -518,6 +518,7 @@ body::after {
 .snippet b { color: var(--sz-accent); font-weight: 400; }
 
 .prefs-card { width: min(560px, 100%); }
+.cloud-status-dot { animation: none; }
 .cloud-card { width: min(440px, 100%); }
 .cloud-card > .eyebrow { display: block; margin-bottom: 8px; }
 .cloud-form { display: grid; gap: 8px; }

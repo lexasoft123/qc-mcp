@@ -88,6 +88,7 @@ def test_auth_headers_are_sent_only_to_fixed_cloud_api():
     headers = {k.lower(): v for k, v in request.header_items()}
     assert headers["authorization"] == "Bearer test-access-secret"
     assert headers["x-cloud-api-client-type"] == "web-cloud"
+    assert headers["user-agent"].split("/")[0] == "qc-mcp"
 
 
 def test_user_profile_encodes_username_as_a_single_path_segment():

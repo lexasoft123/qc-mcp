@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { CloudStatus } from '@shared/types'
 import { Button, SegmentedControl, StatusDot, WindowButtons } from '@singz/ui'
 import { isMac, railText, regCount, sessionWord } from './derive.js'
 import { useSnapshot, useToast, useUpdate } from './store.js'
@@ -34,7 +35,18 @@ export function App(): React.JSX.Element {
   const [view, setView] = useState<View>('home')
   const [prefs, setPrefs] = useState(false)
   const [cloud, setCloud] = useState(false)
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null)
   const [keysOpen, setKeysOpen] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void window.patchbay.cloudStatus().then((status) => {
+      if (active) setCloudStatus(status)
+    }).catch(() => {
+      if (active) setCloudStatus({ authenticated: false, session_persisted: false, error: t('cloud.checkFailed') })
+    })
+    return () => { active = false }
+  }, [cloud])
 
   /*
    * Getting around, by key. The whole navigation was a mouse-only segmented
@@ -74,6 +86,9 @@ export function App(): React.JSX.Element {
   }, [view])
 
   // the kit's chrome only belongs on Windows; macOS keeps its traffic lights
+  const cloudLabel = !cloudStatus ? t('cloud.checking')
+    : cloudStatus.error ? t('cloud.statusUnavailable')
+      : cloudStatus.authenticated ? t('cloud.signedIn') : t('cloud.signedOut')
   const onWindows = document.body.classList.contains('win')
 
   if (!snap) {
@@ -112,7 +127,11 @@ export function App(): React.JSX.Element {
                 onClick={() => setKeysOpen(true)}>
           <Keyboard />
         </Button>
-        <Button size="sm" title={t('cloud.account')} onClick={() => setCloud(true)}>{t('cloud.button')}</Button>
+        <Button size="sm" title={cloudLabel} aria-label={t('cloud.buttonStatus', { status: cloudLabel })}
+                onClick={() => setCloud(true)}>
+          <StatusDot tone={!cloudStatus ? 'idle' : cloudStatus.authenticated ? 'ok' : 'warn'} className="cloud-status-dot" />
+          {t('cloud.button')}
+        </Button>
         <Button size="sm" icon title={t('prefs.open')} aria-label={t('prefs.open')} onClick={() => setPrefs(true)}>
           <Gear />
         </Button>
@@ -142,7 +161,7 @@ export function App(): React.JSX.Element {
 
       {prefs && <Prefs snap={snap} onClose={() => setPrefs(false)} />}
       {keysOpen && <Shortcuts onClose={() => setKeysOpen(false)} />}
-      {cloud && <Cloud onClose={() => setCloud(false)} />}
+      {cloud && <Cloud status={cloudStatus} onStatus={setCloudStatus} onClose={() => setCloud(false)} />}
 
       {toast && (
         <div className={toast.bad ? 'toast bad' : 'toast'} key={toast.id}>

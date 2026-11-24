@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain, screen, shell } from 'electron'
+import { BrowserWindow, Menu, app, dialog, ipcMain, screen, shell } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { CheckId, Mode, Prefs, Progress, Snapshot } from '../shared/types.js'
@@ -86,6 +86,22 @@ function create(): void {
   // when the document arrives.
   win.webContents.on('did-finish-load', () => win?.webContents.setZoomFactor(UI_SCALE))
   win.on('ready-to-show', () => win?.show())
+  win.webContents.on('context-menu', (_event, params) => {
+    if (!win || !params.isEditable || params.frame?.url !== rendererURL()) return
+    const flags = params.editFlags
+    const menu = Menu.buildFromTemplate([
+      { role: 'undo', enabled: flags.canUndo },
+      { role: 'redo', enabled: flags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', enabled: flags.canCut },
+      { role: 'copy', enabled: flags.canCopy },
+      { role: 'paste', enabled: flags.canPaste },
+      { role: 'selectAll', enabled: flags.canSelectAll }
+    ])
+    // Providing the frame enables system items such as macOS Password AutoFill.
+    menu.popup({ window: win, frame: params.frame })
+  })
+
   // `emit` guards on null, which only helps if something nulls it. On macOS
   // `window-all-closed` deliberately does not quit, so without this `win` keeps
   // pointing at a DESTROYED window and `win?.webContents` throws — optional

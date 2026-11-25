@@ -184,16 +184,16 @@ Implemented in `catalog.to_norm` / `to_display`. (A naive linear conversion put 
 parameters). The app resolves them from a table compiled into its binary, so the
 XML alone cannot convert those params. Unresolved names still fall through and
 `to_display` returns the stored float as-is. `catalog.SYMBOLIC` holds the ones
-we have **calibrated against Cortex Control** as a 0–1 ↔ dB map;
-`catalog.RAW_DB_RANGE` is the other case: the device stores the display dB
-itself. Add a name only once it has been measured. Solved so far:
+we have **calibrated against Cortex Control** as a 0–1 ↔ dB map. Add a name
+only once it has been measured. A write that reads back as written does not
+measure it: the device keeps any float it is sent, in range or not. Solved so far:
 
 | name | value | how it was measured |
 |---|---|---|
 | `MIN_MIXER_DB` | **-40 dB** | Lane output VOLUME `0.5` reads **-14.0 dB** in the app, |
 | `MAX_MIXER_DB` | **+12 dB** | and the untouched default `0.769230783` is 0 dB. Two points ⇒ linear over -40..+12 (-40/52 = 10/13 exactly). Confirmed on a second lane. |
-| `MIN_EQ_DB` | **-12 dB** | Parametric-3 (`#4001`) band-2 GAIN on CorOS 4.1.1: writes of -12, -7.5, 0, 0.5, 3, 6, 11.9, +12 |
-| `MAX_EQ_DB` | **+12 dB** | all read back exactly as written. Stored as the raw dB float (identity), not 0–1. `steps="241"` ⇒ 0.1 dB. Same symbols on Parametric-8 (`#4000`) and Output EQ (`#4004`). Graphic-9 (`#4005`) uses literal -12..12 and **is** stored normalized. |
+| `MIN_EQ_DB` | **-12 dB** | A band's GAIN on Parametric-8 (`#4000`), Parametric-3 (`#4001`) and Output EQ (`#4004`, the Global EQ), CorOS 4.1.1. Linear over -12..+12, 0 dB at `0.5`, like every other parameter. Cortex Control shows `0.4417` as **-1.4 dB** and `0.2901` as **-5.0 dB**. |
+| `MAX_EQ_DB` | **+12 dB** | By sound on a Quad Cortex mini: a Peak band at `1.0` measures **+12.0 dB** at its frequency, `0.0` **-12.0 dB**, a Lo shelf at `0.75` is a **+6 dB** shelf within 0.4 dB. The 256 Factory presets hold 1,859 band gains and the 23 stock Global EQ presets 115 more, all within 0–1 and mostly `0.5`. `steps="241"` ⇒ 0.1 dB = 1/240. Graphic-9 (`#4005`) has literal -12..12 bounds, the same scale. |
 
 Lane **PAN** (idx 1) is stored 0..1 and displayed as 50L…C…50R, i.e.
 `display = (nv - 0.5)·100` — `0.35` reads "15 L", `0.65` reads "15 R".

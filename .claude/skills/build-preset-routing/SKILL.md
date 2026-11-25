@@ -209,7 +209,7 @@ ad-hoc scripts for device control. The full toolbox:
   `add_capture`, `add_ir`.
 - **Params:** `set_parameter(row, column, param_index, display_value, device_hash=hash)`
   converts display units using the model catalog. Without `device_hash` the value
-  is sent as supplied, usually normalized 0–1. Some EQ gains use raw dB on the wire.
+  is sent as supplied, usually normalized 0–1.
   Use `find_devices` for the hash and `get_current_preset` for the placed block's
   `param_indices`. `build_preset` block parameters use display units.
 - **Routing / stereo:** `set_lane_routing(row, in_portid, out_portid)`,

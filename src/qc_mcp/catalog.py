@@ -82,9 +82,21 @@ LOG_TAPER = 1.667
 #   MIXER  LaneOutputControl(23000) VOLUME and the merge Mixer(11000) levels.
 #          Measured: 0.5 -> -14.0 dB and the untouched default 0.769230783 -> 0 dB
 #          on two lanes, which fits -40..+12 dB linear exactly (-40/52 = 10/13).
+#   EQ     Parametric-8 (4000), Parametric-3 (4001) and Output EQ (4004) band
+#          GAIN, -12..+12 dB linear, 0 dB at 0.5. Cortex Control shows 0.4417
+#          as -1.4 dB and 0.2901 as -5.0 dB. Measured by sound (Quad Cortex mini,
+#          CorOS 4.1.1): a Peak band written 1.0 boosts +12.0 dB at its
+#          frequency, 0.0 cuts -12.0 dB, a Lo shelf written 0.75 is a +6 dB
+#          shelf within 0.4 dB.
+#          The 256 Factory presets hold 1,859 band gains, the 23 stock Global EQ
+#          presets 115 more, all within 0..1 and mostly 0.5. A raw dB float
+#          written there reads back as written, but the device plays it on the
+#          0..1 scale (0 dB sent raw is 0.0, a -12 dB cut).
 SYMBOLIC = {
     "MIN_MIXER_DB": -40.0,
     "MAX_MIXER_DB": 12.0,
+    "MIN_EQ_DB": -12.0,
+    "MAX_EQ_DB": 12.0,
 }
 
 # I/O port levels, which SYMBOLIC cannot reach: ModelRepo declares IOSettings
@@ -167,37 +179,13 @@ def _skew(block_hash, param_index):
     return sk
 
 
-# Parametric EQ band gains (MIN_EQ_DB..MAX_EQ_DB in ModelRepo) are NOT stored
-# normalized: CorOS 4.1.1 stores the raw dB float. Measured 2026-10-30 on
-# QC Tones 31 (Parametric-3 #4001, band 2 gain): -12, -7.5, 0, 0.5, 3, 6, 11.9,
-# +12 all read back exactly as written. steps="241" => 0.1 dB over -12..+12.
-# These params convert by identity, clamped to the range. Graphic-9 #4005 has
-# literal -12..12 bounds and IS stored normalized, so it is not in RAW_DB_RANGE.
-RAW_DB_RANGE = {"MIN_EQ_DB": -12.0, "MAX_EQ_DB": 12.0}
-
-
-def raw_db_range(block_hash, param_index):
-    """(lo, hi) for a param stored as raw dB (identity conversion), else None."""
-    m = lookup(block_hash)
-    if not m or param_index >= len(m["params"]):
-        return None
-    p = m["params"][param_index]
-    lo, hi = RAW_DB_RANGE.get(p.get("min")), RAW_DB_RANGE.get(p.get("max"))
-    if lo is None or hi is None:
-        return None
-    return lo, hi
-
-
 def display_range(block_hash, param_index):
-    """The display-unit (lo, hi) of a param, raw-dB EQ gains included, or None."""
-    return raw_db_range(block_hash, param_index) or _prange(block_hash, param_index)
+    """The display-unit (lo, hi) of a param, calibrated symbolic bounds included, or None."""
+    return _prange(block_hash, param_index)
 
 
 def to_norm(block_hash, param_index, display_value):
     """Convert a display value to the normalized 0-1 the device stores."""
-    raw = raw_db_range(block_hash, param_index)
-    if raw:
-        return max(raw[0], min(raw[1], float(display_value)))
     rng = _prange(block_hash, param_index)
     if not rng:
         return float(display_value)
@@ -213,8 +201,6 @@ def to_norm(block_hash, param_index, display_value):
 
 def to_display(block_hash, param_index, nv):
     """Convert a stored normalized 0-1 value back to its display value."""
-    if raw_db_range(block_hash, param_index):
-        return float(nv)
     rng = _prange(block_hash, param_index)
     if not rng:
         return nv

@@ -1573,8 +1573,7 @@ def set_parameter(row: int, column: int, param_index: int, display_value: float,
                   device_hash: int = 0) -> str:
     """WRITE: set a block parameter. Supply device_hash for a display value
     such as Hz or ms; the catalog applies the model's unit and taper mapping.
-    Without the hash, pass the wire value directly, usually normalized 0–1.
-    Some EQ gains are stored directly in dB."""
+    Without the hash, pass the wire value directly, usually normalized 0–1."""
     val = _norm(device_hash, param_index, display_value) if device_hash else display_value
     _conn().set_param(row, column, param_index, val)
     return f"Set param {param_index} = {display_value} at row{row} col{column}."
@@ -1585,7 +1584,7 @@ def set_parameter_scenes(row: int, column: int, param_index: int, values: list,
                          device_hash: int = 0) -> str:
     """WRITE: set up to eight scene values A–H and mark the parameter scene-varying.
     Pass device_hash for display units. Without the hash, send wire values directly,
-    usually normalized 0–1. Some EQ gains are stored directly in dB."""
+    usually normalized 0–1."""
     vals = [_norm(device_hash, param_index, v) if device_hash else v for v in values]
     _conn().set_param_scenes(row, column, param_index, vals)
     return f"Set param {param_index} across {len(vals)} scenes at row{row} col{column}."

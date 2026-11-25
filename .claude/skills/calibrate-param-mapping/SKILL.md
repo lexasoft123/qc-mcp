@@ -25,8 +25,9 @@ real app setting known display values and fitting the curve.
 4. **Check the specific parameter's metadata and wire values.** A declared JUCE
    XML skew uses `norm = fraction ** skew`; cabinet HPF/LPF use skew 0.3. The
    historical positive-range heuristic is a fallback and must be checked against
-   observations. Some EQ gains with symbolic `MIN_EQ_DB` / `MAX_EQ_DB` bounds
-   travel raw in dB; other controls with literal dB ranges can be normalized.
+   observations. Symbolic bounds (`MIN_EQ_DB`, `MIN_MIXER_DB`...) are normalized
+   like the rest once `catalog.SYMBOLIC` knows them; a value that reads back as
+   written proves only that the device keeps it, not what it means.
 5. **Implement both directions** and use them everywhere (write *and* read), so you
    always speak real display units. See `catalog.to_norm` / `to_display`.
 

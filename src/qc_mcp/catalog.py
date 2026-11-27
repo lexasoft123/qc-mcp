@@ -130,6 +130,53 @@ def io_level_from_db(param_index, db, block_hash=31000):
     return max(0.0, min(1.0, (float(db) - lo) / (hi - lo)))
 
 
+# Pitch pedals whose position is a number of semitones. ModelRepo gives the Gojira
+# WOW's PEDAL as a plain 0..100 %; how far it shifts depends on MODE and is in no
+# file, so it was measured: QC mini, CorOS 4.1.1, 2026-11-27, a 220 Hz sine through
+# the block, PEDAL written at every whole semitone of each mode, the pitch read back.
+# All within 1 cent (FATSO -1..+0.1 cent, Blade 1 and Blade 2 -0.5..+0.1): the line
+# needs no correction. MODE is a switch, stored as its step like any other switch
+# (stepNames "Blade 2,Blade 1,FATSO", so FATSO = 2, the default):
+#   Blade 2  0 .. +24   +12 at 50 %          PEDAL % = st * 100/24
+#   Blade 1  0 .. +12   a fifth at 58.33 %   PEDAL % = st * 100/12
+#   FATSO  -12 .. +12   the note at 50 %     PEDAL % = 50 + st * 100/24
+# FATSO MIX (FATSO only) mixes the note as played with the shifted one: 100 % is the
+# shifted note alone (a transpose), 50 % both. Only add a block once measured.
+PEDAL_SEMITONES = {
+    18009: {"pedal": 1, "mode": 11, "mix": 0,              # Gojira WOW
+            "modes": {0: ("Blade 2", 0, 24), 1: ("Blade 1", 0, 12), 2: ("FATSO", -12, 12)},
+            "mix_mode": 2},
+}
+
+
+def semitone_pedal(block_hash):
+    """The measured pitch pedal of a block ({pedal, mode, modes: {step: (name, lo, hi)},
+    mix, mix_mode}), or None."""
+    return PEDAL_SEMITONES.get(int(block_hash or 0))
+
+
+def pedal_from_semitones(block_hash, mode, semitones):
+    """PEDAL % for a shift of `semitones` in MODE step `mode`; None when the block has no
+    measured pedal or the shift is outside that mode's span."""
+    sp = semitone_pedal(block_hash)
+    if not sp or mode not in sp["modes"]:
+        return None
+    _name, lo, hi = sp["modes"][mode]
+    st = float(semitones)
+    if not lo - 1e-9 <= st <= hi + 1e-9:
+        return None
+    return 100.0 * (st - lo) / (hi - lo)
+
+
+def semitones_from_pedal(block_hash, mode, percent):
+    """The shift in semitones a PEDAL % gives in MODE step `mode`, or None."""
+    sp = semitone_pedal(block_hash)
+    if not sp or mode not in sp["modes"]:
+        return None
+    _name, lo, hi = sp["modes"][mode]
+    return lo + (hi - lo) * float(percent) / 100.0
+
+
 def _bound(v):
     """A parameter bound as a float: a literal, a calibrated symbolic name, or None."""
     try:

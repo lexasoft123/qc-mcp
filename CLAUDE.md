@@ -189,6 +189,10 @@ CGEventPostToPid): `press "<name>"` borrows focus for ~1s and hands it back.
   `LOG_SKEW` and skew-less params fall back to the heuristic: `min>0 and max/min>=5`
   ⇒ power taper (k≈1.667), else linear. Ranges that are symbolic names in the XML
   need a calibrated entry in `catalog.SYMBOLIC` or they fall through unconverted.
+- **Pitch pedals in semitones**: `catalog.PEDAL_SEMITONES` (measured, 2026-11-27) holds
+  how far the Gojira WOW's PEDAL (0..100 %) shifts per MODE: FATSO −12..+12 (the note at
+  50 %), Blade 1 0..+12, Blade 2 0..+24, linear within 1 cent. `set_semitones` writes it,
+  `get_current_preset` reports `semitones`, `find_devices` says so. Add a block once measured.
 - **Lane output level** = `LaneOutputControl`(23000) param 0 VOLUME, **-40..+12 dB**
   linear (0 dB = 0.769230783). It lives in `Chain.output_control`, so it is stored
   in the preset — the right knob for balancing presets against each other. PAN is

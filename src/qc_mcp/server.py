@@ -55,6 +55,8 @@ mcp = _Server("quad-cortex", instructions="""Controls a Neural DSP Quad Cortex
    Use set_block_bypass(scenes=[...]) and set_parameter_scenes. Supply device_hash
    with display-unit values; without it, pass wire values. Label scenes with
    set_preset_meta and read back the scene values and bypass state.
+   Pitch in semitones (a transpose, a whammy's shift): set_semitones on a Gojira
+   WOW — its PEDAL is a % whose span follows MODE; never guess the %.
 5. Stereo multi-amp: pan branch lanes with set_lane_output (~0.3/0.7), drop lane
    volumes ~0.5 so the parallel sum doesn't clip.
 6. Save: save_preset / save_preset_as (File CREATE; guarded against clobbering).
@@ -327,6 +329,9 @@ def _summary_params(model, info):
         if p.scene_mode or len(vals) > 1:
             scenes[name] = vals
     out = {"params": params, "param_indices": indices}
+    pitch = _semitones_of(model)
+    if pitch:
+        out["semitones"] = pitch
     if scenes:
         out["scene_params"] = scenes
     if expression:
@@ -1592,6 +1597,70 @@ def set_parameter_scenes(row: int, column: int, param_index: int, values: list,
 
 
 @mcp.tool()
+def set_semitones(row: int, column: int, semitones: float = 0.0, mode: str = "",
+                  scenes: list = None) -> str:
+    """WRITE: set a pitch pedal block by semitones — a transpose or a whammy's shift,
+    e.g. "transpose down a whole step with the Gojira WOW" is set_semitones(r, c, -2).
+    Today the Gojira WOW (hash 18009): its PEDAL is 0-100 % and the shift it gives
+    follows MODE — FATSO -12..+12 (the note at 50 %), Blade 1 0..+12, Blade 2 0..+24
+    (measured on CorOS 4.1.1, every semitone within 1 cent). `mode` ("FATSO",
+    "Blade 1", "Blade 2") picks one; omitted, the block keeps its MODE when the shift
+    fits it, else takes the first that fits. `scenes`: up to 8 shifts for scenes A-H
+    instead of one (one MODE for all). In FATSO, FATSO MIX 100 % plays the shifted note
+    alone (a transpose) and 50 % the note with it: left as it is, its value is reported.
+    Verify with get_current_preset (each such block reports `semitones`)."""
+    qc = _conn()
+    bp = qc.get_current_preset()
+    model = None
+    if bp is not None and row < len(bp.chains) and column < len(bp.chains[row].models):
+        model = bp.chains[row].models[column]
+    sp = catalog.semitone_pedal(model.hash) if model is not None else None
+    if not sp:
+        what = catalog.name_of(model.hash) if model is not None else "(empty)"
+        return (f"row{row} col{column} holds {what}: set_semitones knows the PEDAL of "
+                f"{', '.join(catalog.name_of(h) for h in catalog.PEDAL_SEMITONES)} only.")
+    shifts = [float(s) for s in (list(scenes)[:8] if scenes else [semitones])]
+    modes = sp["modes"]
+    fits = lambda k: all(catalog.pedal_from_semitones(model.hash, k, s) is not None for s in shifts)
+    spans = _spans(sp)
+    now = _mode_step(model, sp)
+    if mode:
+        step = next((k for k, (n, _lo, _hi) in modes.items() if n.lower() == mode.strip().lower()), None)
+        if step is None:
+            return f"mode must be one of {', '.join(n for n, _lo, _hi in modes.values())}."
+        if not fits(step):
+            return f"{modes[step][0]} does not reach {shifts}: {spans} semitones."
+    elif now in modes and fits(now):
+        step = now
+    else:
+        step = next((k for k in modes if fits(k)), None)
+        if step is None:
+            return f"No MODE reaches {shifts}: {spans} semitones."
+    if step != now:
+        qc.set_param(row, column, sp["mode"], _norm(model.hash, sp["mode"], step))
+    pct = [catalog.pedal_from_semitones(model.hash, step, s) for s in shifts]
+    wire = [_norm(model.hash, sp["pedal"], p) for p in pct]
+    if scenes:
+        qc.set_param_scenes(row, column, sp["pedal"], wire)
+    else:
+        qc.set_param(row, column, sp["pedal"], wire[0])
+    said = ", ".join(f"{s:+g} st = {p:.2f} %" for s, p in zip(shifts, pct))
+    was = "" if step == now else f" (was {modes.get(now, ('?',))[0]})"
+    text = (f"{catalog.name_of(model.hash)} at row{row} col{column}: "
+            f"MODE {modes[step][0]}{was}, PEDAL {said}.")
+    mix = sp.get("mix")
+    if mix is not None and step == sp["mix_mode"]:
+        name = catalog.lookup(model.hash)["params"][mix]["name"]
+        held = ""
+        if mix < len(model.params) and model.params[mix].param_values:
+            pct_mix = catalog.to_display(model.hash, mix, model.params[mix].param_values[0].float_value)
+            held = f" is {pct_mix:.0f} %"
+        text += (f" {name} (param {mix}){held}: 100 % for the shifted note alone, "
+                 f"50 % for the note and the shifted one.")
+    return text
+
+
+@mcp.tool()
 def assign_expression(row: int, column: int, param_index: int, expression: int,
                       expr_min: float = 0.0, expr_max: float = 1.0) -> str:
     """WRITE: assign a block parameter to an expression pedal — the Quad Cortex's
@@ -1650,8 +1719,70 @@ def find_devices(query: str = "", category: str = "", limit: int = 25) -> list:
     Read-only. Examples: find_devices(category='Guitar Amplifier'),
     find_devices(query='Marshall'), find_devices(query='DLX', category='Amp')."""
     res = catalog.find(query or None, category or None)[:limit]
-    return [{"hash": m["id"], "name": m["name"], "category": m["category"],
-             "based_on": m["tm"]} for m in res]
+    out = []
+    for m in res:
+        row = {"hash": m["id"], "name": m["name"], "category": m["category"],
+               "based_on": m["tm"]}
+        hint = _semitone_hint(m["id"])
+        if hint:
+            row["semitones"] = hint
+        out.append(row)
+    return out
+
+
+def _semitone_hint(block_hash):
+    """How a measured pitch pedal reads in semitones, for find_devices."""
+    sp = catalog.semitone_pedal(block_hash)
+    if not sp:
+        return None
+    names = [p["name"] for p in (catalog.lookup(block_hash) or {}).get("params", [])]
+    spans = _spans(sp)
+    text = (f"{names[sp['pedal']]} (param {sp['pedal']}) shifts the pitch; {names[sp['mode']]} "
+            f"(param {sp['mode']}) sets how far: {spans} semitones. Use set_semitones.")
+    if sp.get("mix") is not None:
+        text += (f" {names[sp['mix']]} (param {sp['mix']}, {sp['modes'][sp['mix_mode']][0]} only): "
+                 f"100 % the shifted note alone (a transpose), 50 % the note and the shifted one.")
+    return text
+
+
+def _spans(sp):
+    """ "Blade 2 0..+24, Blade 1 0..+12, FATSO -12..+12" """
+    st = lambda v: f"{v:+d}" if v else "0"
+    return ", ".join(f"{n} {st(lo)}..{st(hi)}" for n, lo, hi in sp["modes"].values())
+
+
+def _mode_step(model, sp, scene=0):
+    """The MODE step a pitch pedal block holds (in `scene` when it varies by scene)."""
+    idx = sp["mode"]
+    if idx < len(model.params) and model.params[idx].param_values:
+        vals = model.params[idx].param_values
+        v = vals[scene].float_value if scene < len(vals) else vals[0].float_value
+        return int(round(catalog.to_display(model.hash, idx, v)))
+    try:
+        return int(float(catalog.lookup(model.hash)["params"][idx]["default"]))
+    except (TypeError, ValueError, KeyError, IndexError):
+        return None
+
+
+def _semitones_of(model):
+    """{mode, semitones[, scene_semitones]} of a measured pitch pedal block, else None."""
+    sp = catalog.semitone_pedal(model.hash)
+    if not sp or sp["pedal"] >= len(model.params):
+        return None
+    vals = model.params[sp["pedal"]].param_values
+    if not vals:
+        return None
+
+    def shift(scene):
+        step = _mode_step(model, sp, scene)
+        pct = catalog.to_display(model.hash, sp["pedal"], vals[scene].float_value)
+        st = catalog.semitones_from_pedal(model.hash, step, pct)
+        return step, (None if st is None else round(st, 2))
+    step, st = shift(0)
+    out = {"mode": sp["modes"].get(step, ("?",))[0], "semitones": st}
+    if len(vals) > 1:
+        out["scene_semitones"] = [shift(s)[1] for s in range(len(vals))]
+    return out
 
 
 _catalog_cache = None

@@ -25,7 +25,7 @@ def test_every_tool_is_documented():
 
 def test_write_tools_say_so():
     """A caller must be able to tell a read from a write before calling it."""
-    writes = ["add_block", "remove_block", "clear_grid", "set_parameter",
+    writes = ["add_block", "remove_block", "clear_grid", "set_parameter", "set_semitones",
               "save_preset_as", "recall_preset", "assign_stomp", "unassign_stomp",
               "load_device_preset", "save_device_preset", "delete_device_preset",
               "load_settings_preset", "set_io_port"]
